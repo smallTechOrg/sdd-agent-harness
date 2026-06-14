@@ -130,12 +130,22 @@ Ask one question via `AskUserQuestion` (Claude Code) or `askQuestions` (Copilot)
 
 Immediately after approval, before writing any application code:
 
-1. **Create the project directory** `src/<agent-slug>/` — all code lives here. Never write agent code into the boilerplate root.
-2. **Open a session report** at `reports/sessions/YYYY-MM-DD-HHMMSS-agent-builder.md`. Must exist before Phase 1 begins.
-3. **Create `.env.example`** listing every environment variable with placeholder values.
-4. Fill in the product spec files in `spec/product/` from intake answers.
+1. **Create and switch to the feature branch** — `git checkout -b feature/<agent-slug>-v0.1`. All application code lives here. **Never commit application code to `main`.** This is a Non-Negotiable rule (see `spec/engineering/ai-agents.md` § Rule 10). If you are on `main` when you reach this step, create the branch now before touching any file.
+2. **Create the project directory** `src/<agent-slug>/` — all code lives here. Never write agent code into the boilerplate root.
+3. **Open a session report** at `reports/sessions/YYYY-MM-DD-HHMMSS-agent-builder.md`. Must exist before Phase 1 begins.
+4. **Create `.env.example`** listing every environment variable with placeholder values.
+5. Fill in the product spec files in `spec/product/` from intake answers.
 
 Log each step in the session report before moving to Phase 1.
+
+### End-of-build PR (mandatory)
+
+After Phase 2 gate passes (skeleton is running):
+
+- Push the feature branch: `git push origin feature/<agent-slug>-v0.1`
+- Open a pull request from `feature/<agent-slug>-v0.1` into `main` using `gh pr create`
+- The PR body must include: what was built, how to run it, what's deferred
+- Never merge the PR locally — it goes through normal review
 
 ---
 

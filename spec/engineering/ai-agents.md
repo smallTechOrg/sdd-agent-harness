@@ -28,6 +28,13 @@ These rules are never optional, never skipped, and must survive context compress
 
 9. **Every commit must be pushed immediately.** `git commit` and `git push` are a single atomic action — never one without the other. Use `git commit -m "..." && git push origin <branch>` as a single command. A commit that is not pushed does not exist as far as the project is concerned. This is not optional and is not context-compression-safe — if you remember only this sentence: **commit then push, every time, no exceptions.**
 
+10. **`main` is boilerplate-only. Never commit application code to `main`.** All application code lives on a named feature branch and reaches `main` only via a reviewed pull request. This rule has no exceptions:
+    - Before writing any application code, create a feature branch: `git checkout -b feature/<slug>-v0.1`
+    - All phase commits go to the feature branch, never to `main`
+    - Spec/engineering/boilerplate improvements (no app code) are the only commits that may go directly to `main`
+    - When the build is complete, open a PR from the feature branch into `main` — do not merge locally
+    - If you find yourself on `main` while writing application code, stop immediately, create the feature branch, and continue there
+
 ---
 
 ## 1. Session Start Checklist
@@ -39,6 +46,7 @@ Complete all steps in order before writing any code:
   - If incomplete: surface the agent-builder to the user; do not write application code
 - [ ] If spec is complete: read the full spec manifest in `CLAUDE.md`
 - [ ] Run `git status` — working tree must be clean before starting
+- [ ] **Create and switch to a feature branch**: `git checkout -b feature/<slug>-v0.1` — **never build on `main`**
 - [ ] **Create the project directory** `<agent-slug>/` if it doesn't exist — never write agent code into the boilerplate root
 - [ ] Open a session report: `<agent-slug>/reports/sessions/YYYY-MM-DD-HHMMSS-[branch].md` — **must exist before Phase 1 starts**
   - Use the template in `spec/engineering/workflows/session-report.md`
