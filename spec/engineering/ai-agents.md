@@ -35,6 +35,8 @@ These rules are never optional, never skipped, and must survive context compress
     - When the build is complete, open a PR from the feature branch into `main` — do not merge locally
     - If you find yourself on `main` while writing application code, stop immediately, create the feature branch, and continue there
 
+11. **A PR must exist before the first feature-branch commit, and every push must go to that PR.** After creating the feature branch and pushing the first commit, immediately open a PR: `gh pr create --base main --head feature/<slug>-v0.1`. Every subsequent `git push` automatically updates the same PR — no extra step needed — but the PR must be open. Pushing commits without an open PR is equivalent to committing without pushing: the work is invisible and unreviable. This is not optional and survives context compression.
+
 ---
 
 ## 1. Session Start Checklist
