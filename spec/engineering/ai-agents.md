@@ -161,7 +161,15 @@ Build what the spec says, nothing more.
 
 ### When to use a ReAct loop
 
-Use a ReAct (Reason + Act) loop whenever the agent needs to act on the outside world to answer a question, rather than answering from a single prompt. This covers any tool-using agent — for example:
+Use a ReAct (Reason + Act) loop whenever the agent needs to act on the outside world to answer a question, rather than answering from a single prompt. Each iteration runs the same three-step cycle — **reason/plan → act → observe** — and loops until the agent decides it is done:
+
+- **reason/plan** — the LLM decides the next action (or signals it is finished)
+- **act** — execute that action against the real environment
+- **observe** — feed the result back into the next reason step
+
+(The pattern's name, *ReAct*, is just "Reason + Act"; "plan, act, observe" is the cycle that runs inside it. What makes it ReAct rather than plan-everything-up-front is that reasoning and acting are interleaved on every iteration.)
+
+This covers any tool-using agent — for example:
 
 - Data analysis over CSV / database tables
 - Web search agents that need to look up facts
@@ -179,13 +187,13 @@ START
 setup              ← prepare what the agent will act on (load data, open a connection, build an index)
   │
   ▼
-plan_action ◄───────────────────────────────────┐
+plan_action ◄───────────────────────────────────┐   ← reason/plan
   │                                             │
   ├──(error / LLM failure) → handle_error       │
   │                                             │
   ├──(FINAL ANSWER signal) → finalize → END     │
   │                                             │
-  └──(action returned) → execute_action ────────┘
+  └──(action returned) → execute_action ────────┘   ← act, then observe (result loops back)
                               │
                               ├──(non-recoverable error) → handle_error
                               │
