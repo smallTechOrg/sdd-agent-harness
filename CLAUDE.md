@@ -1,68 +1,54 @@
 # Claude Code — Entry Point
 
-This is a spec-driven AI agent boilerplate. Read this file first, then follow the instructions below.
+A spec-driven boilerplate for building AI agents. The spec in `spec/` is the single source of truth.
 
-## What This Repo Is
+## First action every session
 
-A starting template for building AI agents. The spec in `spec/` is either:
-- **Partially or fully filled in** — you are implementing an agent from a completed spec
-- **Empty / placeholder** — you are in the build phase; invoke the agent-builder to fill the spec first
+1. Read [`spec/engineering/ai-agents.md`](spec/engineering/ai-agents.md) — the rules for every session.
+2. Check `spec/product/01-vision.md`: if it still has `<!-- FILL IN -->` markers, the spec isn't ready —
+   **don't write application code**; invoke the agent-builder (below). If it's filled in, read the spec
+   manifest below, then build.
+3. Open a session report at `reports/sessions/YYYY-MM-DD-HHMMSS-[branch].md`.
 
-## Your First Action Every Session
-
-1. Read `spec/engineering/ai-agents.md` — mandatory rules for all AI sessions
-2. Check whether `spec/product/01-vision.md` has been filled in:
-   - If it still contains `<!-- FILL IN -->` placeholders → the spec is not ready; do not write application code yet
-   - If it is filled in → proceed to read the full spec manifest below before touching any code
-3. Open a session report at `reports/sessions/YYYY-MM-DD-HHMMSS-[branch].md`
-
-## Spec Manifest (read in this order when spec is complete)
+## Spec manifest (read in this order when the spec is complete)
 
 ```
-spec/product/01-vision.md
-spec/product/02-architecture.md
-spec/product/capabilities/          ← all files
-spec/product/04-data-model.md
-spec/product/05-api.md
-spec/product/06-ui.md
-spec/product/07-agent-graph.md      ← REQUIRED for any agent framework project
-spec/engineering/ai-agents.md
-spec/engineering/spec-driven.md
-spec/engineering/phases.md
-spec/engineering/project-layout.md
-spec/engineering/tech-stack.md
-spec/engineering/code-style.md
+spec/product/01-vision.md · 02-architecture.md · capabilities/ · 04-data-model.md · 05-api.md · 06-ui.md
+spec/product/07-agent-graph.md       ← REQUIRED for any agent-framework project (LangGraph, CrewAI, …)
+spec/engineering/agentic-architecture.md  ← the agentic AI stack (10 layers) — read after the product spec
+spec/engineering/ai-agents.md · spec-driven.md · phases.md · project-layout.md · tech-stack.md · code-style.md
+spec/engineering/patterns/           ← one canonical home per layer:
+    react-agent.md · llm-providers.md · memory-and-context.md · tools-and-mcp.md · retrieval.md
+    multi-agent.md · guardrails-and-hitl.md · durability.md · observability-and-evals.md
 ```
 
-**`07-agent-graph.md` is mandatory** for any project using LangGraph, CrewAI, AutoGen, or any agent orchestration framework. If it does not exist when you reach Phase 2, stop and raise it as a blocker.
+`07-agent-graph.md` is mandatory for any orchestration-framework project. If it's missing when you reach
+Phase 1, stop and raise it as a blocker. The **default agent ships memory + MCP tools + evals + OTel
+tracing, all real in Phase 1** — the raised baseline in `agentic-architecture.md`. Retrieval, long-term
+memory, multi-agent, HITL, and durability earn their place in later phases.
 
-## If the Spec Is Not Ready
+## Non-negotiables (full text in `ai-agents.md`)
 
-Invoke the agent-builder:
+1. The README must always be accurate — test every command before claiming done.
+2. Never claim a test passed without running it.
+3. Commit then push, every time — one indivisible action.
+4. `main` is boilerplate-only — app code on a feature branch, into `main` via PR only.
+5. Agents that act on the outside world use a ReAct loop — see `patterns/react-agent.md`.
 
-```
-Use the agent-builder sub-agent in .claude/agents/agent-builder.md
-```
+## If the spec isn't ready
 
-Or the user can run the `/build` command with their idea.
+Invoke the agent-builder: *"Use the agent-builder sub-agent in `.claude/agents/agent-builder.md`"*, or
+run `/build [your idea]`.
 
-## Key Rules (summary — full rules in spec/engineering/ai-agents.md)
-
-- Never write application code before reading the full spec
-- Never skip a phase — complete phase N before starting phase N+1
-- Commit every logical unit of work; never let the working tree stay dirty
-- Update `reports/sessions/` at the start and end of every session
-- When in doubt, ask — do not guess requirements
-
-## Sub-agents Available
+## Sub-agents
 
 | Agent | Purpose |
 |-------|---------|
-| `.claude/agents/agent-builder.md` | Master orchestrator — start here for a new build |
-| `.claude/agents/spec-writer.md` | Interview user, write product spec |
-| `.claude/agents/spec-reviewer.md` | Review spec for completeness and coherence |
-| `.claude/agents/tech-designer.md` | Propose tech stack and architecture |
-| `.claude/agents/planner.md` | Create phased implementation plan |
-| `.claude/agents/plan-reviewer.md` | Validate plan against spec |
-| `.claude/agents/drift-auditor.md` | Audit spec/code drift |
-| `.claude/agents/qa-auditor.md` | Test and audit completed phases |
+| `agent-builder` | Master orchestrator — start here for a new build |
+| `spec-writer` / `spec-reviewer` | Write / review the product spec |
+| `tech-designer` | Propose tech stack and architecture |
+| `planner` / `plan-reviewer` | Create / validate the phased plan |
+| `qa-auditor` | Test and gate completed phases |
+| `drift-auditor` | Audit spec/code drift |
+
+All live in `.claude/agents/`. The canonical project layout is in [`spec/engineering/project-layout.md`](spec/engineering/project-layout.md).

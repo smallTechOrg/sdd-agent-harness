@@ -25,7 +25,7 @@ Produce a phased plan that:
    - Add project-specific phases (e.g., "Phase 3b: LinkedIn integration")
    - Remove phases that don't apply (e.g., no UI phase if there's no UI)
 
-2. **States the minimal working thing** — what does Phase 2 look like, specifically? What runs end-to-end with stubs?
+2. **States the minimal working thing** — what does Phase 1 look like, specifically? What runs end-to-end, real?
 
 3. **Lists the files to create or modify** in each phase
 
@@ -38,10 +38,11 @@ Produce a phased plan that:
 ```markdown
 # Implementation Plan — [Project Name]
 
-## Minimal Working Thing (Phase 2 Goal)
+## Minimal Working Thing (Phase 1 Goal)
 
-[Describe in one paragraph what the agent does end-to-end by the end of Phase 2. 
-Be specific: what input triggers it? What output does it produce? What is stubbed?]
+[Describe in one paragraph what the agent does end-to-end by the end of Phase 1.
+Be specific: what input triggers it? What output does it produce? Everything is real —
+real LLM, real MCP tools, real DB.]
 
 ## Phases
 
@@ -74,10 +75,14 @@ Be specific: what input triggers it? What output does it produce? What is stubbe
 
 ## Planning Principles
 
-- **Phases 1 and 2 should be achievable in a single coding session** (2-4 hours)
+- **Phase 1 should be achievable in a single coding session** (2-4 hours)
 - **Later phases can be larger** — by then the foundation is solid
 - **Every phase must be testable in isolation** — do not design a phase that can only be tested by running the full system
-- **Stub everything external in Phase 2** — no real API calls until Phase 3+
+- **Everything is real from Phase 1** — real LLM, real MCP tools, real DB; no stubs, no offline mode
+- **Phase the agentic layers per `spec/engineering/phases.md` § Agentic layers by phase** — the raised
+  baseline (memory + MCP tools + eval skeleton + OTel traces) lands **real in Phase 1**; earns-its-place
+  layers (long-term memory, retrieval/RAG, multi-agent, HITL, durable execution) land in later phases,
+  only when `02-architecture.md` § Agentic stack layers used says the agent needs them
 - **State the exact gate test command** — not "the tests pass" but "`pytest tests/unit/test_agent.py` passes with 0 failures"
 - **Order by dependency** — each phase should only depend on things built in earlier phases
 

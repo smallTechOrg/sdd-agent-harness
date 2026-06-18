@@ -11,3 +11,7 @@ build/
 *.egg-info/
 .DS_Store
 *.log
+
+# Session reports & build artifacts are local handoff docs, not tracked.
+# The session-report TEMPLATE stays tracked at spec/engineering/workflows/session-report.md.
+reports/

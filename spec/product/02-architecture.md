@@ -8,6 +8,26 @@
 
 <!-- FILL IN: One paragraph describing the system at a high level. Who/what interacts with it? -->
 
+## Agentic Stack Layers Used
+
+<!-- Which of the 10 layers in ../engineering/agentic-architecture.md this agent uses. Baseline layers
+     are always on; mark each earns-its-place layer yes/no and say why. -->
+
+| Layer | Used? | Why / notes |
+|-------|-------|-------------|
+| 1 Model | ✅ baseline | <!-- model + routing --> |
+| 2 Context | ✅ baseline | |
+| 3 Memory — working/short-term | ✅ baseline | |
+| 3 Memory — long-term | <!-- yes/no --> | <!-- remembers across sessions? --> |
+| 4 Tools / MCP | ✅ baseline | <!-- which MCP servers --> |
+| 5 Retrieval / RAG | <!-- yes/no --> | <!-- depends on a knowledge corpus? --> |
+| 6 Multi-agent | <!-- yes/no --> | <!-- escalation reason (multi-agent.md) --> |
+| 7 Guardrails — action-safety | ✅ baseline | |
+| 7 Guardrails — input/output + HITL | <!-- yes/no --> | <!-- untrusted input / irreversible action? --> |
+| 8 Durability / checkpointing | <!-- yes/no --> | <!-- long/resumable runs? --> |
+| 9 Observability + evals | ✅ baseline | |
+| 10 Interface / serving | ✅ | <!-- API / UI / CLI / webhook --> |
+
 ## Component Map
 
 <!-- FILL IN: List the major components and what each does. -->

@@ -6,7 +6,10 @@
 
 ## API Style
 
-<!-- FILL IN: REST / GraphQL / CLI / webhook / none -->
+<!-- FILL IN: default is an async FastAPI REST API + UI (the default trigger); REST / GraphQL / CLI /
+     webhook / none. Errors return as JSON via the response envelope (ok / api_error), never an HTML
+     error page — the Next.js frontend renders them. -->
+<!-- Interaction model (multi-turn chat vs. single-shot task) is chosen at intake — state which here. -->
 
 ## Endpoints / Commands
 

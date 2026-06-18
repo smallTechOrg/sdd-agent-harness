@@ -1,6 +1,6 @@
 # Golden-Path UI Smoke Test
 
-**Mandatory before Phase 2 passes** for any project with a UI or HTTP surface.
+**Mandatory before Phase 1 passes** for any project with a UI or HTTP surface.
 
 ## What it is
 
@@ -13,10 +13,10 @@ A test that checks `response.status_code == 200` and nothing else is not a smoke
 Unit tests on the repository layer prove the DB works. Status-code assertions prove routes are wired up. Neither proves the user-visible result is sensible. The smoke test closes that gap.
 
 Bugs this test catches that other tests miss:
-- Stub LLM output that looks nothing like the real thing (outline bullets rendered as an article body)
-- Template engine signature changes (e.g. Starlette 1.0 `TemplateResponse(request, name, ctx)` vs. the older `TemplateResponse(name, {...})`)
-- Forms that POST successfully but render an empty list afterward because the query is wrong
-- Redirects that go to a page which then 500s
+- Real LLM output rendered in the wrong shape (outline bullets shown where an article body belongs)
+- API/serialization mismatches (the frontend expects a field the backend never sends)
+- Forms/requests that succeed but render an empty list afterward because the query is wrong
+- Redirects or navigations that land on a page which then errors
 
 ## Required test structure
 
@@ -37,7 +37,7 @@ The smoke test **must** exercise at least two follow-up questions on the same se
 
 5. **POST** a second question to the same session. Assert 200 and a non-empty answer. A single-question golden-path test misses the most common failure mode: session-scoped resources (DataFrames, parsed files, vector indexes) that are released after Q1 and unavailable for Q2.
 
-If the second question returns any error — `SESSION_DATA_LOST`, 410, 500 — the Phase 2 gate has not passed, regardless of whether Q1 succeeds.
+If the second question returns any error — `SESSION_DATA_LOST`, 410, 500 — the Phase 1 gate has not passed, regardless of whether Q1 succeeds.
 
 ### Reasoning trace requirements (agent outputs)
 
@@ -80,7 +80,7 @@ def test_golden_path_ui_flow(db):
 
 ## Running the live server as part of the smoke
 
-For Phase 2 sign-off the agent must **also** start the server with `uv run python -m <pkg>` and hit `/health` plus at least one page with `curl` to prove the app boots in a real process — not only via `TestClient`. Report the curl exit codes in the session log.
+For Phase 1 sign-off the agent must **also** start the server with `uv run python -m <pkg>` and hit `/health` plus at least one page with `curl` to prove the app boots in a real process — not only via `TestClient`. Report the curl exit codes in the session log.
 
 ## Browser-level end-to-end (client-rendered UI)
 
@@ -92,4 +92,4 @@ For any UI with client-side rendering, add a browser-driven E2E test (**Playwrig
 
 - Golden-path (server-side): `tests/integration/test_pipeline.py` (or a dedicated `test_golden_path.py`), runs as part of `uv run pytest`
 - Browser E2E (client-side): `tests/e2e/` (`uv run pytest tests/e2e/` or `npx playwright test`)
-- No LLM API key required — uses the stub provider
+- Runs against the **real model** — the API key is set (locally from `.env`, in CI from a secret); assert loosely (structure + non-empty) to absorb output variance, never on exact LLM text

@@ -79,8 +79,14 @@ If yes — defer it. One sentence in `## Future Phases` is enough.
 | One external data source | Multiple parallel sources |
 | Config file or env vars | Config CRUD API |
 | CLI or REST — not both | Full web dashboard |
-| Core happy path only | Retry logic, rate limiting, observability |
-| SQLite local file | Remote DB, multi-tenancy |
+| Core happy path + retries | Rate limiting, multi-tenancy |
+| Working/short-term memory, observability, evals (baseline — in Phase 1) | Retrieval/RAG, long-term memory, multi-agent, HITL, durability |
+
+**Not deferrable — the raised baseline.** Working/short-term memory, MCP tools, observability (OTel
+traces), and an eval skeleton are part of every agent's baseline (`spec/engineering/agentic-architecture.md`),
+real in Phase 1 — not "future." Don't scope them out. The earns-its-place layers (retrieval/RAG,
+long-term memory, multi-agent, HITL, durable execution) **are** deferrable — defer them unless the core
+loop needs them, and record the decision in `02-architecture.md` § Agentic stack layers used.
 
 **Target:** 2–4 capabilities max for v1. If you have more than 5, go back and defer — you have not scoped ruthlessly enough.
 
@@ -92,7 +98,8 @@ If yes — defer it. One sentence in `## Future Phases` is enough.
 
 - **Be specific.** "The agent searches the web" is too vague. "The agent calls the Tavily search API with the company name and returns the top 5 results" is a spec.
 - **One fact, one place.** Don't repeat the same fact in multiple files — cross-reference with a link.
-- **No implementation details in product spec.** Say WHAT the agent does, not HOW it does it. Language, framework, and library choices go in `spec/engineering/tech-stack.md`.
+- **No implementation details in product spec.** Say WHAT the agent does, not HOW it does it. Language, framework, and library choices go in `spec/engineering/tech-stack.md`. Don't hardcode an LLM provider or model — the provider is chosen at intake and pinned in the tech stack, not the product spec.
+- **Capture which agentic capabilities the agent needs.** From the core loop, work out which earns-its-place layers (retrieval/RAG, long-term memory, multi-agent, HITL, durability) the agent actually requires, and record each yes/no with a reason in `02-architecture.md` § Agentic Stack Layers Used. The baseline layers (memory + MCP tools + evals + OTel observability) are always on.
 - **Make success criteria testable.** Each success criterion should be a thing you can write a test for.
 - **Out-of-scope is as important as in-scope.** Explicitly listing what the agent won't do prevents scope creep.
 - **Prefer concrete examples.** If describing a data model field, give a concrete example value.

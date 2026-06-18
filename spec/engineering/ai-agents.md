@@ -1,252 +1,155 @@
 # AI Agent Rules
 
-**These rules apply to every AI coding session in this repo — Claude Code, GitHub Copilot, Cursor, or any other AI assistant.**
-
-Read this file completely before doing anything else.
-
----
-
-## ⚠ Non-Negotiable Rules
-
-These rules are never optional, never skipped, and must survive context compression. If your context window is compressed and you can only remember a few rules, these are the ones.
-
-1. **README must always be accurate.** Every command in the README must work exactly as written, from the directory stated. Before ending any session or marking any phase complete: run the README commands yourself — if any fail, fix the README first. A README that lies is worse than no README.
-
-2. **Never claim a test passed if you didn't run it.** "It should work" is not a passing test. Run `pytest` (or equivalent). Show the output. If you can't run it, say so — do not fabricate results.
-
-3. **All commands in docs use the package manager prefix.** For Python + uv projects: every `alembic`, `pytest`, `python` command in the README and docs must be prefixed with `uv run`. Bare commands (e.g. `alembic upgrade head`) fail unless the venv is manually activated — which users won't do.
-
-4. **Working directory must be explicit.** Any README or doc section with shell commands must state the exact working directory at the top of the code block. "Run from project root" is not enough — give the exact relative path from the repo root.
-
-5. **No SQLite substitute for PostgreSQL tests.** If the production database is PostgreSQL, tests run against PostgreSQL. Tests that only pass on SQLite do not count as passing.
-
-6. **Golden-path UI smoke test is mandatory before Phase 2 passes.** If the project has any UI or HTTP surface, Phase 2 must include an automated test that walks the full primary user journey via `TestClient` (or equivalent) and asserts **response content**, not just status codes. See `spec/engineering/workflows/golden-path-smoke-test.md`. A build that returns 200 but renders a broken-looking page is a failing build.
-
-7. **Stub / offline providers must be clearly signalled in the UI.** If an LLM provider is stubbed (no key, demo mode), the UI must display a visible banner on every page. Silent stubs that look like real output are a bug — users will report "it didn't work." The provider should auto-select real when an API key is present (`provider=auto` → real when key set, stub otherwise). Never require the user to flip a flag *in addition* to setting the key.
-
-8. **Stub LLM outputs must be distinct per pipeline node and article-shaped.** Pipeline nodes that share a stub provider must inject unambiguous tags (e.g. `<node:plan>`, `<node:draft>`, `<node:title>`) into their prompts, and the stub must branch on those tags — never on prose keywords from the prompt body (keyword matching cross-contaminates: the word "outline" in a draft prompt must not cause the stub to emit outline bullets instead of a draft). Stub "draft" output must contain paragraphs/headings, not just bullets, so offline demos are credible.
-
-9. **Agents that act on the outside world must use a ReAct loop — never a "sample and guess" pipeline.** If the agent answers questions using tools, data (CSV, databases, APIs, files), or search, it must generate executable actions, run them against the **full** data, and feed results back to the LLM iteratively (reason/plan → act → observe, looping) until the LLM signals a final answer. A single-shot pipeline that passes a sample to the LLM produces wrong results at scale and must be redesigned before Phase 2 is marked complete. Spec the loop in `07-agent-graph.md` before writing any code; see Section 10 for the full pattern.
-
-10. **Every commit must be pushed immediately.** `git commit` and `git push` are a single atomic action — never one without the other. Use `git commit -m "..." && git push origin <branch>` as a single command. A commit that is not pushed does not exist as far as the project is concerned. This is not optional and is not context-compression-safe — if you remember only this sentence: **commit then push, every time, no exceptions.**
-
-11. **`main` is boilerplate-only. Never commit application code to `main`.** All application code lives on a named feature branch and reaches `main` only via a reviewed pull request. This rule has no exceptions:
-    - Before writing any application code, create a feature branch: `git checkout -b feature/<slug>-v0.1`
-    - All phase commits go to the feature branch, never to `main`
-    - Spec/engineering/boilerplate improvements (no app code) are the only commits that may go directly to `main`
-    - When the build is complete, open a PR from the feature branch into `main` — do not merge locally
-    - If you find yourself on `main` while writing application code, stop immediately, create the feature branch, and continue there
-
-12. **A PR must exist before the first feature-branch commit, and every push must go to that PR.** After creating the feature branch and pushing the first commit, immediately open a PR: `gh pr create --base main --head feature/<slug>-v0.1`. Every subsequent `git push` automatically updates the same PR — no extra step needed — but the PR must be open. Pushing commits without an open PR is equivalent to committing without pushing: the work is invisible and unreviable. This is not optional and survives context compression.
+**Applies to every AI coding session in this repo** — Claude Code, Copilot, Cursor, any assistant.
+Read this file completely before doing anything else. Each rule lives here once; deeper detail lives in
+the linked canonical file.
 
 ---
 
-## 1. Session Start Checklist
+## ⚠ Non-Negotiables (must survive context compression)
 
-Complete all steps in order before writing any code:
+If your context is compressed and you can remember only a few rules, these are the ones.
 
-- [ ] Read `spec/product/01-vision.md` — know what you're building
-- [ ] Check if the spec is complete (no `<!-- FILL IN -->` markers in product spec files)
-  - If incomplete: surface the agent-builder to the user; do not write application code
-- [ ] If spec is complete: read the full spec manifest in `CLAUDE.md`
-- [ ] Run `git status` — working tree must be clean before starting
-- [ ] **Create and switch to a feature branch**: `git checkout -b feature/<slug>-v0.1` — **never build on `main`**
-- [ ] **Create the project directory** `<agent-slug>/` if it doesn't exist — never write agent code into the boilerplate root
-- [ ] Open a session report: `<agent-slug>/reports/sessions/YYYY-MM-DD-HHMMSS-[branch].md` — **must exist before Phase 1 starts**
-  - Use the template in `spec/engineering/workflows/session-report.md`
-- [ ] Confirm which phase you are implementing (see `spec/engineering/phases.md`)
-
-## 2. Session Report (Mandatory)
-
-Every session must have a report at `reports/sessions/YYYY-MM-DD-HHMMSS-[branch].md`.
-
-Minimum required sections:
-- **Goal:** What this session is trying to accomplish
-- **Phase:** Which implementation phase
-- **Steps completed:** Logged as you work (not reconstructed at the end)
-- **Prompt log:** Every user message and a one-line summary of your action
-- **Next steps:** What remains
-
-Update the report in real time. Do not reconstruct it from memory at the end.
-
-## 3. Gate Law
-
-The goal is: **one prompt → working skeleton in ~10 minutes.** All decisions are captured upfront and approved once. There is exactly one user approval gate before code is written.
-
-```
-INTAKE (4 questions: scope, stack, trigger, constraints)
-        ↓
-DRAFT (spec + tech design + plan produced together)
-        ↓
-ONE APPROVAL (user sees everything at once — one response to proceed)
-        ↓
-BUILD (Phase 1 → Phase 2, each gated by passing tests)
-```
-
-**Rules that never change:**
-- Stack decisions (database, language, hosting) belong to the user — captured at intake, never chosen autonomously
-- No code is written before the single approval gate is cleared
-- Each build phase must pass its gate test before the next phase starts
-- Reviewers (spec-reviewer, plan-reviewer) run as background validation and surface blockers, but do not add approval rounds for v0.1
-
-**After v0.1 is running**, subsequent phases follow the standard gate:
-```
-[Phase implemented] → [gate test passes] → [committed] → [next phase]
-```
+1. **The README must always be accurate.** Every command must work exactly as written, from the stated
+   directory. Run them yourself before ending a session or marking a phase complete; if any fails, fix
+   the README first. → [`project-layout.md`](project-layout.md) § README Requirements.
+2. **Never claim a test passed without running it.** "It should work" is not a pass. Run it, show the
+   output. If you can't run it, say so — never fabricate results.
+3. **Commit then push, every time.** `git commit -m "…" && git push origin <branch>` is one indivisible
+   action. An unpushed commit does not exist. → § 6.
+4. **`main` is boilerplate-only.** Application code lives on a `feature/<slug>-<date>` branch and reaches
+   `main` only via a reviewed PR, and a PR must exist before the first feature-branch commit. → § 6.
+5. **Agents that act on the outside world use a ReAct loop**, never a sample-and-guess pipeline. Spec
+   it before coding. → [`patterns/react-agent.md`](patterns/react-agent.md).
 
 ---
 
-## 4. Spec-First Rule
+## 1. Session Start
 
-**No code change without a spec backing it.**
+Complete in order before writing any code:
 
-If you are asked to implement something not in the spec:
-1. Stop
-2. Tell the user what spec gap you found
-3. Propose adding it to the spec first
-4. Wait for approval before writing code
+- [ ] Read `spec/product/01-vision.md` — know what you're building.
+- [ ] Check the spec is complete (no `<!-- FILL IN -->` in `spec/product/`). If incomplete, surface the
+      agent-builder and **do not write application code**.
+- [ ] If complete, read the full spec manifest in `CLAUDE.md`.
+- [ ] `git status` — the working tree must be clean.
+- [ ] Create and switch to a feature branch: `git checkout -b feature/<slug>-<date>`. **Never build on `main`.**
+- [ ] Open a session report at `reports/sessions/YYYY-MM-DD-HHMMSS-[branch].md` — **must exist before
+      Phase 1.** → § 2.
+- [ ] Confirm which phase you're implementing (`phases.md`).
 
-See `spec/engineering/spec-driven.md` for full details.
+## 2. Session Report
+
+Every session has a report at `reports/sessions/YYYY-MM-DD-HHMMSS-[branch].md`, using the template in
+[`workflows/session-report.md`](workflows/session-report.md). It is a **handoff document**: log **every
+activity** — not just builds, but spec edits, investigations, decisions, and dead ends — in real time, so
+the user can switch chats or coding agents and resume seamlessly. Capture Goal, Phase, steps, a prompt
+log, and next steps as you go — never reconstruct it at the end. `reports/` is gitignored (the template
+under `workflows/` stays tracked); a missing session report is a build failure.
+
+## 3. The One-Approval Gate Law
+
+Goal: **one prompt → working agent fast.** Decisions are captured upfront and approved once. Phase 1
+delivers the raised agentic baseline running with **real** integrations (real LLM + MCP tools + memory +
+evals), not a bare loop — see § 10.
+
+```
+INTAKE (scope · stack · provider · trigger · constraints)  →  DRAFT (spec + tech design + plan together)
+   →  ONE APPROVAL (user sees everything, one response)  →  BUILD (Phase 1 = real baseline, then gated phases)
+```
+
+- Stack decisions (database, language, hosting, **LLM provider**) belong to the user — captured at
+  intake, never chosen autonomously.
+- No code before the single approval gate clears.
+- Each build phase passes its gate test before the next starts.
+- Reviewers (spec-reviewer, plan-reviewer) run as background validation and surface blockers; they do
+  not add approval rounds for the first release.
+
+After Phase 1 is running, every later phase follows: implemented → gate test passes → committed → next.
+
+## 4. Spec-First
+
+**No code change without a spec backing it.** If asked to implement something not in the spec: stop,
+name the gap, propose adding it to the spec, wait for approval. → [`spec-driven.md`](spec-driven.md).
 
 ## 5. Phase Discipline
 
-**Never start phase N+1 while phase N is incomplete or failing.**
+**Never start phase N+1 while phase N is incomplete or failing.** A phase ends when its code is
+committed and pushed, its tests pass, and the qa-auditor (or the manual QA checklist) has signed off.
+→ [`phases.md`](phases.md).
 
-Each phase ends when:
-- All code for that phase is written and committed
-- All tests for that phase pass
-- The qa-auditor sub-agent has signed off (or you have run the QA checklist manually)
+## 6. Git (canonical home)
 
-See `spec/engineering/phases.md` for the phase definitions and gates.
-
-## 6. Git Discipline
-
-- Commit every logical unit of work — never let the working tree stay dirty for more than one logical change
-- **Push immediately after every commit** — treat `git commit -m "..." && git push origin <branch>` as a single indivisible command. Never leave a commit unpushed.
-- Commit message format: `phase-N: [what you did]` (e.g., `phase-1: add domain models`)
-- Never commit secrets (API keys, passwords, tokens)
-- Never force-push without user confirmation
-- **Never `git add -A` / `git add .`** — always stage specific files or directories. `-A` sweeps in untracked leftovers from prior build attempts (stray packages, abandoned experiments) and poisons the commit. If a phase needs many files, list them explicitly or stage directories one at a time.
-
-**Before every reply to the user:**
-1. Run `git status`
-2. If dirty: commit the changes with `git commit -m "..." && git push origin <branch>`
-3. Confirm the working tree is clean **and** the branch is pushed before replying
+- Commit every logical unit of work — never leave the tree dirty across more than one logical change.
+- **Push immediately after every commit** (Non-Negotiable 3). Never leave a commit unpushed.
+- **`main` is boilerplate-only.** All application code lives on `feature/<slug>-<date>` and reaches `main`
+  only via PR. Spec/engineering/boilerplate-only changes may commit directly to `main`. If you find
+  yourself on `main` writing application code, stop and create the branch first.
+- **A PR must exist before the first feature-branch commit** (`gh pr create --base main --head
+  feature/<slug>-<date>`). Every later push updates that same PR automatically.
+- Commit message format: `phase-N: [what you did]`.
+- **Never `git add -A` / `git add .`** — stage specific files or directories; `-A` sweeps in untracked
+  leftovers from prior attempts and poisons the commit.
+- Never commit secrets (→ [`secret-hygiene.md`](secret-hygiene.md)); never force-push without user
+  confirmation.
+- **Before every reply:** `git status`; if dirty, commit and push; confirm clean + pushed before replying.
 
 ## 7. Test Before Claiming Done
 
-A phase is not done until tests pass. "It looks right" is not a test.
+A phase is not done until tests pass; "it looks right" is not a test. Write tests per capability as you
+implement, and run the full suite before marking a phase complete.
 
-- Write tests for each capability as you implement it
-- Run the full test suite before marking a phase complete
-- If tests fail, fix them before moving on
+**Test across every layer**, not just units:
 
-**Test thoroughly across every layer — not just the unit level:**
 - **Unit** — domain logic, parsing, pure functions.
-- **Integration** — the agent loop and DB end-to-end with stubs (no API key).
-- **Golden-path** — the full primary user journey through the HTTP/UI layer, asserting rendered content, not just status codes (`spec/engineering/workflows/golden-path-smoke-test.md`).
-- **Frontend / UI** — any page that renders or updates content via JavaScript (charts, SPA, htmx, streamed tokens) must be tested in a **real browser** (Playwright or equivalent) asserting the **rendered DOM** — a `TestClient` HTML check cannot see what the browser actually paints.
-- **End-to-end** — at least one test drives the whole system the way a user would (browser → API → agent → DB → back), with nothing mocked beyond the LLM stub.
-- **Evals** — agents need quality tests, not just plumbing tests. Keep a small fixed set of representative inputs with expected outputs (or rubric/property checks) and run it to catch regressions in the agent's *answers* — a run that returns 200 with a wrong analysis passes every layer above. Run against the stub for deterministic CI, and against the real model when validating a prompt or model change.
+- **Integration** — the agent loop + DB end-to-end against the **real** model (key from a CI secret),
+  with **loose assertions** (structure + non-empty) to tolerate LLM output variance.
+- **Golden-path** — the full primary user journey through the HTTP/UI layer, asserting rendered
+  **content**, not just status codes. → [`workflows/golden-path-smoke-test.md`](workflows/golden-path-smoke-test.md).
+- **Frontend / browser** — any client-rendered content (charts, SPA, htmx, streamed tokens) tested in a
+  real browser (Playwright) asserting the post-JavaScript DOM. A `TestClient` HTML check cannot see what
+  the browser paints.
+- **End-to-end** — at least one test drives the whole stack as a user does (browser → API → agent → DB →
+  back), nothing mocked — the model is real.
+- **Evals** — a small fixed set of representative inputs with rubric/property checks to catch regressions
+  in the agent's *answers*. A run that returns 200 with a wrong analysis passes every layer above.
 
-A UI claimed "working" on the strength of a 200 response, with no browser-level assertion, is not tested; an agent whose answers are never eval'd is not validated.
+Tests run against the real model with loose asserts, and use the same DB driver as production. →
+[`tech-stack.md`](tech-stack.md) § Database & Tests, [`patterns/llm-providers.md`](patterns/llm-providers.md).
 
 ## 8. Error Resilience
 
-Every external call (API, database, LLM) must have:
-- Error handling that doesn't crash the agent
-- Logged failures (to file or stdout at minimum)
-- Graceful degradation (the agent continues if a non-critical step fails)
+Every external call (API, DB, LLM) needs error handling that doesn't crash the agent, logged failures
+(file or stdout minimum), and graceful degradation — the agent continues when a non-critical step fails.
 
 ## 9. No Gold-Plating
 
-Build what the spec says, nothing more.
+Build what the spec says, nothing more. No extra features "while you're in there", no refactoring
+outside the current phase, no premature abstractions. Note future improvements in the session report and
+keep moving.
 
-- No extra features "while you're in there"
-- No refactoring outside the current phase scope
-- No premature abstractions
-- If you spot a future improvement, add it to `reports/sessions/[current].md` under "Future improvements" and keep moving
+## 10. Agentic Architecture
 
-## 10. Agent Loop Design Patterns
+If the agent acts on the outside world (tools, data, search), it must run a ReAct loop with all the
+mandatory mechanics — termination signal, max-iterations guard, `force_finalize`, self-correction, the
+action-safety boundary, usage accounting, and a live user-facing trace. Defined once in
+[`patterns/react-agent.md`](patterns/react-agent.md).
 
-### The ReAct loop
-
-Any agent that acts on the outside world to answer a question — tool use, data queries, web search, file/API access — must run a **ReAct** ("Reason + Act") loop, not a single-shot pipeline. Each iteration runs the same cycle and repeats until the agent signals it is done:
-
-**reason/plan** (LLM picks the next action, or signals done) → **act** (execute it) → **observe** (feed the result back into the next reason step).
-
-Reasoning and acting interleave every iteration — that is what makes it ReAct rather than planning everything up front. A single-shot pipeline ("gather context, pass to the LLM, return its answer") cannot verify its inputs or self-correct, and breaks down once the real environment differs from the sampled context.
-
-```
-START → setup → plan_action ──(action)──► execute_action ──┐
-                  ▲   │                                     │
-                  │   ├─(FINAL ANSWER)─► finalize → END     │
-                  │   └─(fatal error)─► handle_error → END  │
-                  └──────────(observe: result loops back)───┘
-                                                            │
-   (max iterations OR repeated errors) ─► force_finalize ─► END
-```
-
-- **setup** — prepare what the agent acts on (load data, open a connection, build an index)
-- **plan_action** = reason/plan · **execute_action** = act · result appended to state and looped back = observe
-
-### Mandatory mechanics
-
-- **Termination signal.** The LLM ends the loop with a fixed prefix, e.g. `FINAL ANSWER: <text>`. `plan_action` checks for it (case-insensitive): if present, strip it and route to `finalize`; otherwise treat the response as the next action. Without this the loop never terminates on its own.
-- **Max-iterations guard.** Configurable ceiling (`max_agent_iterations`, default 10). On reaching it — or after repeated consecutive errors — route to **`force_finalize`**, never loop unboundedly.
-- **Best-effort finalization (`force_finalize`).** Running out of iterations is not a crash: synthesise the best answer from `action_history` and note what's missing — never a bare "I couldn't do it." Reserve `handle_error` for fatal failures (data missing, LLM/network down).
-- **Self-correction.** On a recoverable action error (bad query, API 4xx, missing file), append the action + error to history and route back to `plan_action` so the LLM sees it inline and retries. Hard-fail (→ `handle_error`) only on a structurally invalid action or an LLM-call failure.
-- **Action-safety boundary.** Treat model-generated actions as untrusted: validate each action before running it, and never `exec`/`eval` raw output unsandboxed. For code-generating actions (pandas, SQL, shell) the safe executor pattern is **AST-parse → walk + reject dangerous nodes → compile + eval in a restricted namespace** (no `__builtins__`, only explicitly listed names). Do not use a regex-dispatch pattern: LLMs naturally generate chained expressions (`df.groupby(x)[y].sum()`, `df.sort_values(by=x).head(n)`) that regex will fail to parse, producing spurious errors. A frozenset allowlist of attribute names inspected during the AST walk is the correct safety mechanism — not a regex that tries to parse call structure.
-- **Operator observability.** Every LLM call returns structured usage (input/output tokens, estimated cost) accumulated in state and persisted on the run; every node emits a structured (JSON) log bound to `run_id`. Token/cost per run must never be invisible.
-- **User transparency.** Observability is not only logs. The agent must show the user *what it is doing as it happens* — each step's action, its result, then the final answer — streamed or rendered from `action_history`. The run is a glass box, never a spinner hiding a black box.
-
-### State
-
-`AgentState` carries the context the LLM needs on every `plan_action` call:
-
-```python
-action_history: list[dict]  # [{"description": str, "action": str, "result": str, "is_error": bool}]
-iteration_count: int
-llm_response: str           # raw last LLM output — router inspects it for FINAL ANSWER
-tokens_input: int           # accumulated usage — persisted on the run record
-tokens_output: int
-estimated_cost_usd: float | None
-```
-
-`action_history` entries **must** include a `description` field — a plain-English sentence the user can read. Raw code or query strings alone are never acceptable in the user-facing trace. The LLM prompt must ask for a description alongside every action (e.g. `DESCRIPTION: <plain English>\nACTION: <expression>`); the executor parses both and stores both.
-
-Persist `action_history` — it is both the live user-facing trace and the audit log — along with the usage fields.
-
-**Resource lifecycle — run-scoped vs. session-scoped:**
-
-- **Run-scoped resources** (a single LLM call's context, a short-lived network connection) live in the state or local scope and are released at the end of the node function. No module-level store needed.
-- **Session-scoped resources** (DataFrames, parsed files, vector indexes, database connections that span multiple user questions on the same session) live in a module-level store keyed by `session_id` — **not** `run_id`. They must **not** be released in terminal nodes (`finalize`, `force_finalize`, `handle_error`) because the user will ask follow-up questions on the same session. Release them only when the session is explicitly deleted (a DELETE endpoint or an LRU eviction policy). Releasing them per-question causes `SESSION_DATA_LOST` on the second question — this is a correctness bug, not a memory leak fix.
-
-If the resource was session-scoped but the server restarted (process memory lost), the API must return a clear, user-actionable error ("Session data is no longer available — please re-upload your file") rather than a generic 500.
-
-### Spec it before coding
-
-`07-agent-graph.md` must answer, before any node code is written: (1) what action the LLM generates (query, HTTP request, file path, tool call…); (2) the exact FINAL ANSWER string; (3) the recoverable-vs-fatal error boundary; (4) the max-iterations default; (5) what `setup` prepares and how it's cleaned up; (6) what fields `AgentState` carries for history, iteration count, and usage — and how the trace is surfaced to the user live; (7) the **action-safety boundary** — which operations the executor permits, how each action is validated before running, and what sandbox it runs in; (8) what `force_finalize` synthesises when iterations are exhausted. If any are missing, raise a blocker before Phase 2.
-
----
+Build to the **agentic baseline** in [`agentic-architecture.md`](agentic-architecture.md): the default
+agent ships memory + MCP tools + evals + OTel tracing, all **real in Phase 1**. Retrieval, long-term
+memory, multi-agent, HITL, and durability earn their place in later phases. Before Phase 1, record in
+`02-architecture.md` which stack layers apply and why; each layer is defined once in its pattern doc
+under [`patterns/`](patterns/) — never restate, link.
 
 ## 11. When Stuck
 
-If requirements are unclear:
-1. Stop
-2. List your specific questions in the session report
-3. Ask the user — do not guess
-
-If the spec is ambiguous:
-1. State the ambiguity
-2. Propose an interpretation
-3. Wait for confirmation before implementing
+If requirements are unclear or the spec is ambiguous: stop, write the specific questions in the session
+report, propose an interpretation, and ask the user — do not guess.
 
 ## 12. Closing a Session
 
-Before ending a session:
-- [ ] Working tree is clean (all changes committed and pushed)
-- [ ] Session report is complete and up to date
-- [ ] Tests pass
-- [ ] `README.md` updated if project layout, setup steps, or commands changed
-- [ ] Note which phase you're on and what comes next in the session report
+- [ ] Working tree clean (all changes committed and pushed).
+- [ ] Session report complete and current.
+- [ ] Tests pass.
+- [ ] README updated if layout, setup, or commands changed.
+- [ ] Current phase and next steps noted in the session report.

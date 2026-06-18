@@ -38,8 +38,8 @@ Which language fits the project best? Consider:
 - Deployment target (cloud function vs. long-running service vs. CLI)
 
 **Default stack (recommend unless the user stated otherwise):**
-- **Python 3.12+ for the backend/agent** — agent logic, data work, APIs, CLIs.
-- **Node.js (TypeScript) for any frontend.** The frontend is **always Node.js, never Python** — there is no Python frontend option. Any UI/web surface uses Node.js even when the backend is Python.
+- **Async Python 3.12+ for the backend/agent** — agent logic, data work, APIs, CLIs; async throughout.
+- **Next.js + React + Tailwind (TypeScript) for any frontend.** The frontend is **always Node.js, never Python** — there is no Python frontend option. Any UI/web surface uses Node.js even when the backend is Python.
 
 Override only if the user explicitly chose a different stack:
 - TypeScript everywhere (backend + frontend) if the user asked for it
@@ -57,13 +57,7 @@ State which you recommend and why.
 
 ### 3. LLM Provider and Model
 
-Which LLM is best for this agent's tasks?
-
-Default: **Anthropic Claude** (`claude-sonnet-4-6`) — strong reasoning, tool use, and long context.
-
-Override if: the project has a specific budget constraint, requires a specialized model, or uses a provider the user already has API access to.
-
-Always use the latest available model. As of the knowledge cutoff: Opus 4.7 (`claude-opus-4-7`), Sonnet 4.6 (`claude-sonnet-4-6`), Haiku 4.5 (`claude-haiku-4-5-20251001`).
+The **provider is chosen at intake** — there is no hardcoded default. **Anthropic Claude is recommended** (strong reasoning, tool use, long context), but use the provider the user picked at intake; an API key is required. Pin the specific model from [`spec/engineering/tech-stack.md`](../../spec/engineering/tech-stack.md) § Models — the single source of truth for current model names. Construct the model via LangChain's `init_chat_model` (provider + model from settings), **not** a custom `LLMClient` wrapper — see [`spec/engineering/patterns/llm-providers.md`](../../spec/engineering/patterns/llm-providers.md).
 
 ### 4. Database
 
@@ -72,12 +66,12 @@ Always use the latest available model. As of the knowledge cutoff: Opus 4.7 (`cl
 If no preference was stated, you must flag this as an open question — do not pick autonomously. Include it in "Questions for user before proceeding" with your recommendation and reasoning.
 
 Options:
-- **PostgreSQL** — relational data, multi-tenancy, ACID, production deployments
-- **SQLite** — single-user, local-only, no separate DB process needed
+- **PostgreSQL** — relational data, multi-tenancy, ACID, production deployments; the default for any real project
+- **SQLite** — single-user, local-only demos only; no separate DB process needed
 - **Redis** — caching, queues, or ephemeral state (usually alongside a primary DB)
 - **None** — stateless agent, everything in LLM context or returned directly
 
-**Default recommendation when no preference is stated:** SQLite. It is the default datastore for the recommended stack. Recommend PostgreSQL instead only when the spec clearly requires it (multi-tenancy, concurrent writers, production scale that SQLite cannot serve) — and flag that as the open question for the user to confirm.
+**Default recommendation when no preference is stated:** PostgreSQL — it is the datastore for any real project. Recommend SQLite only for a throwaway demo. Either way, flag the choice as the open question for the user to confirm.
 
 ### 5. API / CLI / UI
 
@@ -91,10 +85,10 @@ Does the spec require:
 
 List the specific libraries for:
 - HTTP calls
-- LLM client
+- LLM client — LangChain `init_chat_model` (not a custom wrapper)
 - Database ORM / ODM
 - Testing
-- Observability / logging
+- Observability / logging — OTel GenAI tracing is baseline (→ [`spec/engineering/patterns/observability-and-evals.md`](../../spec/engineering/patterns/observability-and-evals.md))
 - Any integration-specific libraries
 
 ### 7. Dependency Management
@@ -103,15 +97,19 @@ List the specific libraries for:
 - TypeScript: `pnpm` + `package.json`
 - Go: `go mod`
 
+### 8. Agentic Stack Layers
+
+Decide which of the 10 layers in [`spec/engineering/agentic-architecture.md`](../../spec/engineering/agentic-architecture.md) this agent uses, and pin the tech for each from [`spec/engineering/tech-stack.md`](../../spec/engineering/tech-stack.md) § Agentic Stack Tech. The baseline (model, context, working/short-term memory, MCP tools, evals, OTel observability) is always on and real in Phase 1; decide the earns-its-place ones (retrieval/RAG, long-term memory, multi-agent, HITL, durable execution) based on what the agent's job requires. Retrieval/RAG is **not** baseline — it earns its place in a later phase only when answers depend on a corpus. **Default to LangGraph + MCP.**
+
 ---
 
 ## Your Output
 
 Fill in these files with your decisions:
 
-1. `spec/engineering/tech-stack.md` — complete the template with your decisions
+1. `spec/engineering/tech-stack.md` — complete the template, **including § Agentic Stack Tech** (MCP runtime, tracing/OTel, evals at baseline; vector DB/embeddings and checkpointer only if you chose retrieval/durability)
 2. `spec/engineering/code-style.md` — fill in the language-specific sections
-3. `spec/product/02-architecture.md` — if any sections were left empty (deployment model, components), fill them in now that you know the tech stack
+3. `spec/product/02-architecture.md` — fill empty sections **and § Agentic Stack Layers Used** (which layers + why)
 4. **`spec/product/07-agent-graph.md` — REQUIRED if you chose an agent framework (LangGraph, CrewAI, AutoGen, etc.)**
 
 ### Agent Graph Spec (mandatory when using an agent framework)
@@ -157,8 +155,8 @@ At the end of `spec/engineering/tech-stack.md`, always add a section:
 
 | Phase | Gate command |
 |-------|-------------|
-| 1 | `[test command for unit tests]` |
-| 2 | `[test command for integration tests]` |
+| 1 | `[migration command]` + `[real-model test command]` |
+| 2 | `[test command for the next phase]` |
 ```
 
-These must reflect the actual language and test runner chosen. The agent-builder uses these to run gates without guessing.
+These must reflect the actual language and test runner chosen. Phase 1 runs migrations against the real DB and tests against the **real model** (API key from a CI secret, loose assertions). The agent-builder uses these to run gates without guessing.

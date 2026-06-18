@@ -1,144 +1,127 @@
 # Tech Stack
 
-> **Boilerplate status:** Filled in by the tech-designer sub-agent after the product spec is approved. The user may override specific choices before the tech-designer is invoked.
->
-> **Recommended defaults** (override any of these if the project calls for something different):
-> - **Backend language:** Python 3.12+ (agent logic, data processing, API server)
-> - **Frontend/tooling language:** Node.js 20+ (UI, build tooling, CLI scripts)
-> - **Database:** SQLite (zero-ops, file-based, ships with Python — upgrade to PostgreSQL only when multi-user concurrency requires it)
+> **Boilerplate status:** The FILL-IN sections are completed by the tech-designer sub-agent after the
+> product spec is approved. The user may override any choice; a stated preference is always binding
+> (see `.claude/agents/tech-designer.md`). The **Permanent Rules** at the bottom apply to all projects.
 
 ---
 
-## Language
+## Default Stack (when the user states no preference)
 
-<!-- FILL IN: e.g., Python 3.12 / TypeScript 5 / Go 1.22 -->
-<!-- Recommended: Python 3.12 for backend agent logic; Node.js 20 for any frontend/tooling layer -->
+- **Backend / agent:** Python 3.12+, **async** — agent logic, data processing, API server. The API is
+  async FastAPI and the DB layer is **async SQLAlchemy** (`asyncpg` / `aiosqlite` driver); the agent
+  loop is `async def` throughout. Async is the default, not an upgrade.
+- **Frontend:** Node.js 20+ — **Next.js 15 + React + TailwindCSS**. **The frontend is always Node.js,
+  never Python.** There is no Python frontend option; any UI/web surface is Node.js regardless of backend.
+- **Database:** **PostgreSQL for any real project** (multi-user, durable, `pgvector`-ready). SQLite is
+  for quick demos/prototypes only. Same SQLAlchemy 2.0 code either way — it's a driver/URL change.
+- **LLM provider:** **chosen at intake** (`agent-builder` Q-provider) — Anthropic / OpenAI / Gemini /
+  OpenRouter / other. No hardcoded default; Anthropic is the recommendation, not an assumption.
+- **Dependency management:** `uv` + `pyproject.toml` (Python); `pnpm` or `npm` (Node.js).
 
-**Why:** <!-- reason for this choice -->
+This is the stack the intake question (`agent-builder` Q2) recommends first. The agentic layers built on
+top of it are speced in [`agentic-architecture.md`](agentic-architecture.md); their exact tech is the
+**Agentic Stack Tech** table below.
 
-## Agent Framework
+## Models (source of truth — every other file links here)
 
-<!-- FILL IN: e.g., LangGraph / CrewAI / AutoGen / custom / none -->
+Always use a current, verified model name — never a guessed or deprecated one. The name must be
+configurable via an env var (e.g. `APP_LLM_MODEL`) so it changes without a code deploy. A 404
+`NOT_FOUND` from an LLM API almost always means a wrong/deprecated model name — check the name first.
+Verify against the provider's current docs / `ListModels` before hardcoding.
 
-**Why:** <!-- reason for this choice -->
+The provider is chosen at intake (→ [`patterns/llm-providers.md`](patterns/llm-providers.md)); the model
+is constructed with LangChain `init_chat_model`, so switching is a config change. Pick the default +
+cheap + strong row for whichever provider the user chose.
 
-## LLM Provider
+| Provider | Default | Cheap / fast | Hard reasoning | Notes |
+|----------|---------|--------------|----------------|-------|
+| **Anthropic** (recommended) | `claude-sonnet-4-6` | `claude-haiku-4-5-20251001` | `claude-opus-4-8` | `claude-fable-5` also available |
+| Google Gemini | `gemini-2.5-flash` | `gemini-2.5-flash` | `gemini-2.5-pro` | older `1.5`/`2.0-flash` unavailable to new users |
+| OpenAI | `gpt-4o-mini` | `gpt-4o-mini` | `gpt-4o` | |
 
-<!-- FILL IN: e.g., Anthropic Claude / OpenAI GPT / Google Gemini -->
+## Agentic Stack Tech (source of truth for layers 2–9)
 
-**Model:** <!-- specific model, e.g., claude-sonnet-4-6 -->
+Defaults for the layers in [`agentic-architecture.md`](agentic-architecture.md). Zero-ops choices first;
+the override column is what to reach for at scale. The tech-designer pins the actual choice per project.
 
+| Layer | Default | Override at scale |
+|-------|--------------------|-------------------|
+| Orchestration | **LangGraph** (`StateGraph`) | — (Claude Agent SDK for Claude-native/light) |
+| Model client | **LangChain `init_chat_model`** (provider-agnostic) | direct provider SDK if a feature needs it |
+| Tools / integration | **MCP everywhere** via `mcp` SDK (stdio) — internal *and* external tools | MCP over streamable HTTP; official servers |
+| Memory store | PostgreSQL tables (`memory_records`); SQLite for demos | PostgreSQL + partitioning |
+| Vector / embeddings | **`pgvector`** + provider or local embeddings (`sqlite-vec` for demos) | a dedicated vector DB (Qdrant/Weaviate) |
+| Retrieval rerank | none (top-k) | cross-encoder / LLM reranker |
+| Checkpointer (durability) | **`PostgresSaver`** (`SqliteSaver` for demos) | — |
+| Guardrails | in-process validators + Pydantic | a dedicated guardrails lib if policy grows |
+| Tracing | **OTel GenAI** spans (baseline) → LangSmith / Langfuse / OTLP | aggregate metrics + latency dashboards |
+| Evals | `pytest` + a fixed dataset, real model, loose asserts | LLM-judge + component evals + online judges |
+
+**Raised baseline (real, Phase 1):** the default agent ships layers 1–4 + 9 (model, context,
+working/short-term memory, MCP tools, observability + OTel tracing + an eval skeleton) — **real, not
+stubbed**, from Phase 1. Layer 5 (retrieval/RAG), layer 6 (multi-agent), layer 7 (HITL), layer 8
+(durable execution), and long-term memory are added when they earn their place. See [`phases.md`](phases.md).
+
+---
+
+## To fill in (tech-designer)
+
+### Language & Runtime
+<!-- FILL IN: e.g. Python 3.12 async backend; Node.js 20 frontend. Default stack above unless overridden. -->
 **Why:** <!-- reason -->
 
-## Backend Framework (if applicable)
+### Agent Framework
+<!-- FILL IN: LangGraph (conditional routing / checkpointing) · simple loop · none -->
+**Why:** <!-- reason -->
 
-<!-- FILL IN: e.g., FastAPI / Express / Django / none -->
-<!-- Recommended: FastAPI (Python) for agent APIs -->
+### LLM Provider & Model
+<!-- FILL IN: provider chosen at intake + a specific model from the Models table above; built via
+     init_chat_model. -->
+**Why:** <!-- reason -->
 
-## Database (if applicable)
+### Backend Framework
+<!-- FILL IN: async FastAPI (Python, recommended) · Express · none -->
 
-<!-- FILL IN: e.g., SQLite / PostgreSQL / Redis / none -->
-<!-- Recommended: SQLite — file-based, zero configuration, built into Python's stdlib. Sufficient for single-user and low-concurrency workloads. Upgrade to PostgreSQL only when multi-user writes or full-text search require it. -->
+### Database & ORM
+<!-- FILL IN: PostgreSQL (default for real projects) / SQLite (demos only) — see § Database & Tests.
+     ORM: async SQLAlchemy 2.0 (asyncpg for Postgres, aiosqlite for SQLite). -->
 
-**ORM/ODM:** <!-- e.g., SQLAlchemy 2.0 / Prisma / none -->
-<!-- Recommended: SQLAlchemy 2.0 (Python) — works with both SQLite and PostgreSQL, so upgrades are migration-only -->
+### Frontend
+<!-- FILL IN: Node.js only — Next.js 15 + React + TailwindCSS (default). Never Python. -->
 
-## Frontend (if applicable)
-
-<!-- FILL IN: e.g., Next.js 15 / React / Vue / none -->
-<!-- Recommended: Node.js 20 + a lightweight framework (e.g. Vite + React) for any browser UI -->
-
-## Key Libraries
-
-<!-- FILL IN: List the important libraries and what each does. -->
+### Key Libraries
+<!-- FILL IN: HTTP client, LLM client, ORM, testing, logging, integration-specific libs. -->
 
 | Library | Version | Purpose |
 |---------|---------|---------|
-| <!-- name --> | <!-- version --> | <!-- purpose --> |
+| | | |
 
-## What to Avoid
-
-<!-- FILL IN: Libraries, patterns, or approaches that are explicitly off-limits and why. -->
-
-## Dependency Management
-
-<!-- FILL IN: e.g., uv + pyproject.toml / npm / pnpm / go modules -->
-<!-- Recommended: uv + pyproject.toml (Python); npm or pnpm (Node.js) -->
+### What to Avoid
+<!-- FILL IN: libraries/patterns explicitly off-limits and why. -->
 
 ---
 
-## Permanent Rules (apply to all projects, not filled in by tech-designer)
+## Permanent Rules (all projects)
 
-### Recommended Default Stack
+### Database & Tests (canonical home)
 
-When the user states no preference, the **recommended default stack** is:
+- **Driver in main dependencies.** The DB driver (e.g. `psycopg2-binary` for PostgreSQL) goes in
+  `[project.dependencies]`, never a dev-only group. Alembic migrations run at deploy/setup time, not
+  just in tests — a dev-only driver makes `alembic upgrade head` fail wherever dev deps aren't installed.
+- **Tests use the same driver as production.** If production is PostgreSQL (the default for real
+  projects), tests run against PostgreSQL — tests that only pass on SQLite are not a passing gate. If
+  production is SQLite (demos), SQLite tests are correct.
+- **Test DB is set up automatically** via `conftest.py` (`Base.metadata.create_all` against the test DB
+  URL, dropped after). No manual steps. The URL comes from an env var (`TEST_DATABASE_URL`, or a
+  `_test` database via `DATABASE_URL`), provided by a gitignored `.env.test` or a CI variable, and the
+  README documents it.
+- **The LLM is real in tests** — the API key is set (locally from `.env`, in CI from a secret). Tests
+  assert loosely (structure + non-empty) to absorb output variance; there is no stub
+  (`patterns/llm-providers.md`).
 
-- **Backend / agent:** Python 3.12+
-- **Frontend:** Node.js (TypeScript / Next.js)
-- **Database:** SQLite
+### Default Dev Port — 8001
 
-This is the stack the intake question (`agent-builder` Q2) recommends first. The user may override any part of it by choosing another option — their stated preference is always binding (see `.claude/agents/tech-designer.md` § "User Preferences Are Binding").
-
-**The frontend is always Node.js, never Python.** Any UI/web surface is built in Node.js (TypeScript/Next.js) regardless of the backend language. There is no Python frontend option. Python is for the backend/agent only.
-
-### Default Dev Port
-
-All generated projects **must** use **port 8001** as the default development port (not 8000).
-
-Reason: Port 8000 is commonly occupied by other local services (other FastAPI apps, Django, http.server, etc.). Using 8001 avoids startup failures with no code change needed.
-
-- `__main__.py` must hard-code `port=8001` (not 8000) unless overridden by an env var
-- README must reference `http://localhost:8001`
-- `.env.example` should include `PORT=8001` if the port is configurable
-
-### LLM Model Name Rule
-
-**Always use a current, verified model name — never a deprecated or guessed one.**
-
-- For Google Gemini: use **`gemini-2.0-flash`** as the default (not `gemini-1.5-flash` — deprecated and removed from the API).
-- Model names change. Before hardcoding any model identifier, verify it exists by calling the provider's `ListModels` API or checking current documentation.
-- The model name must be configurable via an env var (e.g. `APPNAME_LLM_MODEL`) so it can be changed without a code deployment.
-- A 404 NOT_FOUND error from the LLM API almost always means the model name is wrong — check the name first before debugging anything else.
-
-Current safe defaults (as of 2026):
-
-| Provider | Default model | Notes |
-|----------|---------------|-------|
-| Google Gemini | `gemini-2.5-flash` | `gemini-2.0-flash` and `gemini-1.5-flash` unavailable for new users |
-| OpenAI | `gpt-4o-mini` | |
-| Anthropic | `claude-3-5-haiku-latest` | |
-
-### DB Driver Rule
-
-The database driver (e.g. `psycopg2-binary` for PostgreSQL, `asyncpg` for async PostgreSQL) **must be declared in the main `[project.dependencies]` block**, never in `[dependency-groups.dev]` or equivalent dev-only groups.
-
-Reason: Alembic migrations run at deploy/setup time, not just in tests. If the driver is dev-only, `alembic upgrade head` fails in any environment that didn't install dev deps.
-
-### Test Environment Rule
-
-**Tests must use the same database driver as production.** If the production DB is PostgreSQL, tests run against PostgreSQL — not SQLite.
-
-- Tests that pass on SQLite but were never run against PostgreSQL are **not a passing gate**.
-- The test database must be set up automatically. Use `conftest.py` to create and tear down the test database. No manual steps.
-- The test database URL is provided via environment variable (e.g. `TEST_DATABASE_URL` or reuse the app's `DATABASE_URL` pointing at a `_test` database). The `conftest.py` session fixture creates all tables before tests run and drops them after.
-- A `.env.test` file (gitignored) or CI environment variable provides the test DB URL. The README must document this.
-
-Example `conftest.py` pattern for PostgreSQL + SQLAlchemy (sync):
-
-```python
-import pytest
-from sqlalchemy import create_engine, text
-from yourapp.db.models import Base
-from yourapp.config.settings import get_settings
-
-@pytest.fixture(scope="session", autouse=True)
-def _setup_test_db():
-    settings = get_settings()
-    engine = create_engine(settings.database_url)
-    Base.metadata.create_all(engine)
-    yield
-    Base.metadata.drop_all(engine)
-    engine.dispose()
-```
-
-The `DATABASE_URL` in `.env` (or `.env.test`) must point at a real PostgreSQL test database before running tests.
+All generated projects use **port 8001** (not 8000, which is commonly occupied by other local
+services). `__main__.py` hard-codes `port=8001` unless an env var overrides it; the README references
+`http://localhost:8001`; `.env.example` includes `PORT=8001` if configurable.
