@@ -26,6 +26,7 @@ def _message_dict(m: Message) -> dict:
         "role": m.role,
         "content": m.content,
         "result_table": m.result_table_json,
+        "chart": m.chart_json,
         "trace": m.trace_json,
         "created_at": m.created_at.isoformat(),
     }

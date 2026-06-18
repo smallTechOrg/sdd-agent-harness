@@ -85,6 +85,7 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     result_table_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    chart_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     trace_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 

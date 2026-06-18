@@ -11,9 +11,11 @@ checkpointer (all deferred).
 
 ## Pre-coding answers (per `react-agent.md` § Spec it before coding)
 
-1. **Action the LLM generates:** either a tool call to `inspect_schema` (list tables/columns/types +
-   sample rows) or a tool call to `run_sql` with a **read-only SQL `SELECT`** string; or the `finish`
-   tool when it has the answer.
+1. **Action the LLM generates:** a tool call to `inspect_schema` (list tables/columns/types + sample
+   rows); `run_sql` with a **read-only SQL `SELECT`** string; `suggest_chart(chart_type, x_column,
+   y_column, title)` to attach a bar/line/pie chart built from the last `run_sql` result (Phase 3,
+   [`capabilities/04-visualizations.md`](capabilities/04-visualizations.md)); or the `finish` tool when
+   it has the answer.
 2. **`finish` tool signature:** `finish(answer: str)` — `answer` is the plain-English explanation.
    The result table to render is attached automatically from the last successful `run_sql` (carried in
    `state["result_table"]`), **not** passed back through the tool: Gemini's function-calling schema
@@ -52,6 +54,7 @@ class AgentState(TypedDict):
 
     # Pipeline data
     result_table: dict | None    # {"columns": [...], "rows": [[...]]} from last successful run_sql
+    chart: dict | None           # {"type","title","x","y","data":[...]} from suggest_chart (Phase 3)
     final_answer: str | None     # plain-English answer (set at finalize/force_finalize)
 
     # Control
@@ -168,9 +171,9 @@ Router after `node_plan_action`: if the model called `finish` → `node_finalize
 
 - Reads: `state.run_id`, `state.last_tool_call` (the `finish` args), `state.result_table`,
   `state.action_history`, usage fields.
-- Sets `final_answer` from the `finish` tool's `answer`; attaches `result_table`.
+- Sets `final_answer` from the `finish` tool's `answer`; attaches `result_table` and `chart` (if set).
 - Updates DB: `run` status → `completed`, `completed_at`; persists `action_history` + usage; writes the
-  assistant `message` (content + `result_table_json` + `trace_json`).
+  assistant `message` (content + `result_table_json` + `chart_json` + `trace_json`).
 - Logs a run summary. Does **not** release the session-scoped DuckDB engine.
 
 ---

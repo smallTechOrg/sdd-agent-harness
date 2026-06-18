@@ -19,6 +19,7 @@ class AgentState(TypedDict, total=False):
 
     # Pipeline data
     result_table: dict[str, Any] | None
+    chart: dict[str, Any] | None
     final_answer: str | None
 
     # Control

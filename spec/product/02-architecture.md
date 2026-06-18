@@ -2,9 +2,8 @@
 
 ## System Overview
 
-DataChat is an async **FastAPI** + **SSE** service. (A **Next.js/React/Tailwind** chat UI is specced in
-[`06-ui.md`](06-ui.md) but **deferred to a later phase** — see [`01-vision.md`](01-vision.md) § Future
-Phases; this release exposes the HTTP/SSE API only.) A user creates
+DataChat is an async **FastAPI** + **SSE** service fronting a **Next.js/React/Tailwind** chat UI
+([`06-ui.md`](06-ui.md), Phase 3). A user creates
 a dataset and uploads CSV files; the backend parses each CSV, infers its schema, and materializes it as
 a table in an in-process **DuckDB** analytical engine. The user then chats about the dataset: each
 question runs a **LangGraph ReAct agent** that uses **Google Gemini** (`gemini-2.5-flash`) to inspect
@@ -23,14 +22,14 @@ layer real from Phase 1.
 | 2 Context | ✅ baseline | System prompt assembles: SQL-analyst role + read-only contract + dataset **schema** + a small **row sample** + recent conversation turns + the loop's `action_history`. Built once in `context.build(...)` — [`memory-and-context.md`](../engineering/patterns/memory-and-context.md). |
 | 3 Memory — working/short-term | ✅ baseline | **Working** = LangGraph `AgentState` (`action_history`, query results) per run. **Short-term** = conversation turns (`messages` table) + the session-scoped DuckDB connection keyed by dataset/conversation, enabling multi-turn follow-ups. |
 | 3 Memory — long-term | ❌ no | The agent does not need to remember anything across conversations; each conversation is self-contained against one dataset. Deferred (Future Phases). |
-| 4 Tools / MCP | ✅ baseline | Two real **MCP tools** over the dataset's DuckDB: `inspect_schema` (list tables/columns/types + sample rows) and `run_sql` (execute a **read-only** SELECT). Plus the structured `finish` tool. Local `stdio` MCP server in `mcp/servers/`. |
+| 4 Tools / MCP | ✅ baseline | Real **MCP tools** over the dataset's DuckDB: `inspect_schema` (list tables/columns/types + sample rows), `run_sql` (execute a **read-only** SELECT), and `suggest_chart` (build a bar/line/pie spec from the last result — Phase 3, [`capabilities/04-visualizations.md`](capabilities/04-visualizations.md)). Plus the structured `finish` tool. Local `stdio` MCP server in `mcp/servers/`. |
 | 5 Retrieval / RAG | ❌ no | Answers come from running SQL over structured data, not from an unstructured knowledge corpus. No embeddings/vector store. Deferred. |
 | 6 Multi-agent | ❌ no | A single ReAct loop keeps NL→SQL coherent; no sub-task decomposition needs separate agents. Default single-agent ([`react-agent.md`](../engineering/patterns/react-agent.md)). |
 | 7 Guardrails — action-safety | ✅ baseline | Every model-generated SQL string is validated **read-only** (parse → reject non-SELECT / DDL / DML / multi-statement / dangerous functions) before execution. Defined in [`07-agent-graph.md`](07-agent-graph.md) § action-safety. |
 | 7 Guardrails — input/output + HITL | ❌ no | Input is the user's own uploaded data (not untrusted third-party content), and read-only SELECTs are not irreversible/high-stakes — no human approval gate needed. Deferred. |
 | 8 Durability / checkpointing | ❌ no | A run is a single short question→answer cycle (seconds); no long/resumable runs to survive a restart. No LangGraph checkpointer in v1. Deferred. |
 | 9 Observability + evals | ✅ baseline | Structured per-`run_id` logs, token/cost on each `run`, **OTel GenAI traces**, and an eval skeleton (fixed CSV + reference-SQL question cases, ≥1 loose assertion, run in CI against real Gemini). |
-| 10 Interface / serving | ✅ baseline (API); UI deferred | Async **FastAPI** REST + **SSE** streaming is the Phase-1 trigger. The **Next.js + React + Tailwind** chat UI in [`06-ui.md`](06-ui.md) is **deferred to a later phase** ([`01-vision.md`](01-vision.md) § Future Phases) — the API is exercised by tests + curl until then. See [`05-api.md`](05-api.md). |
+| 10 Interface / serving | ✅ | Async **FastAPI** REST + **SSE** streaming (Phase 1) + a **Next.js + React + Tailwind** chat UI under `frontend/` with chart rendering (Phase 3, [`06-ui.md`](06-ui.md)). Trigger = HTTP API + UI. See [`05-api.md`](05-api.md). |
 
 ## Component Map
 

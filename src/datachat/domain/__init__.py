@@ -1,4 +1,6 @@
 from datachat.domain.conversation import (
+    ChartPoint,
+    ChartSpec,
     ConversationCreate,
     ConversationRead,
     MessageRead,
@@ -15,6 +17,8 @@ from datachat.domain.dataset import (
 )
 
 __all__ = [
+    "ChartPoint",
+    "ChartSpec",
     "ColumnSchema",
     "ConversationCreate",
     "ConversationRead",

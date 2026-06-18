@@ -75,6 +75,7 @@ One turn in a conversation — a user question or an assistant answer. The short
 | role | enum (`user` / `assistant`) | yes | Who produced the turn |
 | content | text | yes | The question text, or the assistant's plain-English answer |
 | result_table_json | json | no | Result rows + headers for an assistant answer (null for user turns) |
+| chart_json | json | no | Chart spec (`type`/`title`/`x`/`y`/`data`) for an assistant answer, when the agent called `suggest_chart` (Phase 3); null otherwise |
 | trace_json | json | no | The `action_history` (description/result per step) for the assistant turn |
 | created_at | datetime (naive UTC) | yes | When created |
 

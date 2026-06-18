@@ -17,7 +17,11 @@ from datachat.llm.model import get_model, usage_from_response
 from datachat.memory import context
 from datachat.observability.events import estimate_cost_usd, get_logger, span
 from datachat.prompts import load
-from datachat.tools.sql_tools import tool_inspect_schema, tool_run_sql
+from datachat.tools.sql_tools import (
+    tool_inspect_schema,
+    tool_run_sql,
+    tool_suggest_chart,
+)
 
 _RESULT_PREVIEW_CHARS = 4000
 
@@ -137,6 +141,18 @@ def node_execute_action(state: AgentState) -> AgentState:
                 updates["result_table"] = json.loads(result)
             except json.JSONDecodeError:
                 pass
+    elif name == "suggest_chart":
+        ctype = args.get("chart_type", "")
+        x = args.get("x_column", "")
+        y = args.get("y_column", "")
+        title = args.get("title", "")
+        description = f"Building a {ctype or 'chart'} of {y or '?'} by {x or '?'}."
+        with span("tool.suggest_chart"):
+            result, chart = tool_suggest_chart(state.get("result_table"), ctype, x, y, title)
+        is_error = result.startswith("ERROR:")
+        action = f"suggest_chart(type={ctype}, x={x}, y={y})"
+        if chart is not None:
+            updates["chart"] = chart
     else:
         description = f"Unknown tool '{name}'."
         result = f"ERROR: unknown tool '{name}'"
@@ -165,7 +181,8 @@ def node_finalize(state: AgentState) -> AgentState:
     _logger(state).info("run.complete", node="finalize",
                         tokens_input=state.get("tokens_input"),
                         tokens_output=state.get("tokens_output"))
-    return {**state, "final_answer": answer, "result_table": result_table}
+    return {**state, "final_answer": answer, "result_table": result_table,
+            "chart": state.get("chart")}
 
 
 def node_force_finalize(state: AgentState) -> AgentState:

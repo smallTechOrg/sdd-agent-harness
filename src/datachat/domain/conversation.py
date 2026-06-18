@@ -13,6 +13,19 @@ class ResultTable(BaseModel):
     rows: list[list[Any]]
 
 
+class ChartPoint(BaseModel):
+    x: Any
+    y: Any
+
+
+class ChartSpec(BaseModel):
+    type: str
+    title: str
+    x: str
+    y: str
+    data: list[ChartPoint]
+
+
 class TraceStep(BaseModel):
     description: str
     action: str
@@ -27,6 +40,7 @@ class MessageRead(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     result_table: ResultTable | None = None
+    chart: ChartSpec | None = None
     trace: list[TraceStep] | None = None
     created_at: datetime
 

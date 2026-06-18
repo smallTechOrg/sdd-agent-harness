@@ -132,6 +132,7 @@ async def run_agent(
         role="assistant",
         content=final.get("final_answer") or "Done.",
         result_table_json=final.get("result_table"),
+        chart_json=final.get("chart"),
         trace_json=final.get("action_history"),
     )
     session.add(assistant)

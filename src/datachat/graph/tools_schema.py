@@ -10,7 +10,11 @@ from __future__ import annotations
 
 from langchain_core.tools import tool
 
-from datachat.tools.sql_tools import INSPECT_SCHEMA_DESC, RUN_SQL_DESC
+from datachat.tools.sql_tools import (
+    INSPECT_SCHEMA_DESC,
+    RUN_SQL_DESC,
+    SUGGEST_CHART_DESC,
+)
 
 
 @tool(description=INSPECT_SCHEMA_DESC)
@@ -25,6 +29,12 @@ def run_sql(sql: str) -> str:
     return ""
 
 
+@tool(description=SUGGEST_CHART_DESC)
+def suggest_chart(chart_type: str, x_column: str, y_column: str, title: str) -> str:
+    """Attach a chart built from the last run_sql result. Skip when a chart doesn't help."""
+    return ""
+
+
 @tool(description="Finish: return the final plain-English answer. The result table from your last "
                   "successful run_sql is attached automatically — you do not pass it here.")
 def finish(answer: str) -> str:
@@ -32,4 +42,4 @@ def finish(answer: str) -> str:
     return ""
 
 
-TOOLS = [inspect_schema, run_sql, finish]
+TOOLS = [inspect_schema, run_sql, suggest_chart, finish]
