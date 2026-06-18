@@ -25,13 +25,10 @@ def run_sql(sql: str) -> str:
     return ""
 
 
-@tool(description="Finish: return the final plain-English answer plus the supporting result table.")
-def finish(
-    answer: str,
-    result_columns: list[str] | None = None,
-    result_rows: list[list] | None = None,
-) -> str:
-    """Call when you have the answer. Pass the columns/rows from your last run_sql."""
+@tool(description="Finish: return the final plain-English answer. The result table from your last "
+                  "successful run_sql is attached automatically — you do not pass it here.")
+def finish(answer: str) -> str:
+    """Call when you have the answer (plain English). The last query's table is attached for you."""
     return ""
 
 

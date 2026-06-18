@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from datachat.data import engine
 from datachat.data.ingest import ingest_csv
-from datachat.db.models import Conversation, Dataset, EvalResult
+from datachat.db.models import Conversation, Dataset, EvalResult, File
 from datachat.graph.runner import run_agent
 from evals.dataset import EVAL_CASES, EVAL_CSV
 
@@ -33,7 +33,18 @@ async def run_evals(session: AsyncSession) -> list[EvalResult]:
     ds = Dataset(id=dataset_id, name="eval-fixture")
     session.add(ds)
     await session.commit()
-    ingest_csv(dataset_id, "eval.csv", EVAL_CSV)
+    res = ingest_csv(dataset_id, "eval.csv", EVAL_CSV)
+    session.add(
+        File(
+            dataset_id=dataset_id,
+            filename="eval.csv",
+            duckdb_table=res.duckdb_table,
+            schema_json=res.schema_columns,
+            sample_rows_json=res.sample_rows,
+            row_count=res.row_count,
+        )
+    )
+    await session.commit()
 
     results: list[EvalResult] = []
     try:

@@ -15,7 +15,7 @@ import pytest
 from datachat.config.settings import get_settings
 from datachat.data import engine
 from datachat.data.ingest import ingest_csv
-from datachat.db.models import Conversation, Dataset
+from datachat.db.models import Conversation, Dataset, File
 from datachat.graph.runner import run_agent
 
 CSV = b"region,product,sales\nwest,widget,100\neast,widget,200\nwest,gadget,50\neast,gadget,75\n"
@@ -32,7 +32,17 @@ async def test_real_react_loop_answers_with_table(db_session):
     ds = Dataset(id=dataset_id, name="sales")
     db_session.add(ds)
     await db_session.commit()
-    ingest_csv(dataset_id, "sales.csv", CSV)
+    res = ingest_csv(dataset_id, "sales.csv", CSV)
+    db_session.add(
+        File(
+            dataset_id=dataset_id,
+            filename="sales.csv",
+            duckdb_table=res.duckdb_table,
+            schema_json=res.schema_columns,
+            sample_rows_json=res.sample_rows,
+            row_count=res.row_count,
+        )
+    )
     conv = Conversation(dataset_id=dataset_id)
     db_session.add(conv)
     await db_session.commit()
@@ -65,7 +75,17 @@ async def test_force_finalize_past_max_iterations(db_session, monkeypatch):
     ds = Dataset(id=dataset_id, name="sales")
     db_session.add(ds)
     await db_session.commit()
-    ingest_csv(dataset_id, "sales.csv", CSV)
+    res = ingest_csv(dataset_id, "sales.csv", CSV)
+    db_session.add(
+        File(
+            dataset_id=dataset_id,
+            filename="sales.csv",
+            duckdb_table=res.duckdb_table,
+            schema_json=res.schema_columns,
+            sample_rows_json=res.sample_rows,
+            row_count=res.row_count,
+        )
+    )
     conv = Conversation(dataset_id=dataset_id)
     db_session.add(conv)
     await db_session.commit()

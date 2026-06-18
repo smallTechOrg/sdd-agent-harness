@@ -14,9 +14,11 @@ checkpointer (all deferred).
 1. **Action the LLM generates:** either a tool call to `inspect_schema` (list tables/columns/types +
    sample rows) or a tool call to `run_sql` with a **read-only SQL `SELECT`** string; or the `finish`
    tool when it has the answer.
-2. **`finish` tool signature:** `finish(answer: str, result_columns: list[str] | None,
-   result_rows: list[list] | None)` — `answer` is the plain-English explanation; the result fields
-   carry the table to render (populated from the last successful `run_sql`).
+2. **`finish` tool signature:** `finish(answer: str)` — `answer` is the plain-English explanation.
+   The result table to render is attached automatically from the last successful `run_sql` (carried in
+   `state["result_table"]`), **not** passed back through the tool: Gemini's function-calling schema
+   rejects a nested `list[list]` parameter (`items.items: missing field`), and re-sending rows the
+   agent already retrieved is redundant. `node_finalize` reads `state["result_table"]`.
 3. **Recoverable vs. fatal:** a bad/invalid SQL query, a read-only-guard rejection, or a DuckDB
    execution error is **recoverable** — append to `action_history`, loop back to `plan_action`. An LLM
    call failure, or the dataset's DuckDB engine being missing, is **fatal** → `handle_error`.

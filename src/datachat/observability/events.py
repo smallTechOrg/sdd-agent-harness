@@ -7,6 +7,7 @@ spans wrap each Gemini call and tool call. Never log dataset rows, raw CSV, or t
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 
 import structlog
 from opentelemetry import trace
@@ -42,13 +43,13 @@ def get_logger(**bind):
     return structlog.get_logger().bind(**bind)
 
 
+@contextmanager
 def span(name: str, **attrs):
     """Context manager for an OTel GenAI span around a model/tool call."""
-    cm = _tracer.start_as_current_span(name)
-    span_obj = cm.__enter__()
-    for k, v in attrs.items():
-        span_obj.set_attribute(k, v)
-    return cm
+    with _tracer.start_as_current_span(name) as span_obj:
+        for k, v in attrs.items():
+            span_obj.set_attribute(k, v)
+        yield span_obj
 
 
 def estimate_cost_usd(tokens_input: int, tokens_output: int) -> float:

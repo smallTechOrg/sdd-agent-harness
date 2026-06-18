@@ -22,6 +22,21 @@ from datachat.tools.sql_tools import tool_inspect_schema, tool_run_sql
 _RESULT_PREVIEW_CHARS = 4000
 
 
+def _as_text(content: Any) -> str:
+    """Gemini may return content as a list of blocks (extended thinking) — flatten to text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+        return "".join(parts)
+    return str(content) if content is not None else ""
+
+
 def _logger(state: AgentState):
     return get_logger(
         run_id=state.get("run_id"),
@@ -74,7 +89,7 @@ def node_plan_action(state: AgentState) -> AgentState:
         last = {"name": calls[0]["name"], "args": calls[0].get("args", {})}
     else:
         # No tool call — treat the prose as a finish answer so the loop still terminates.
-        last = {"name": "finish", "args": {"answer": response.content or ""}}
+        last = {"name": "finish", "args": {"answer": _as_text(response.content)}}
 
     log.info("agent.plan", node="plan_action", tool=last["name"])
     return {
@@ -145,10 +160,8 @@ def _describe_sql(sql: str) -> str:
 def node_finalize(state: AgentState) -> AgentState:
     """The model called finish — set the answer + result table from its args."""
     args = state["last_tool_call"].get("args", {})
-    answer = args.get("answer", "") or "Done."
-    result_table = state.get("result_table")
-    if args.get("result_columns") and args.get("result_rows"):
-        result_table = {"columns": args["result_columns"], "rows": args["result_rows"]}
+    answer = _as_text(args.get("answer", "")) or "Done."
+    result_table = state.get("result_table")  # carried from the last successful run_sql
     _logger(state).info("run.complete", node="finalize",
                         tokens_input=state.get("tokens_input"),
                         tokens_output=state.get("tokens_output"))
@@ -167,7 +180,7 @@ def node_force_finalize(state: AgentState) -> AgentState:
     try:
         with span("gemini.force_finalize"):
             response = get_model().invoke(prompt)
-        answer = response.content or "I could not fully answer within the step limit."
+        answer = _as_text(response.content) or "I could not fully answer within the step limit."
         tin, tout = usage_from_response(response)
     except Exception as exc:
         log.error("run.error", node="force_finalize", error=str(exc))
