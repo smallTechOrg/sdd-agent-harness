@@ -2,7 +2,9 @@
 
 ## System Overview
 
-DataChat is an async **FastAPI** service fronting a **Next.js/React/Tailwind** chat UI. A user creates
+DataChat is an async **FastAPI** + **SSE** service. (A **Next.js/React/Tailwind** chat UI is specced in
+[`06-ui.md`](06-ui.md) but **deferred to a later phase** — see [`01-vision.md`](01-vision.md) § Future
+Phases; this release exposes the HTTP/SSE API only.) A user creates
 a dataset and uploads CSV files; the backend parses each CSV, infers its schema, and materializes it as
 a table in an in-process **DuckDB** analytical engine. The user then chats about the dataset: each
 question runs a **LangGraph ReAct agent** that uses **Google Gemini** (`gemini-2.5-flash`) to inspect
@@ -28,7 +30,7 @@ layer real from Phase 1.
 | 7 Guardrails — input/output + HITL | ❌ no | Input is the user's own uploaded data (not untrusted third-party content), and read-only SELECTs are not irreversible/high-stakes — no human approval gate needed. Deferred. |
 | 8 Durability / checkpointing | ❌ no | A run is a single short question→answer cycle (seconds); no long/resumable runs to survive a restart. No LangGraph checkpointer in v1. Deferred. |
 | 9 Observability + evals | ✅ baseline | Structured per-`run_id` logs, token/cost on each `run`, **OTel GenAI traces**, and an eval skeleton (fixed CSV + reference-SQL question cases, ≥1 loose assertion, run in CI against real Gemini). |
-| 10 Interface / serving | ✅ | Async **FastAPI** REST + **SSE** streaming; **Next.js + React + Tailwind** chat UI. Trigger = HTTP API + UI. See [`05-api.md`](05-api.md), [`06-ui.md`](06-ui.md). |
+| 10 Interface / serving | ✅ baseline (API); UI deferred | Async **FastAPI** REST + **SSE** streaming is the Phase-1 trigger. The **Next.js + React + Tailwind** chat UI in [`06-ui.md`](06-ui.md) is **deferred to a later phase** ([`01-vision.md`](01-vision.md) § Future Phases) — the API is exercised by tests + curl until then. See [`05-api.md`](05-api.md). |
 
 ## Component Map
 
@@ -81,7 +83,7 @@ Observability: OTel GenAI traces · token/cost on run · structured run_id logs 
 |------------|---------|--------------|
 | Google Gemini API | LLM for the ReAct loop (NL→SQL planning + answer) | Fail loud; the run records `error`, API returns `api_error("LLM_UNAVAILABLE", …)`. |
 | SQLite | App metadata (datasets, files, conversations, messages, runs) | Startup fails loud if unreachable; request returns `api_error`. |
-| DuckDB (in-process) | Analytical engine executing read-only SQL over dataset data | If the dataset's in-memory table is missing (e.g. after restart), API returns a clear "dataset not loaded — re-materialize" error, not a 500. |
+| DuckDB (file-backed, one per dataset) | Analytical engine executing read-only SQL over dataset data; persists across restarts | If the dataset's DuckDB file is missing (e.g. deleted), API returns a clear "dataset not loaded — please re-upload" error, not a 500. |
 
 ## Deployment Model
 

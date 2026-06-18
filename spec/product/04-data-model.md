@@ -126,8 +126,9 @@ A score for one eval case (NL question against a fixture dataset vs. a reference
 - **Deleted** — deleting a dataset removes its files, conversations, messages, runs, **and** drops its
   DuckDB tables (releasing the session-scoped engine resource per
   [`react-agent.md`](../engineering/patterns/react-agent.md) § Resource lifecycle).
-- **Volatility** — DuckDB tables live in the in-process engine; on a process restart they must be
-  **re-materialized** from the stored files (or the dataset is reported as "not loaded"). SQLite
+- **Volatility** — each dataset's DuckDB tables live in a **file-backed** DuckDB (`.duckdb_store/<dataset_id>.duckdb`),
+  so they **persist across process restarts**. If that file is missing (e.g. deleted), the API reports
+  the dataset as "not loaded" with an actionable re-upload message rather than answering wrongly. SQLite
   metadata is durable.
 
 ## Sensitive Data

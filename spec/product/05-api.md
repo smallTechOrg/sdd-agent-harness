@@ -2,10 +2,11 @@
 
 ## API Style
 
-Async **FastAPI** REST API + **Next.js** UI (the default trigger). Every route returns the standard
-JSON envelope — `ok(data)` on success or `api_error(code, message, status)` on failure
-([`../engineering/code-style.md`](../engineering/code-style.md) § Errors are JSON). Errors are never an
-HTML page; the frontend renders them.
+Async **FastAPI** REST API with **SSE** streaming (the default trigger for this release; a Next.js chat
+UI is **deferred to a later phase** — see [`01-vision.md`](01-vision.md) § Future Phases). Every route
+returns the standard JSON envelope — `ok(data)` on success or `api_error(code, message, status)` on
+failure ([`../engineering/code-style.md`](../engineering/code-style.md) § Errors are JSON). Errors are
+never an HTML page; a client renders them.
 
 **Interaction model:** **multi-turn chat.** A conversation is bound to one dataset; each question is a
 turn whose answer streams back over **Server-Sent Events (SSE)**.
@@ -30,16 +31,15 @@ Envelope shape:
 { "name": "string — dataset name, e.g. \"Q1 Sales\"" }
 ```
 
-**Response:**
+**Response:** `201` —
 ```json
-{ "ok": true, "data": { "id": "uuid", "name": "string", "created_at": "datetime" } }
+{ "ok": true, "data": { "id": "uuid", "name": "string", "created_at": "datetime", "files": [] } }
 ```
 
 **Error cases:**
 | Status | Condition |
 |--------|-----------|
-| 400 | missing/empty name (`VALIDATION_ERROR`) |
-| 500 | DB error (`DB_ERROR`) |
+| 422 | missing/empty name (Pydantic validation) |
 
 ---
 
@@ -49,13 +49,15 @@ Envelope shape:
 
 **Request:** `multipart/form-data` with one or more `files` parts (CSV).
 
-**Response:**
+**Response:** `201` — each file's inferred columns are under `schema_columns`:
 ```json
 { "ok": true, "data": {
   "dataset_id": "uuid",
   "files": [
-    { "id": "uuid", "filename": "sales_2024.csv", "row_count": 1200,
-      "schema": [ { "name": "region", "type": "VARCHAR" }, { "name": "sales", "type": "DOUBLE" } ] }
+    { "id": "uuid", "dataset_id": "uuid", "filename": "sales_2024.csv", "duckdb_table": "ds_...",
+      "row_count": 1200,
+      "schema_columns": [ { "name": "region", "type": "object" }, { "name": "sales", "type": "int64" } ],
+      "created_at": "datetime" }
   ]
 } }
 ```
@@ -63,24 +65,24 @@ Envelope shape:
 **Error cases:**
 | Status | Condition |
 |--------|-----------|
-| 400 | non-CSV upload (`UNSUPPORTED_FORMAT`) or malformed CSV (`CSV_PARSE_ERROR`) |
+| 413 | file exceeds the upload size limit (`FILE_TOO_LARGE`) |
+| 422 | empty/unparseable CSV (`BAD_CSV`) |
 | 404 | dataset not found (`NOT_FOUND`) |
-| 500 | DB/DuckDB load error (`DB_ERROR`) |
 
 ---
 
 ### `GET /datasets`
 
-**Purpose:** List datasets (id, name, file count) for the dataset picker.
+**Purpose:** List datasets (with their files) for the dataset picker, newest first.
 
-**Response:**
+**Response:** `data` is an array of dataset objects (same shape as `GET /datasets/{id}`):
 ```json
-{ "ok": true, "data": { "datasets": [
-  { "id": "uuid", "name": "Q1 Sales", "file_count": 2, "created_at": "datetime" }
-] } }
+{ "ok": true, "data": [
+  { "id": "uuid", "name": "Q1 Sales", "created_at": "datetime",
+    "files": [ { "id": "uuid", "filename": "sales_2024.csv", "row_count": 1200,
+                 "schema_columns": [ { "name": "region", "type": "object" } ] } ] }
+] }
 ```
-
-**Error cases:** 500 (`DB_ERROR`).
 
 ---
 
@@ -91,13 +93,23 @@ Envelope shape:
 **Response:**
 ```json
 { "ok": true, "data": {
-  "id": "uuid", "name": "Q1 Sales",
+  "id": "uuid", "name": "Q1 Sales", "created_at": "datetime",
   "files": [ { "id": "uuid", "filename": "sales_2024.csv", "row_count": 1200,
-              "schema": [ { "name": "region", "type": "VARCHAR" } ] } ]
+              "schema_columns": [ { "name": "region", "type": "object" } ] } ]
 } }
 ```
 
-**Error cases:** 404 (`NOT_FOUND`), 500 (`DB_ERROR`).
+**Error cases:** 404 (`NOT_FOUND`).
+
+---
+
+### `DELETE /datasets/{dataset_id}`
+
+**Purpose:** Delete a dataset (and its files, conversations, runs) and drop its DuckDB data —
+releasing the session-scoped engine ([`../engineering/patterns/react-agent.md`](../engineering/patterns/react-agent.md)
+§ Resource lifecycle).
+
+**Response:** `{ "ok": true, "data": { "deleted": "uuid" } }`  ·  **Error:** 404 (`NOT_FOUND`).
 
 ---
 
@@ -110,16 +122,16 @@ Envelope shape:
 { "dataset_id": "uuid" }
 ```
 
-**Response:**
+**Response:** `201` —
 ```json
-{ "ok": true, "data": { "id": "uuid", "dataset_id": "uuid", "created_at": "datetime" } }
+{ "ok": true, "data": { "id": "uuid", "dataset_id": "uuid", "title": null, "created_at": "datetime" } }
 ```
 
-**Error cases:** 404 (dataset `NOT_FOUND`), 500 (`DB_ERROR`).
+**Error cases:** 404 (dataset `NOT_FOUND`).
 
 ---
 
-### `POST /conversations/{conversation_id}/messages`  (SSE)
+### `POST /conversations/{conversation_id}/query`  (SSE)
 
 **Purpose:** Ask a question (first or follow-up) in a conversation. Runs the ReAct agent and **streams**
 the live trace and final answer. This is the multi-turn NL-query entry point.
@@ -132,38 +144,43 @@ the live trace and final answer. This is the multi-turn NL-query entry point.
 **Response:** `text/event-stream`. Event payloads (each `data:` line is JSON):
 | Event | Payload |
 |-------|---------|
-| `run_started` | `{ "run_id": "uuid" }` |
-| `step` | `{ "description": "Grouping sales by region…", "is_error": false }` — one per `action_history` entry (the live trace; never raw SQL alone) |
-| `answer` | `{ "text": "Total sales by region: …", "result_table": { "columns": [...], "rows": [[...]] } }` |
-| `done` | `{ "run_id": "uuid", "status": "completed", "early_exit_reason": null }` |
-| `error` | `{ "code": "LLM_UNAVAILABLE", "message": "…" }` (stream then closes) |
+| `step` | the full `action_history` entry: `{ "description", "action", "result", "is_error" }` — one per executed action (the live trace; `description` is plain-English) |
+| `answer` | the assistant message: `{ "id", "conversation_id", "run_id", "role", "content", "result_table": { "columns", "rows" }, "trace", "created_at" }` |
+| `done` | `{ "run_id", "status", "tokens_input", "tokens_output", "estimated_cost_usd", "early_exit_reason" }` |
+| `error` | `{ "code": "RUN_FAILED" \| "DATASET_NOT_LOADED", "message": "…" }` (stream then closes) |
 
 **Error cases (before the stream opens, as JSON envelope):**
 | Status | Condition |
 |--------|-----------|
-| 400 | empty question (`VALIDATION_ERROR`) |
+| 422 | empty question (`EMPTY_QUESTION`) |
 | 404 | conversation not found (`NOT_FOUND`) |
-| 409 | dataset not loaded in DuckDB (e.g. after restart) — `DATASET_NOT_LOADED` |
-| 500 | run failed fatally (`RUN_FAILED`) / LLM unavailable (`LLM_UNAVAILABLE`) |
+| 409 | a query is already running on this conversation (`RUN_IN_PROGRESS`) |
+
+A fatal run failure (LLM down, dataset not loaded) is reported **inside** the stream as an `error`
+event, not an HTTP status, since the stream has already opened.
 
 ---
 
-### `GET /conversations/{conversation_id}/messages`
+### `GET /conversations/{conversation_id}`
 
-**Purpose:** Get the full conversation history (for reload / display).
+**Purpose:** Get the conversation with its full message history (for reload / display).
 
 **Response:**
 ```json
-{ "ok": true, "data": { "conversation_id": "uuid", "messages": [
-  { "id": "uuid", "role": "user", "content": "total sales by region", "created_at": "datetime" },
-  { "id": "uuid", "role": "assistant", "content": "Total sales by region: …",
-    "result_table": { "columns": ["region","total"], "rows": [["West", 4200]] },
-    "trace": [ { "description": "Grouping sales by region…", "is_error": false } ],
-    "created_at": "datetime" }
+{ "ok": true, "data": { "id": "uuid", "dataset_id": "uuid", "title": null, "created_at": "datetime",
+  "messages": [
+    { "id": "uuid", "conversation_id": "uuid", "run_id": null, "role": "user",
+      "content": "total sales by region", "result_table": null, "trace": null, "created_at": "datetime" },
+    { "id": "uuid", "conversation_id": "uuid", "run_id": "uuid", "role": "assistant",
+      "content": "Total sales by region: …",
+      "result_table": { "columns": ["region","total"], "rows": [["West", 4200]] },
+      "trace": [ { "description": "Grouping sales by region…", "action": "SELECT …",
+                   "result": "…", "is_error": false } ],
+      "created_at": "datetime" }
 ] } }
 ```
 
-**Error cases:** 404 (`NOT_FOUND`), 500 (`DB_ERROR`).
+**Error cases:** 404 (`NOT_FOUND`).
 
 ## Authentication
 

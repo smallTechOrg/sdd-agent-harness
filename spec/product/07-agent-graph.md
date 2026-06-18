@@ -196,8 +196,10 @@ safe-executor validates it (`react-agent.md` § Action-safety boundary — use p
 - **Read-only only** — the top-level statement must be `SELECT` (or `WITH … SELECT`). Reject any
   `INSERT`, `UPDATE`, `DELETE`, `CREATE`, `DROP`, `ALTER`, `ATTACH`, `COPY`, `INSTALL`, `LOAD`,
   `PRAGMA`, `EXPORT`, or `CALL`.
-- **Scope to the dataset's tables** — reject references to tables outside the loaded dataset.
-- Optionally enforce a row/`LIMIT` cap on results.
+- **Scoped to the dataset's tables by isolation** — each dataset is a separate file-backed DuckDB, so a
+  query simply cannot reference another dataset's tables (no cross-DB `ATTACH` is allowed either). This
+  is enforced by storage isolation rather than an AST table-name check.
+- A result-row cap is enforced (`MAX_RESULT_ROWS` in `data/query.py`) so a huge result can't blow up.
 
 A rejection is returned as an **error value** appended to `action_history` (recoverable — the loop
 retries with the error visible), never an exception that crashes the run. Defense-in-depth: the DuckDB
