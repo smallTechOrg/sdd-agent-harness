@@ -141,6 +141,15 @@ A phase is not done until tests pass. "It looks right" is not a test.
 - Run the full test suite before marking a phase complete
 - If tests fail, fix them before moving on
 
+**Test thoroughly across every layer — not just the unit level:**
+- **Unit** — domain logic, parsing, pure functions.
+- **Integration** — the agent loop and DB end-to-end with stubs (no API key).
+- **Golden-path** — the full primary user journey through the HTTP/UI layer, asserting rendered content, not just status codes (`spec/engineering/workflows/golden-path-smoke-test.md`).
+- **Frontend / UI** — any page that renders or updates content via JavaScript (charts, SPA, htmx, streamed tokens) must be tested in a **real browser** (Playwright or equivalent) asserting the **rendered DOM** — a `TestClient` HTML check cannot see what the browser actually paints.
+- **End-to-end** — at least one test drives the whole system the way a user would (browser → API → agent → DB → back), with nothing mocked beyond the LLM stub.
+
+A UI claimed "working" on the strength of a 200 response, with no browser-level assertion, is not tested.
+
 ## 8. Error Resilience
 
 Every external call (API, database, LLM) must have:

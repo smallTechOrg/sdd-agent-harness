@@ -60,11 +60,12 @@ The planner sub-agent will customize this for your project, but the general stru
 ### Phase 7 — Basic UI (if required)
 - Implement the UI from `spec/product/06-ui.md`
 - Functional but not polished
-- **Gate:** All specified screens/views are present and functional
+- **Gate:** All specified screens/views are present and functional; any client-rendered content (charts, SPA, htmx, streamed updates) is covered by a **browser-level test** (Playwright/equivalent) asserting the post-JavaScript DOM, not just a `TestClient` status check. See `spec/engineering/workflows/golden-path-smoke-test.md`.
 
-### Phase 8 — Integration Tests
+### Phase 8 — End-to-End + Integration Tests
 - Write integration tests that exercise the full system
-- **Gate:** Integration tests pass reliably
+- Add at least one **full end-to-end test** that drives the whole stack the way a user does (browser → API → agent → DB → back), nothing mocked beyond the LLM stub
+- **Gate:** Integration and E2E tests pass reliably
 
 ### Phase 9 — Advanced Observability
 - The structured-logging + token/cost baseline already lands in Phase 2 (see gate item 9). This phase adds aggregation on top: per-run metrics, latency tracking, and — if the spec calls for it — trace export (OpenTelemetry GenAI conventions / an LLM tracing backend).
@@ -117,6 +118,8 @@ The gate test command depends on the project language. The tech-designer sets th
 | Go | `migrate up` + `go test ./internal/...` | `go test ./...` |
 
 The Phase 2 gate must pass with **no LLM API key set** regardless of language. The DB URL must be set — tests need a real database, they just don't need a real LLM.
+
+Projects with a UI add a browser E2E run on top of the unit/integration gates at Phase 7/8 — `uv run pytest tests/e2e/` (playwright-python) or `npx playwright test` — against the live server.
 
 ## TypeScript/Bun Phase 2 Test Pattern
 

@@ -65,8 +65,30 @@ def test_golden_path_ui_flow(db):
 
 For Phase 2 sign-off the agent must **also** start the server with `uv run python -m <pkg>` and hit `/health` plus at least one page with `curl` to prove the app boots in a real process — not only via `TestClient`. Report the curl exit codes in the session log.
 
+## Browser-level end-to-end (client-rendered UI)
+
+`TestClient` returns the server's HTML **before any JavaScript runs**. If the page renders content client-side — interactive charts (Plotly/D3), an SPA, htmx swaps, streamed/typed-out tokens — the HTML assertion above proves the markup was *sent*, not that the user *sees* anything. A `<div class="plotly-chart" data-spec="…">` that `TestClient` confirms is present can still render blank if the chart script throws.
+
+For any UI with client-side rendering, add a browser-driven E2E test. **Playwright is the default** (works for both Python and Node):
+
+```python
+from playwright.sync_api import sync_playwright
+
+def test_chart_renders_in_browser(live_server):  # live_server = real running app, not TestClient
+    with sync_playwright() as p:
+        page = p.chromium.launch().new_page()
+        errors = []
+        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        page.goto(f"{live_server}/ask?q=sales+by+region")
+        page.wait_for_selector(".plotly-chart .plotly")   # JS actually painted the chart
+        assert page.locator(".plotly svg").count() > 0     # rendered, not blank
+        assert not errors, f"console errors: {errors}"
+```
+
+Assert the **post-JavaScript** state: the element the script was supposed to build exists, has visible content, and **no console error fired**. Run it against the live server, never `TestClient`.
+
 ## Where it lives
 
-- File: `tests/integration/test_pipeline.py` (or a dedicated `test_golden_path.py`)
-- Runs as part of `uv run pytest`
+- Golden-path (server-side): `tests/integration/test_pipeline.py` (or a dedicated `test_golden_path.py`), runs as part of `uv run pytest`
+- Browser E2E (client-side): `tests/e2e/` (`uv run pytest tests/e2e/` or `npx playwright test`)
 - No LLM API key required — uses the stub provider
