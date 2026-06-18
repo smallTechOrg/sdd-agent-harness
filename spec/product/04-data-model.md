@@ -1,34 +1,62 @@
 # Data Model
 
-> **Boilerplate status:** Filled in by the tech-designer sub-agent after architecture is approved.
-
----
-
 ## Storage Technology
 
-<!-- FILL IN: What database/storage does this project use and why? -->
+SQLite via SQLAlchemy 2.0 (Mapped types) + Alembic migrations. One file (`datachat.db`) at the repo root; path configurable via `DATACHAT_DATABASE_URL`.
 
-## Entities
+## Tables
 
-<!-- FILL IN: One section per major entity. -->
+### sessions
 
-### Entity: <!-- Name -->
+Represents one uploaded dataset.
 
-<!-- FILL IN: What does this entity represent? -->
+| Column | Type | Notes |
+|--------|------|-------|
+| id | TEXT PK | UUID |
+| filename | TEXT | Original filename |
+| status | TEXT | `uploading` \| `ready` \| `error` |
+| row_count | INTEGER | Parsed row count |
+| column_names | TEXT | JSON array of column names |
+| error_message | TEXT NULL | Set on parse failure |
+| created_at | TIMESTAMP | UTC |
+| updated_at | TIMESTAMP | UTC, auto-updated |
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| id | <!-- type --> | yes | Primary key |
-| <!-- field --> | <!-- type --> | <!-- yes/no --> | <!-- description --> |
+### messages
 
-### Relationships
+One row per user/assistant turn within a session.
 
-<!-- FILL IN: How do entities relate to each other? -->
+| Column | Type | Notes |
+|--------|------|-------|
+| id | TEXT PK | UUID |
+| session_id | TEXT FK→sessions.id | Cascade delete |
+| role | TEXT | `user` \| `assistant` |
+| content | TEXT | Message body |
+| reasoning_trace | TEXT NULL | JSON array of action dicts (assistant only) |
+| created_at | TIMESTAMP | UTC |
 
-## Data Lifecycle
+### runs
 
-<!-- FILL IN: When is data created, updated, and deleted? Is anything time-boxed or archived? -->
+One row per agent invocation (one per user question).
 
-## Sensitive Data
+| Column | Type | Notes |
+|--------|------|-------|
+| id | TEXT PK | UUID |
+| session_id | TEXT FK→sessions.id | |
+| status | TEXT | `pending` \| `completed` \| `force_completed` \| `failed` |
+| tokens_input | INTEGER | Accumulated |
+| tokens_output | INTEGER | Accumulated |
+| error_message | TEXT NULL | |
+| created_at | TIMESTAMP | UTC |
+| updated_at | TIMESTAMP | UTC |
 
-<!-- FILL IN: What fields contain PII or secrets? How are they protected? -->
+## In-Memory Store
+
+Parsed DataFrames are held in a module-level dict `_dataframe_store: dict[str, pd.DataFrame]` in `graph/nodes.py`, keyed by `session_id`. This is intentional for v0.1 (single-process, no persistence needed for DataFrames). Cleared in all terminal nodes.
+
+## Domain Models (Pydantic)
+
+| Class | Purpose |
+|-------|---------|
+| `Session` | API-facing session representation |
+| `Message` | API-facing message representation |
+| `Run` | API-facing run representation |

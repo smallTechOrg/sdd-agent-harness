@@ -1,152 +1,85 @@
 # Agent Graph
 
-> **Boilerplate status:** Required when the project uses an agent framework (LangGraph, CrewAI, AutoGen, etc.). Filled in by the tech-designer sub-agent as part of the tech design stage.
->
-> If your project has no agent framework (e.g., it's a simple script or API), delete this file.
->
-> The spec-reviewer treats this file as a **CRITICAL BLOCKER** — the tech design will not be approved if this file is absent or incomplete when an agent framework is in use.
->
-> **If the agent acts on the outside world** (tools, data, search — see Rule #9), it must use a **ReAct loop**. This file must then answer the eight pre-coding questions in `spec/engineering/ai-agents.md` Section 10 — including the **action-safety boundary** (what the executor permits / how actions are validated / the sandbox) and what **`force_finalize`** synthesises when iterations run out. The State below must carry the loop-control and usage fields; Edge Topology must show the `plan_action → execute_action` loop with iteration exhaustion routed to `force_finalize` (best-effort), not a one-shot pipeline; and the `action_history` trace must be surfaced to the user live, not just logged.
+## Framework
 
----
+LangGraph `StateGraph` with a ReAct loop.
 
-## State
+## Pre-coding Answers (Required by ai-agents.md §10)
 
-<!-- FILL IN: Define the agent's state type. Every field must be named and typed. -->
+1. **What action does the LLM generate?**
+   A one-line pandas expression string, e.g. `df.groupby("region")["amount"].mean()`. The expression references `df` (the session DataFrame) and any named column.
 
-```python
-class AgentState(TypedDict):
-    # Identity
-    run_id: int
-    # ... add all fields
+2. **Exact FINAL ANSWER string:**
+   `FINAL ANSWER: <text>` — case-insensitive prefix check in `plan_action`.
 
-    # Pipeline data (populated progressively by nodes)
-    # ...
+3. **Recoverable vs. fatal error boundary:**
+   - Recoverable: pandas raises `KeyError`, `ValueError`, bad column name — append action + error to `action_history`, route back to `plan_action` (self-correcting).
+   - Fatal: DataFrame missing from store (session not found) → `handle_error` and status `failed`.
 
-    # Control
-    error: str | None   # set by any node on fatal failure
+4. **Max-iterations default:** 10 (configurable via `DATACHAT_MAX_ITERATIONS`).
 
-    # ReAct loop only (omit for one-shot pipelines)
-    action_history: list[dict]  # [{"action": str, "result": str, "is_error": bool}]
-    iteration_count: int        # guarded against max_iterations → force_finalize
-    llm_response: str           # raw last LLM output — router checks it for FINAL ANSWER
+5. **`setup` prepares / cleans up:**
+   `setup` loads the DataFrame from the module-level `_dataframe_store` into state. Cleanup happens in every terminal node (`finalize`, `force_finalize`, `handle_error`) by deleting the session's entry from `_dataframe_store` — wrapped in `finally` so no path leaks the resource.
 
-    # Usage accounting (persist on the run record — see Rule #10 mechanics)
-    tokens_input: int
-    tokens_output: int
-    estimated_cost_usd: float | None
-```
+6. **`AgentState` fields:**
+   ```
+   run_id: str
+   session_id: str
+   question: str
+   df_columns: list[str]          # column names for prompt context
+   action_history: list[dict]     # {"action": str, "result": str, "is_error": bool}
+   iteration_count: int
+   llm_response: str              # raw last LLM output
+   final_answer: str | None
+   tokens_input: int              # accumulated
+   tokens_output: int
+   error: str | None
+   ```
+   `action_history` is surfaced to the user in the API response as `reasoning_trace`.
 
----
+7. **Action-safety boundary:**
+   - Permitted operations: a frozenset of pandas method names (e.g., `mean`, `sum`, `groupby`, `value_counts`, `describe`, `head`, `filter`, `sort_values`, `nunique`, `max`, `min`, `count`) — dispatched via `getattr(df, method)(...)`.
+   - The LLM output is parsed with regex to extract `method_name` and `args` — never `eval`'d raw.
+   - If the parsed method is not in the allowlist, the executor returns an error result and routes back to `plan_action`.
+   - The DataFrame is read-only from the agent's perspective (no assignment operations).
 
-## Nodes
+8. **`force_finalize` synthesises:**
+   Summarises all successful results in `action_history` into a best-effort answer: "Based on the computations completed so far: [list of results]. Further analysis was not completed within the iteration limit."
 
-<!-- FILL IN: One section per node. -->
+## Node Definitions
 
-### `node_[name]`
-
-**Reads from state:** <!-- field names -->
-
-**Writes to state:** <!-- field names -->
-
-**External calls:**
-
-| System | Operation | On Failure |
-|--------|-----------|------------|
-| <!-- system --> | <!-- what it calls --> | <!-- fatal (set error) or partial (log and continue) --> |
-
-**Behaviour:** <!-- one paragraph describing what this node does -->
-
----
+| Node | Role |
+|------|------|
+| `setup` | Load DataFrame from store; validate session exists |
+| `plan_action` | LLM call: given question + action_history, output next action or `FINAL ANSWER: <text>` |
+| `execute_action` | Run pandas op via allowlist executor; append result to action_history |
+| `finalize` | Write answer + trace to DB; update RunRow status = `completed`; release DataFrame |
+| `force_finalize` | Synthesise best-effort answer; status = `force_completed`; release DataFrame |
+| `handle_error` | Fatal error path; status = `failed`; release DataFrame |
 
 ## Edge Topology
 
-<!-- FILL IN: ASCII diagram of node flow. Show conditional edges explicitly. -->
-
 ```
-START
-  │
-  ▼
-node_a ──(error)──► node_handle_error ──► END
-  │
-  ▼
-node_b
-  │
-  ▼
-node_finalize
-  │
-  ▼
-END
-```
+START → setup
+setup → plan_action              (normal)
+setup → handle_error             (DataFrame missing)
 
----
+plan_action → execute_action     (action detected)
+plan_action → finalize           (FINAL ANSWER detected)
+plan_action → force_finalize     (iteration_count >= max_iterations)
+plan_action → handle_error       (LLM call failed)
 
-## Error Handler Node (`node_handle_error`)
+execute_action → plan_action     (observe loop — always)
 
-<!-- FILL IN: What happens when a fatal error occurs. -->
-
-- Reads: `state.error`, `state.run_id`
-- Updates DB: run status → "failed", error_message, completed_at
-- Logs error with run_id context
-- Terminates graph
-
----
-
-## Finalize Node (`node_finalize`)
-
-<!-- FILL IN: How a successful run is closed out. -->
-
-- Reads: `state.run_id`, `state.completed_*`, `state.failed_*`
-- Updates DB: run status → "completed", posts_completed count, completed_at
-- Logs run summary
-
----
-
-## Force-Finalize Node (`node_force_finalize`) — ReAct loops only
-
-<!-- FILL IN (ReAct agents only): best-effort close-out when iterations run out. Delete for one-shot pipelines. -->
-
-- Reached when `iteration_count` hits `max_agent_iterations` or the last N actions all errored (Rule #10) — **not** a fatal error.
-- Asks the LLM to synthesise the best answer it can from `action_history`, noting what is missing; never emits a bare "I couldn't answer."
-- Updates DB: run status → "completed" (records the early-exit reason); persists `action_history` + usage fields.
-- Releases the run's module-level resources (same cleanup as `finalize`).
-
----
-
-## Graph Assembly (`agent/graph.py`)
-
-<!-- FILL IN: Pseudocode showing how nodes and edges are wired. Must be ≤ 60 lines in the real file. -->
-
-```python
-graph = StateGraph(AgentState)
-
-graph.add_node("node_a", node_a)
-graph.add_node("node_b", node_b)
-graph.add_node("finalize", node_finalize)
-graph.add_node("handle_error", node_handle_error)
-
-graph.set_entry_point("node_a")
-
-# Conditional edges after nodes that can produce fatal errors
-graph.add_conditional_edges(
-    "node_a",
-    lambda s: "handle_error" if s.get("error") else "node_b",
-)
-
-# Unconditional edges
-graph.add_edge("node_b", "finalize")
-graph.add_edge("finalize", END)
-graph.add_edge("handle_error", END)
-
-compiled_graph = graph.compile()
+finalize → END
+force_finalize → END
+handle_error → END
 ```
 
----
+## Stub Behaviour
 
-## Concurrency Model
+The stub provider branches on prompt tags:
+- `<node:plan>` in prompt → returns a fake pandas expression or `FINAL ANSWER: [stub answer]` after 1 iteration
+- No tag → returns a short generic response
 
-<!-- FILL IN: How concurrent runs are handled. -->
-
-- **One run at a time** (enforced at API layer — returns 409 if a run is already active)
-- OR: **Parallel nodes** within a single run (describe which nodes run in parallel and why)
-- **Checkpointing:** <!-- none / SqliteSaver / PostgresSaver — and when it's needed -->
+The stub never branches on prose keywords from the prompt body.
