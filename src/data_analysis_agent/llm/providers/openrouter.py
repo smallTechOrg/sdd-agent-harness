@@ -16,6 +16,7 @@ class OpenRouterLLMProvider(LLMProvider):
             model=self._model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1024,
+            timeout=60.0,
         )
         usage = response.usage
         input_tokens = usage.prompt_tokens if usage else 0

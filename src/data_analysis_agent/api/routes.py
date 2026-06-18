@@ -1,5 +1,6 @@
 import json
 import shutil
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
@@ -7,7 +8,7 @@ from typing import Annotated
 import pandas as pd
 import structlog
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from data_analysis_agent.api import templates
@@ -213,13 +214,21 @@ def session_detail(
         .order_by(QueryRecordRow.created_at.desc())
         .all()
     )
-    return render(
+    new_record_status = None
+    if new:
+        nr = session.get(QueryRecordRow, new)
+        new_record_status = nr.status if nr else None
+
+    response = render(
         request, templates, "session.html",
         sess=sess,
         data_sources=data_sources,
         records=records,
         new_record_id=new,
+        new_record_status=new_record_status,
     )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 # ─── Session: Delete ─────────────────────────────────────────────────────────
@@ -249,6 +258,25 @@ def delete_session(
 
 # ─── Session: Submit Query ────────────────────────────────────────────────────
 
+def _run_pipeline_background(query_record_id: str, session_id: str, question: str) -> None:
+    """Run in a background thread — returns immediately, updates DB when done."""
+    try:
+        from data_analysis_agent.graph.runner import run_pipeline
+        run_pipeline(query_record_id=query_record_id, session_id=session_id, question=question)
+    except Exception as exc:
+        log.error("query.background_pipeline_error", query_record_id=query_record_id, error=str(exc))
+        from data_analysis_agent.db.session import create_db_session
+        from data_analysis_agent.db.models import QueryRecordRow as _QR
+        try:
+            with create_db_session() as db:
+                qr = db.get(_QR, query_record_id)
+                if qr and qr.status == "pending":
+                    qr.status = "failed"
+                    qr.error_message = str(exc)
+        except Exception:
+            pass
+
+
 @router.post("/sessions/{session_id}/query")
 def submit_query(
     request: Request,
@@ -270,22 +298,28 @@ def submit_query(
     sess.updated_at = datetime.now(timezone.utc)
     session.commit()
 
-    try:
-        from data_analysis_agent.graph.runner import run_pipeline
-        final_state = run_pipeline(
-            query_record_id=query_record_id,
-            session_id=session_id,
-            question=question.strip(),
-        )
+    # Fire pipeline in background so the browser gets the redirect immediately
+    t = threading.Thread(
+        target=_run_pipeline_background,
+        args=(query_record_id, session_id, question.strip()),
+        daemon=True,
+    )
+    t.start()
+    log.info("query.submitted", query_record_id=query_record_id, session_id=session_id)
 
-        if final_state.get("error"):
-            log.error("query.pipeline_error", error=final_state["error"])
-            return render(request, templates, "error.html", detail=final_state["error"])
+    return RedirectResponse(
+        url=f"/sessions/{session_id}?new={query_record_id}",
+        status_code=303,
+    )
 
-        return RedirectResponse(
-            url=f"/sessions/{session_id}?new={query_record_id}",
-            status_code=303,
-        )
-    except Exception as exc:
-        log.error("query.unexpected_error", error=str(exc))
-        return render(request, templates, "error.html", detail=str(exc))
+
+@router.get("/sessions/{session_id}/query/{qr_id}/status")
+def query_status(
+    session_id: str,
+    qr_id: str,
+    session: Session = Depends(get_session),
+):
+    qr = session.get(QueryRecordRow, qr_id)
+    if not qr or qr.session_id != session_id:
+        raise api_error("NOT_FOUND", "Query not found.", status_code=404)
+    return JSONResponse({"status": qr.status, "error": qr.error_message})

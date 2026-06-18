@@ -138,9 +138,7 @@ const STEPS = [
 let _stepIdx = 0;
 let _stepTimer = null;
 
-function startLoading() {
-  const q = document.getElementById('question-input').value.trim();
-  if (!q) return;
+function _showOverlay() {
   const overlay = document.getElementById('loading-overlay');
   overlay.style.display = 'flex';
   _stepIdx = 0;
@@ -152,8 +150,29 @@ function startLoading() {
   document.getElementById('submit-btn').disabled = true;
 }
 
-// Scroll to new answer
-{% if new_record_id %}
+function startLoading() {
+  const q = document.getElementById('question-input').value.trim();
+  if (!q) return;
+  _showOverlay();
+}
+
+{% if new_record_id and new_record_status == 'pending' %}
+// Query is still running — show overlay and poll until done
+window.addEventListener('DOMContentLoaded', () => {
+  _showOverlay();
+  const pollInterval = setInterval(async () => {
+    try {
+      const r = await fetch('/sessions/{{ sess.id }}/query/{{ new_record_id }}/status');
+      const data = await r.json();
+      if (data.status !== 'pending') {
+        clearInterval(pollInterval);
+        window.location.reload();
+      }
+    } catch (_) {}
+  }, 2000);
+});
+{% elif new_record_id %}
+// Query finished — scroll to the answer card
 window.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('q-{{ new_record_id }}');
   if (el) el.scrollIntoView({behavior:'smooth', block:'start'});

@@ -14,7 +14,9 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 async def _lifespan(app: FastAPI):
     from data_analysis_agent.db.session import init_db
     from data_analysis_agent.config.settings import get_settings
+    from data_analysis_agent.logging_config import configure_logging
     settings = get_settings()
+    configure_logging(log_level=settings.log_level, log_file=settings.log_file)
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     init_db()
     yield

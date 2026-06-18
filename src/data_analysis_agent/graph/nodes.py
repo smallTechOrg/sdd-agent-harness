@@ -53,6 +53,7 @@ def _load_tool_registry(session_id: str) -> tuple[list[dict], list[dict]]:
                     "type": tool.type,
                     "description": tool.description,
                     "config": tool.config,
+                    "data_source_id": tool.data_source_id,
                     "capabilities": [
                         {
                             "name": c.name,
@@ -67,7 +68,6 @@ def _load_tool_registry(session_id: str) -> tuple[list[dict], list[dict]]:
 
 def _build_plan_prompt(state: AgentState) -> str:
     tools: list[dict] = state.get("tools", [])
-    columns = ", ".join(state.get("column_names", []))
     question = state["question"]
     history: list[dict] = state.get("action_history", [])
 
@@ -86,9 +86,22 @@ def _build_plan_prompt(state: AgentState) -> str:
                 lines.append(f"  Parameters: {json.dumps(params)}")
             lines.append("")
 
+    # Build schema section grouped by actual table name
+    from collections import defaultdict
+    table_cols: dict[str, list[str]] = defaultdict(list)
+    for col in state.get("column_names", []):
+        if "." in col:
+            tbl, colname = col.split(".", 1)
+            table_cols[tbl].append(colname)
+        else:
+            table_cols["data"].append(col)
+
+    lines.append("Dataset schema:")
+    for tbl, cols in table_cols.items():
+        lines.append(f"  Table: {tbl} — Columns: {', '.join(cols)}")
+    lines.append("")
+
     lines.extend([
-        f"Dataset schema — Table: data — Columns: {columns}",
-        "",
         f"User question: {question}",
     ])
 
@@ -149,26 +162,15 @@ def load_data(state: AgentState) -> AgentState:
                 all_column_names.extend([f"{table}.{c}" for c in df.columns])
                 total_rows += len(df)
 
-        # Patch tool configs so plan_action prompt uses the right table names per source
+        # Ensure each tool's config has the correct runtime table name
         for tool in tools:
             if tool["type"] == "csv_query":
-                ds_id = None
-                from data_analysis_agent.db.session import create_db_session
-                from data_analysis_agent.db.models import ToolRow
-                with create_db_session() as db:
-                    tr = db.query(ToolRow).filter(ToolRow.name == tool["name"]).first()
-                    if tr:
-                        ds_id = tr.data_source_id
+                ds_id = tool.get("data_source_id")
                 matching_ds = next((d for d in data_sources if d["id"] == ds_id), None)
                 if matching_ds:
                     table = _table_name_for(matching_ds["name"])
                     tool = dict(tool)
                     tool["config"] = {**tool.get("config", {}), "table_name": table}
-                    # Update capability descriptions with the actual table name
-                    tool["capabilities"] = [
-                        {**cap, "description": cap["description"].replace("'data'", f"'{table}'")}
-                        for cap in tool.get("capabilities", [])
-                    ]
             updated_tools.append(tool)
 
         log.info("load_data.done", run_id=state.get("run_id"), sources=len(data_sources),
@@ -209,7 +211,8 @@ def plan_action(state: AgentState) -> AgentState:
             new_state["answer"] = response[len("FINAL ANSWER:"):].strip()
             log.info("plan_action.final_answer", run_id=state.get("run_id"), iterations=state.get("iteration_count", 0))
         else:
-            log.info("plan_action.tool_call", run_id=state.get("run_id"), iteration=state.get("iteration_count", 0))
+            log.info("plan_action.tool_call", run_id=state.get("run_id"),
+                     iteration=state.get("iteration_count", 0), llm_response=response[:300])
 
         return new_state
     except Exception as exc:
@@ -282,7 +285,10 @@ def execute_action(state: AgentState) -> AgentState:
             if conn is None:
                 return {**state, "error": "In-memory DB not found — load_data must run before execute_action"}
             sql = parameters.get("query", "")
+            log.debug("execute_action.sql", run_id=run_id, sql=sql)
             result_str, is_error = _execute_csv_query(conn, sql)
+            if is_error:
+                log.warning("execute_action.sql_error", run_id=run_id, sql=sql, error=result_str)
         else:
             _cleanup_db(run_id)
             return {**state, "error": f"No executor for tool type '{found_tool_type}' capability '{capability_name}'"}

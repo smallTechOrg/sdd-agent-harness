@@ -10,4 +10,18 @@ dist/
 build/
 *.egg-info/
 .DS_Store
+
+# Logs
 *.log
+logs/
+
+# Runtime data
+*.db
+uploads/
+
+# Test / tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage

@@ -1,3 +1,5 @@
+import re
+
 from data_analysis_agent.llm.providers.base import LLMProvider
 from data_analysis_agent.llm.types import LLMResult
 
@@ -14,7 +16,13 @@ class StubLLMProvider(LLMProvider):
                 "Set DATAANALYSIS_OPENROUTER_API_KEY to get real AI-powered answers."
             )
         else:
-            text = '{"capability": "run_query", "parameters": {"query": "SELECT COUNT(*) as total_rows FROM data"}}'
+            # Parse the actual table name from the schema section
+            match = re.search(r"Table:\s+(\w+)\s+—\s+Columns:", prompt)
+            table = match.group(1) if match else "data"
+            text = (
+                f'{{"capability": "run_query", "parameters": '
+                f'{{"query": "SELECT COUNT(*) as total_rows FROM {table}"}}}}'
+            )
 
         return LLMResult(
             text=text,
