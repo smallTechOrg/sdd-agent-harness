@@ -6,6 +6,11 @@ export interface SessionInfo {
   status: string;
   row_count: number;
   column_names: string[];
+  message_count?: number;
+  total_tokens_input?: number;
+  total_tokens_output?: number;
+  created_at?: string;
+  last_active_at?: string;
   error_message?: string;
 }
 
@@ -15,12 +20,23 @@ export interface Message {
   content: string;
   reasoning_trace?: { action: string; result: string; is_error: boolean }[];
   iteration_count?: number;
+  tokens_input?: number;
+  tokens_output?: number;
   created_at: string;
 }
 
 export interface HealthInfo {
   status: string;
   version: string;
+  llm_provider: string;
+}
+
+export interface AskResponse {
+  answer: string;
+  reasoning_trace: { action: string; result: string; is_error: boolean }[];
+  iteration_count: number;
+  tokens_input: number;
+  tokens_output: number;
   llm_provider: string;
 }
 
@@ -39,12 +55,20 @@ export async function uploadFile(file: File): Promise<SessionInfo> {
   return j.data;
 }
 
-export async function askQuestion(sessionId: string, question: string): Promise<{
-  answer: string;
-  reasoning_trace: { action: string; result: string; is_error: boolean }[];
-  iteration_count: number;
-  llm_provider: string;
-}> {
+export async function listSessions(): Promise<SessionInfo[]> {
+  const r = await fetch(`${BASE}/api/sessions`);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.detail?.message || 'Failed to load sessions');
+  return j.data;
+}
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/sessions/${sessionId}`, { method: 'DELETE' });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.detail?.message || 'Delete failed');
+}
+
+export async function askQuestion(sessionId: string, question: string): Promise<AskResponse> {
   const r = await fetch(`${BASE}/api/sessions/${sessionId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

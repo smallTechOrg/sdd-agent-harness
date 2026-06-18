@@ -3,9 +3,10 @@ import { uploadFile, type SessionInfo } from '../api';
 
 interface Props {
   onSessionReady: (session: SessionInfo) => void;
+  onCancel?: () => void;
 }
 
-export function UploadScreen({ onSessionReady }: Props) {
+export function UploadScreen({ onSessionReady, onCancel }: Props) {
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -84,6 +85,18 @@ export function UploadScreen({ onSessionReady }: Props) {
 
       {error && (
         <p style={{ color: '#dc2626', marginTop: '16px', fontSize: '14px' }}>{error}</p>
+      )}
+
+      {onCancel && (
+        <button
+          onClick={onCancel}
+          style={{
+            marginTop: '20px', background: 'none', border: 'none',
+            color: '#64748b', cursor: 'pointer', fontSize: '14px',
+          }}
+        >
+          ← Back to sessions
+        </button>
       )}
     </div>
   );

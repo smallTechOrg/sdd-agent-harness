@@ -63,12 +63,17 @@ def ask_question(
     answer = final_state.get("final_answer") or final_state.get("error") or "No answer produced"
     action_history = final_state.get("action_history", [])
 
+    tokens_input = final_state.get("tokens_input", 0)
+    tokens_output = final_state.get("tokens_output", 0)
+
     assistant_msg = MessageRow(
         session_id=session_id,
         role="assistant",
         content=answer,
         reasoning_trace=json.dumps(action_history),
         iteration_count=final_state.get("iteration_count", 0),
+        tokens_input=tokens_input,
+        tokens_output=tokens_output,
     )
     db.add(assistant_msg)
     db.commit()
@@ -77,7 +82,7 @@ def ask_question(
         "answer": answer,
         "reasoning_trace": action_history,
         "iteration_count": final_state.get("iteration_count", 0),
-        "tokens_input": final_state.get("tokens_input", 0),
-        "tokens_output": final_state.get("tokens_output", 0),
+        "tokens_input": tokens_input,
+        "tokens_output": tokens_output,
         "llm_provider": __import__("data_analyst.config.settings", fromlist=["get_settings"]).get_settings().resolved_llm_provider,
     })

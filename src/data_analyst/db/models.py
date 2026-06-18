@@ -64,6 +64,8 @@ class MessageRow(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     reasoning_trace: Mapped[str | None] = mapped_column(Text, nullable=True)
     iteration_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_now
     )

@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { askQuestion, type SessionInfo } from '../api';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { askQuestion, getMessages, type SessionInfo, type AskResponse } from '../api';
 
 interface Step {
   action: string;
@@ -12,46 +12,92 @@ interface ChatMessage {
   content: string;
   steps?: Step[];
   iterationCount?: number;
+  tokensInput?: number;
+  tokensOutput?: number;
+  firedAt?: string;
+  durationMs?: number;
 }
 
 interface Props {
   session: SessionInfo;
   onReset: () => void;
+  sessionTokensInput: number;
+  sessionTokensOutput: number;
+  onTokensAdded: (input: number, output: number) => void;
 }
 
-export function ChatScreen({ session, onReset }: Props) {
+function fmt(n: number): string {
+  return n.toLocaleString();
+}
+
+function ElapsedTimer({ startMs }: { startMs: number }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(Date.now() - startMs), 250);
+    return () => clearInterval(id);
+  }, [startMs]);
+  const s = (elapsed / 1000).toFixed(1);
+  return <span style={{ fontVariantNumeric: 'tabular-nums' }}>{s}s</span>;
+}
+
+export function ChatScreen({ session, onReset, sessionTokensInput, sessionTokensOutput, onTokensAdded }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingStart, setLoadingStart] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    getMessages(session.session_id).then(msgs => {
+      setMessages(msgs.map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        steps: m.reasoning_trace ?? undefined,
+        iterationCount: m.iteration_count ?? undefined,
+        tokensInput: m.tokens_input,
+        tokensOutput: m.tokens_output,
+        firedAt: m.created_at,
+      })));
+    }).catch(() => {});
+  }, [session.session_id]);
 
-  const send = async () => {
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
+
+  const send = useCallback(async () => {
     const q = input.trim();
     if (!q || loading) return;
     setInput('');
     setError('');
-    setMessages(prev => [...prev, { role: 'user', content: q }]);
+    const firedAt = new Date().toISOString();
+    setMessages(prev => [...prev, { role: 'user', content: q, firedAt }]);
     setLoading(true);
+    setLoadingStart(Date.now());
+    const t0 = Date.now();
     try {
-      const resp = await askQuestion(session.session_id, q);
+      const resp: AskResponse = await askQuestion(session.session_id, q);
+      const durationMs = Date.now() - t0;
+      onTokensAdded(resp.tokens_input, resp.tokens_output);
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: resp.answer,
         steps: resp.reasoning_trace,
         iterationCount: resp.iteration_count,
+        tokensInput: resp.tokens_input,
+        tokensOutput: resp.tokens_output,
+        firedAt: new Date().toISOString(),
+        durationMs,
       }]);
-    } catch (e: any) {
-      setError(e.message || 'Something went wrong');
+    } catch (e: unknown) {
+      setError((e as Error).message || 'Something went wrong');
     } finally {
       setLoading(false);
+      setLoadingStart(null);
     }
-  };
+  }, [input, loading, session.session_id, onTokensAdded]);
 
   const toggleSteps = (i: number) => {
     setExpandedSteps(prev => {
@@ -61,12 +107,16 @@ export function ChatScreen({ session, onReset }: Props) {
     });
   };
 
+  const totalIn = sessionTokensInput;
+  const totalOut = sessionTokensOutput;
+
   return (
     <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
       {/* Sidebar */}
       <div style={{
         width: '240px', background: '#1e293b', color: '#fff',
         padding: '20px 16px', display: 'flex', flexDirection: 'column', flexShrink: 0,
+        overflowY: 'auto',
       }}>
         <div style={{ fontSize: '18px', fontWeight: 700, marginBottom: '4px' }}>DataChat</div>
         <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '24px' }}>AI Data Assistant</div>
@@ -80,8 +130,23 @@ export function ChatScreen({ session, onReset }: Props) {
         <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', marginTop: '20px', marginBottom: '6px' }}>
           Columns ({session.column_names.length})
         </div>
-        <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: '1.8', overflow: 'auto', flex: 1 }}>
+        <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: '1.8', maxHeight: '140px', overflow: 'auto' }}>
           {session.column_names.map(c => <div key={c} style={{ fontFamily: 'monospace' }}>{c}</div>)}
+        </div>
+
+        {/* Session token totals */}
+        <div style={{
+          marginTop: '20px', background: '#0f172a', borderRadius: '8px',
+          padding: '10px 12px',
+        }}>
+          <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', marginBottom: '6px' }}>
+            Session tokens
+          </div>
+          <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.8' }}>
+            <div>In: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{fmt(totalIn)}</span></div>
+            <div>Out: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{fmt(totalOut)}</span></div>
+            <div>Total: <span style={{ color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600 }}>{fmt(totalIn + totalOut)}</span></div>
+          </div>
         </div>
 
         <button
@@ -91,7 +156,7 @@ export function ChatScreen({ session, onReset }: Props) {
             color: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px',
           }}
         >
-          Upload new file
+          ← All sessions
         </button>
       </div>
 
@@ -110,6 +175,22 @@ export function ChatScreen({ session, onReset }: Props) {
 
           {messages.map((msg, i) => (
             <div key={i} style={{ marginBottom: '20px' }}>
+              {/* Timestamp row */}
+              {msg.firedAt && (
+                <div style={{
+                  fontSize: '11px', color: '#9ca3af',
+                  textAlign: msg.role === 'user' ? 'right' : 'left',
+                  marginBottom: '4px',
+                }}>
+                  {new Date(msg.firedAt).toLocaleTimeString()}
+                  {msg.durationMs !== undefined && (
+                    <span style={{ marginLeft: '6px', color: '#6b7280' }}>
+                      ({(msg.durationMs / 1000).toFixed(1)}s)
+                    </span>
+                  )}
+                </div>
+              )}
+
               <div style={{
                 display: 'flex',
                 justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
@@ -129,6 +210,14 @@ export function ChatScreen({ session, onReset }: Props) {
                 </div>
               </div>
 
+              {/* Token count for assistant messages */}
+              {msg.role === 'assistant' && (msg.tokensInput !== undefined || msg.tokensOutput !== undefined) && (
+                <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px', paddingLeft: '2px' }}>
+                  Tokens — in: {fmt(msg.tokensInput ?? 0)} · out: {fmt(msg.tokensOutput ?? 0)} · total: {fmt((msg.tokensInput ?? 0) + (msg.tokensOutput ?? 0))}
+                </div>
+              )}
+
+              {/* Script log (collapsible) */}
               {msg.role === 'assistant' && msg.steps && msg.steps.length > 0 && (
                 <div style={{ marginTop: '6px', paddingLeft: '4px' }}>
                   <button
@@ -138,23 +227,31 @@ export function ChatScreen({ session, onReset }: Props) {
                       fontSize: '12px', color: '#64748b', padding: '2px 4px',
                     }}
                   >
-                    {expandedSteps.has(i) ? '▼' : '▶'} {msg.steps.length} reasoning step{msg.steps.length !== 1 ? 's' : ''}
+                    {expandedSteps.has(i) ? '▼' : '▶'} Script log ({msg.steps.length} step{msg.steps.length !== 1 ? 's' : ''})
                   </button>
 
                   {expandedSteps.has(i) && (
                     <div style={{
-                      marginTop: '6px', background: '#f8fafc', border: '1px solid #e2e8f0',
+                      marginTop: '6px', background: '#0f172a', border: '1px solid #1e293b',
                       borderRadius: '8px', padding: '12px', fontSize: '12px', fontFamily: 'monospace',
                     }}>
                       {msg.steps.map((step, j) => (
-                        <div key={j} style={{ marginBottom: '10px' }}>
-                          <div style={{ color: '#2563eb', fontWeight: 600 }}>
-                            Step {j + 1}: df.{step.action}
+                        <div key={j} style={{ marginBottom: '12px' }}>
+                          <div style={{ color: '#7dd3fc', marginBottom: '2px' }}>
+                            # Step {j + 1}
+                          </div>
+                          <div style={{ color: '#a3e635' }}>
+                            df.{step.action}
                           </div>
                           <div style={{
-                            color: step.is_error ? '#dc2626' : '#374151',
-                            marginTop: '2px', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                            maxHeight: '120px', overflow: 'auto',
+                            color: step.is_error ? '#f87171' : '#94a3b8',
+                            marginTop: '4px',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-all',
+                            maxHeight: '120px',
+                            overflow: 'auto',
+                            paddingLeft: '8px',
+                            borderLeft: `2px solid ${step.is_error ? '#ef4444' : '#334155'}`,
                           }}>
                             {step.result.slice(0, 500)}{step.result.length > 500 ? '…' : ''}
                           </div>
@@ -168,9 +265,9 @@ export function ChatScreen({ session, onReset }: Props) {
           ))}
 
           {loading && (
-            <div style={{ color: '#888', fontSize: '14px', display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div style={{ color: '#888', fontSize: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
               <span>Analysing</span>
-              <span style={{ animation: 'pulse 1.4s infinite' }}>…</span>
+              {loadingStart && <ElapsedTimer startMs={loadingStart} />}
             </div>
           )}
 
