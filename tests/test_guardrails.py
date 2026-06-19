@@ -36,8 +36,8 @@ def test_read_only_refuses_writes(sql):
     assert reason                            # a human-readable reason is returned for the model to recover
 
 
-def test_run_sql_tool_refuses_write_without_touching_data():
+def test_execute_sql_tool_refuses_write_without_touching_data():
     """The tool returns a refusal string (fail-soft), never executing the write."""
-    from agent.tools import run_sql
-    out = run_sql.invoke({"sql": "DROP TABLE sales"})
+    from agent.tools import execute_sql
+    out = execute_sql.invoke({"dataset_id": "any", "sql": "DROP TABLE sales"})
     assert out.startswith("REFUSED")

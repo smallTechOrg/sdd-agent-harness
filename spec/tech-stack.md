@@ -1,90 +1,120 @@
-# Tech Stack — DataChat
+# Tech Stack
 
-> Part 4 of the 4-part spec contract (see `harness/harness.md`). Records the per-build decisions that drive
-> `agent/config.py`. **Verify the latest library + model versions before pinning at build time** — a
-> guessed/old version 404s. The locked stack (async, FastAPI, LangGraph, async SQLAlchemy, SQLite→Postgres)
-> is not relitigated here; only the choices below are.
+Per-build decisions for the data analysis agent. Defaults follow harness rules
+(`harness/harness.md`); every field below is filled — no `<!-- FILL IN -->` markers remain.
+Verify new versions at the next build: a stale pin 404s.
 
-## Runtime LLM (the PRODUCT's model — separate from the coding agent that builds this)
+## Runtime LLM
 
-| Setting | Value | Env var |
-|---------|-------|---------|
-| Provider | `google_genai` | `APP_LLM_PROVIDER` |
-| Runtime model (CHEAP tier) | `gemini-2.5-flash` | `APP_LLM_MODEL` |
-| API key | funded, in `.env` (gitignored) — **present & verified** (used in this repo's real-Gemini self-test) | `APP_LLM_API_KEY` |
-| Escalation model | none in scope — revisit only if SQL-generation quality on complex questions proves insufficient | per-call override |
+Claude Code builds this product. The product's runtime LLM is set here.
 
-`gemini-2.5-flash` is the cheap/fast tier for `google_genai` and is **already configured and funded** in
-`.env`; it is capable for schema-grounded SQL generation, chart-spec authoring, and multi-turn analysis.
-The runtime model is wired via `init_chat_model`, so switching provider/tier is a config change, not a code
-change (`harness/patterns/model-and-providers.md`). The LLM-as-judge for evals defaults to the same model.
+- **Provider:** `google_genai`
+  Rationale: user-specified; cheap-tier is the default within this provider.
+- **Runtime model:** `gemini-2.5-flash`
+  Rationale: user-specified cheap tier. Verified against Google AI docs and the
+  `langchain-google-genai` integration page — the stable ID has no date suffix.
+  NL-to-SQL + chart-spec generation on short-to-medium context is well within the
+  flash tier's capability; no escalation needed.
+- **API key env var:** `APP_LLM_API_KEY` (pydantic-settings, prefix `APP_`)
+- **Provider package:** `langchain-google-genai==4.2.5` (verified on PyPI 2026-06-19)
+
+Wire-up: `init_chat_model(model, model_provider="google_genai", api_key=...)` —
+switching provider stays a config change, never a code change. See
+`harness/patterns/model-and-providers.md`.
 
 ## Persistence
 
-Local-first by default; the SAME async code runs on both rungs — only the URL (and saver class) changes.
+Local-first; the same async code runs on both rungs — only the URL changes.
+See `harness/patterns/persistence.md`.
 
-- Local (DEMO): SQLite via **aiosqlite** — `sqlite+aiosqlite:///./agent.db` (the `APP_DATABASE_URL` default)
-- Prod (PRODUCTIONISE): PostgreSQL via **asyncpg** — `postgresql+asyncpg://...` (via `/deploy`)
-- ORM: async SQLAlchemy 2.0. **NEVER psycopg2** (sync — breaks the async stack).
-- Core tables: `runs`, `messages`, `spans`.
-- Domain entities (SQLite metadata): `datasets`, `data_tables`, `conversations`, `conversation_turns`, `charts` — see `spec/agent.md` § Domain tables.
-- **Analytical data store: DuckDB** — the user's uploaded tabular data lives in a per-dataset DuckDB file
-  (e.g. `./data/<dataset_id>.duckdb`), **not** in SQLite. Ingest uses a write-connection (server-only); the
-  agent's `run_sql` uses a separate `read_only=True` connection. DuckDB reads CSV/JSON natively.
-- Multi-turn checkpointer (L8): `AsyncSqliteSaver` local → `AsyncPostgresSaver` prod (`langgraph-checkpoint-*`).
+- **Local (demo gate):** `sqlite+aiosqlite:///./agent.db`
+- **Prod (productionise):** `postgresql+asyncpg://user:pw@host/db` — swap URL only at
+  `/deploy`; **never `psycopg2`** (sync, blocks the event loop).
+- **ORM:** async SQLAlchemy 2.0 (`sqlalchemy[asyncio]==2.0.51`)
+- **Local driver:** `aiosqlite==0.22.1`
+- **Prod driver:** `asyncpg==0.31.0` (added at productionise; not needed for demo gate)
 
-## Tools (3-layer model — `harness/patterns/tools-and-mcp.md`)
-- In-process (typed `@tool`): `get_schema`, `run_sql` (read-only DuckDB), `create_chart` (Vega-Lite v5), `write_todos`, `finish`.
-- MCP (external integrations only): **none** — nothing crosses a process/trust boundary.
-- Skills / CLI: none.
+### Domain entities (extend the same `Base` — `agent/domain.py`)
 
-## Interface — `harness/patterns/interface.md`
-- Web UI: **yes** — Next.js (App Router) + React + Tailwind. Primary journey: create/select a dataset →
-  upload files → ask a question → see the grounded answer + any chart (Vega-Lite via `vega-embed`) → deep-link
-  to its `/traces`. Multi-turn chat thread. Does not re-implement the `/traces` viewer.
-- API endpoints (FastAPI): `GET /health`, `POST /runs` (`{goal, conversation_id?}` → answer + chart refs),
-  `POST /datasets`, `POST /datasets/{id}/files`, `GET /datasets/{id}` (schema), `POST /conversations`,
-  `GET /traces`.
-- Streaming: SSE token streaming is optional (nice-to-have for the chat UX); Phase 1 `POST /runs` returns
-  the full answer. Add `/runs/stream` later if wanted (`harness/patterns/interface.md` § SSE).
+These join `runs`, `messages`, `spans` on the same `Base` and are created by `init_db()`.
+Foreign keys reference `runs.id` so domain rows tie back to the run that produced them.
 
-## Deploy target — `harness/patterns/deploy.md`
-- Target host: **TBD** (chosen at `/deploy`; Railway recommended for least-ops, else Fly.io / Modal).
-- Artifact: portable build — both `langgraph.json` (`langgraph build`) and a `Dockerfile` ship.
-- Prod ladder: PostgreSQL (`asyncpg`) + `AsyncPostgresSaver` checkpointer; Redis only if multi-replica.
+| Table | Columns | Notes |
+|---|---|---|
+| `datasets` | `id` (PK, uuid), `name` (String), `created_at` (DateTime+tz), `row_count` (Integer), `column_info` (JSON) | One row per uploaded CSV/JSON after ingestion |
+| `uploaded_files` | `id` (PK, uuid), `dataset_id` (FK → datasets.id, indexed), `original_filename` (String), `stored_path` (String), `created_at` (DateTime+tz) | Raw file record; `stored_path` is the local filesystem path |
 
-## Key libraries (pin CURRENT versions at build time — verify, don't guess)
+## Interface
 
-| Concern | Library | Notes |
-|---------|---------|-------|
-| Web / SSE | `fastapi`, `uvicorn`, `python-multipart` | async; multipart for file upload |
-| Orchestration | `langgraph`, `langchain`, `langchain-core` | StateGraph + ReAct; `init_chat_model` |
-| LLM provider SDK | `langchain-google-genai` | matches `APP_LLM_PROVIDER=google_genai` |
-| Analytical engine | `duckdb` | per-dataset store; native CSV/JSON read; `read_only=True` for the agent |
-| DB (local) | `sqlalchemy[asyncio]`, `aiosqlite` | local-first metadata + spine |
-| DB (prod) | `asyncpg` | added at `/deploy`; **NEVER psycopg2** |
-| Checkpointer | `langgraph-checkpoint-sqlite` (local), `langgraph-checkpoint-postgres` (prod) | multi-turn threads (L8) |
-| Settings | `pydantic-settings` | env prefix `APP_` |
-| Observability | `opentelemetry-api` / `-sdk` | OTel-GenAI spans → SQLite; opt-in OTLP export |
-| Tests | `pytest`, `pytest-asyncio`, `httpx` | FakeModel drives the loop with no key; httpx for API tests |
-| UI e2e gate | `playwright` | asserts the post-JS DOM (answer + chart + trace link) |
-| UI (Node) | `next`, `react`, `tailwindcss`, `vega`, `vega-lite`, `vega-embed` | chat UI + client-side chart render |
+- **Web UI:** Next.js + React + Tailwind — upload page, chat panel, chart rendering, `/traces` viewer
+- **Backend API:** FastAPI (`fastapi==0.137.2`) with SSE token streaming
+- **SSE server:** `uvicorn==0.49.0` (ASGI, async end-to-end)
+- **Port:** `APP_PORT=8001`
 
-Example `.env` (the only thing that differs local↔prod is environment):
+## Deploy
+
+- **Artifacts:** both ship every build — `langgraph.json` (managed runtime path) and
+  `Dockerfile` (portable uvicorn path). See `harness/patterns/deploy.md`.
+- **Host:** TBD — chosen at `/deploy`. Railway is recommended for non-experts (managed
+  Postgres + Redis plugin, minimal ops); Fly.io for multi-region; Modal for bursty/serverless.
+- **Prod ladder:** Postgres (`asyncpg`) + Redis (for multi-replica streaming/queue). Redis
+  is productionise-only — a single-replica demo needs neither.
+- **Migrations:** `create_all` for local dev; Alembic at productionise when Postgres has
+  data that can't be dropped.
+
+## Tools — in-process `@tool` only (no MCP needed)
+
+All tools are owned, local, and cross no process/trust boundary — plain typed `@tool`
+in `agent/tools.py`. See `harness/patterns/tools-and-mcp.md`.
+
+| Tool | Action class | Purpose |
+|---|---|---|
+| `list_datasets` | read-only | Return names + IDs of ingested datasets |
+| `execute_sql` | read-only | Run a parameterised SELECT against the agent DB and return rows as JSON string |
+| `get_dataset_schema` | read-only | Return column names, types, and a row-count for a dataset |
+| `generate_chart_spec` | read-only | Build a Plotly JSON spec from a dataset + column selections for the UI to render |
+| `finish` | terminal | Return the final answer and end the run (called exactly once) |
+
+No MCP servers — the product is local-only with no external SaaS integrations.
+
+## Key libraries — pinned, verified on PyPI 2026-06-19
+
+| Concern | Package | Pinned version |
+|---|---|---|
+| Web / SSE | `fastapi` | `0.137.2` |
+| ASGI server | `uvicorn` | `0.49.0` |
+| Orchestration | `langgraph` | `1.2.6` |
+| LangChain core | `langchain` | `1.3.10` |
+| LangChain core | `langchain-core` | `1.4.8` |
+| LLM provider SDK | `langchain-google-genai` | `4.2.5` |
+| ORM | `sqlalchemy[asyncio]` | `2.0.51` |
+| Local DB driver | `aiosqlite` | `0.22.1` |
+| Prod DB driver | `asyncpg` | `0.31.0` |
+| Settings | `pydantic-settings` | `2.14.2` |
+| Observability | `opentelemetry-api` | `1.42.1` |
+| Observability | `opentelemetry-sdk` | `1.42.1` |
+| Data processing | `pandas` | `3.0.3` |
+| Chart spec gen | `plotly` | `6.8.0` |
+| Tests | `pytest` | `9.1.1` |
+| Tests (async) | `pytest-asyncio` | `1.1.0` |
+
+`asyncpg` is prod-only — include it in `requirements.txt` but it is not exercised at the
+demo gate (which runs SQLite). `pandas` requires Python ≥ 3.11; pin `python_version = "3.12"`
+in `langgraph.json` and the `Dockerfile`.
+
+## Agent settings — `agent/config.py` defaults
+
 ```
 APP_LLM_PROVIDER=google_genai
-APP_LLM_MODEL=gemini-2.5-flash      # CHEAP tier — verified working in this repo
-APP_LLM_API_KEY=                    # funded key, .env only — never committed
-APP_DATABASE_URL=sqlite+aiosqlite:///./agent.db   # local-first; Postgres+asyncpg at /deploy
+APP_LLM_MODEL=gemini-2.5-flash
+APP_LLM_API_KEY=                          # funded key — injected env / .env, never committed
+APP_DATABASE_URL=sqlite+aiosqlite:///./agent.db   # local-first; swap to postgresql+asyncpg at /deploy
 APP_PORT=8001
 APP_MAX_ITERATIONS=6
-APP_DURABILITY_ENABLED=false        # true for multi-turn conversations; false for the single-turn demo gate
 ```
 
-## What to avoid (load-bearing — full rationale in `harness/harness.md`)
-- **No `psycopg2` / any sync DB driver** — the whole stack is async (aiosqlite / asyncpg / duckdb sync calls run off the loop or are fast/local).
-- **No write access for the agent** — `run_sql` is read-only by construction (DuckDB `read_only=True` + statement allowlist); ingest's write-connection is never exposed to the model.
-- **No MCP** — every tool is owned and in-process; MCP is for external integrations only.
-- **No guessed/old library or model versions** — verify latest, then pin.
-- **No frontier model as the runtime default** — `gemini-2.5-flash` (cheap tier); escalate only on a stated need.
-- **No secrets in code** — config via `APP_`-prefixed env / `.env` (pydantic-settings); the model sees tool names, never the key.
+## What this file drives
+
+`spec/tech-stack.md` → `agent/config.py` (`Settings`, env prefix `APP_`) → every recipe
+that calls `get_settings()`. The only difference between local and prod is the environment
+variables above — no code changes required.

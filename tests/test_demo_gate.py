@@ -1,7 +1,7 @@
 """Demo-gate eval, in-process (harness/patterns/observability-and-evals.md).
 
-A REAL run on the seeded dataset, then BOTH evals — a 200 with a wrong answer fails here. Needs a funded
-APP_LLM_API_KEY (loaded from .env); skipped offline. The end-to-end HTTP version is harness/scripts/demo_gate.sh.
+A REAL run on the seeded dataset, then BOTH evals — a 200 with a wrong answer fails here.
+Needs a funded APP_LLM_API_KEY (loaded from .env); skipped offline.
 """
 import pytest
 
@@ -27,5 +27,4 @@ async def test_demo_gate_real_run():
 
     ok_o, score, text = await outcome_eval(GOAL, r["answer"], CRITERION, EVALUATION_STEPS)
     assert ok_o, f"OUTCOME failed: score {score}\n{text}\nanswer={r['answer']!r}"
-    # the ground truth: Electronics totals 3000 in the seeded data
     assert "electronic" in (r["answer"] or "").lower()

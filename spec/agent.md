@@ -1,69 +1,40 @@
-# Agent
+# Agent layers
 
-> Part 3 of the 4-part spec contract (see `harness/harness.md`). Decides which of the 11 agentic layers are
-> ON. Baseline layers ship in Phase 1. The earns-its-place layers stay OFF until a capability needs them.
-> Each layer names its recipe in `harness/patterns/`; the "why" is one line, specific to **this** agent.
+> ON = generated in this phase. Default baseline is ON and real. Turn an optional layer ON only when a
+> capability needs it; name that capability in Why. Each layer maps to one recipe in harness/patterns/.
 
-## Layers
+| Layer | Recipe | Default | This build | Why (capability) |
+|-------|--------|---------|-----------|------------------|
+| 1 · Model & providers | model-and-providers.md | ON | ON | google_genai / gemini-2.5-flash (cheap tier); JSON-mode structured output used by generate_chart_spec to return a typed Plotly/Vega-Lite spec |
+| 2 · Context engineering | context-engineering.md | ON | ON | dataset schema summaries (column names, types, row counts) injected into context each turn so the model never guesses column names; long tool-result messages trimmed to stay within token budget |
+| 3 · Memory (short-term) | memory.md | ON | ON | LangGraph AsyncSqliteSaver checkpointer keyed to thread_id — required by multi-turn-conversation capability |
+| 3 · Memory (long-term, cross-run) | memory.md | OFF | OFF | datasets exist only within the current session; no cross-run recall needed |
+| 4 · Tools (in-process) | tools-and-mcp.md | ON | ON | list_datasets, get_dataset_schema, execute_sql, generate_chart_spec, finish — all local, no external process |
+| 4 · Tools (MCP, external) | tools-and-mcp.md | OFF | OFF | no external integrations; all data is local |
+| 5 · Retrieval / RAG | retrieval.md | OFF | OFF | no corpus to embed; data is in SQLite tables queried directly via execute_sql |
+| 6 · Multi-agent | multi-agent.md | OFF | OFF | a single ReAct loop handles all four capabilities; no distinct sub-task requiring isolation |
+| 7 · Guardrails & HITL | guardrails-and-hitl.md | OFF | ON | on_tool_call hook validates execute_sql argument is a SELECT-only statement before it runs; on_input scans for PII in uploaded data names (nl-query capability, action-safety boundary) |
+| 8 · Durability (checkpointer) | durability.md | OFF | OFF | runs are short (single question → answer); crash recovery not needed; short-term memory checkpointer is the AsyncSqliteSaver used for multi-turn, not a durability checkpoint |
+| 9 · Observability & Evals | observability-and-evals.md | ON | ON | OTel spans for every execute_sql, generate_chart_spec, and LLM call; outcome eval grades the final answer against EARS criteria; trajectory eval confirms execute_sql fired and no mutating tool ran |
+| 10 · Interface / serving | interface.md | ON | ON | FastAPI: GET /health, POST /runs (accepts optional thread_id), POST /upload (multipart CSV/JSON ingest), GET /traces; SSE streaming on POST /runs/stream for token-by-token answer in chat panel; Next.js + React + Tailwind web UI |
+| — · Persistence (data spine) | persistence.md | ON | ON | runs, messages, spans (core) + datasets, uploaded_files (domain tables); uploaded CSV/JSON rows stored in dynamically created SQLite tables |
+| 11 · Deploy & Operate | deploy.md | later | later | langgraph.json + Dockerfile ship with the build; host TBD (Railway recommended) at /deploy |
 
-### Baseline — ON in Phase 1
+## Guardrails trigger set (Layer 7 — action-safety baseline, HITL OFF)
 
-- [x] **L1 · Model & providers** — `harness/patterns/model-and-providers.md`
-  Runtime LLM behind `init_chat_model`; provider/model pinned in `spec/tech-stack.md` (cheap tier).
-  *Why:* Gemini 2.5 Flash (`google_genai`) generates SQL + narrates grounded answers; no JSON-mode/vision needs.
-- [x] **L2 · Context engineering** — `harness/patterns/context-engineering.md`
-  Assemble the window each turn: domain system prompt + goal + tool results, within a token budget.
-  *Why:* domain prompt + the dataset schema (fetched JIT via `get_schema`, not stuffed) must always be in context; raw query result sets are pruned/capped; **prior conversation turns (goal, answer) are reconstructed into the window** for multi-turn follow-ups (`converse-multiturn`).
-- [x] **L3 · Memory (working / short-term)** — `harness/patterns/memory.md`
-  In-run scratchpad + message history. Long-term / cross-run semantic memory is OFF (below).
-  *Why:* within a run the agent tracks the schema it read, the SQL it ran, and intermediate results.
-- [x] **L4 · Tools (in-process)** — `harness/patterns/tools-and-mcp.md`
-  Internal actions = plain typed `@tool` in-process; MCP only for external integrations.
-  *Why:* `get_schema`, `run_sql` (read-only DuckDB), `create_chart` (Vega-Lite), `write_todos`, `finish` — all own-process; nothing external.
-- [x] **Orchestration · ReAct Deep-Agent loop** — `harness/patterns/react-agent.md`
-  LangGraph `StateGraph`: `agent → (tools → agent)* → finalize`, with planning todos + a `finish` tool.
-  *Why:* default loop; `write_todos` plans multi-step analyses; iteration cap + force_finalize guard runaway query loops.
-- [x] **L7 · Guardrails (action-safety only)** — `harness/patterns/guardrails-and-hitl.md`
-  Validate tool inputs, refuse out-of-scope/unsafe actions. HITL pause is OFF (below).
-  *Why:* `run_sql` / `create_chart` are gated to **read-only** — any `INSERT/UPDATE/DELETE/DDL/COPY/ATTACH/PRAGMA-write` is refused; queries are row- and time-capped.
-- [x] **L9 · Observability & Evals** — `harness/patterns/observability-and-evals.md`
-  OTel-GenAI spans → SQLite → `/traces`; outcome + trajectory evals from the EARS criteria.
-  *Why:* outcome eval on `query-data` (answer grounded in the SQL result, not invented) is the demo gate; every `chat`/`execute_tool.run_sql` step is a span.
-- [x] **L10 · Interface / serving** — `harness/patterns/interface.md`
-  Async FastAPI: `GET /health`, `POST /runs`, `GET /traces`. Port 8001.
-  *Why:* plus dataset/upload + conversation endpoints and a Next.js chat UI (upload → ask → answer + chart → trace link); charts returned in the `POST /runs` envelope.
-- [x] **L11 · Deploy & Operate** — `harness/patterns/deploy.md`
-  Portable artifact (`langgraph.json` / Dockerfile); local SQLite → Postgres (+ checkpointer) on the prod ladder.
-  *Why:* host TBD; productionised via `/deploy` (Phase 4) after the demo gate is green.
+The following actions are validated by the `on_tool_call` guardrail before execution. HITL pause is NOT activated (no money, no prod-data deletes, no external comms in scope):
 
-> Persistence (the data spine — `harness/patterns/persistence.md`) is always on. Async SQLAlchemy 2.0,
-> SQLite (`aiosqlite`) local → Postgres (`asyncpg`) prod. Core tables `runs`/`messages`/`spans` + the domain
-> tables below. The user's tabular data lives in **DuckDB** (analytical store), queried read-only by the agent.
-
-### Earns its place
-
-- [ ] **L5 · Retrieval / RAG** — `harness/patterns/retrieval.md`  → **OFF**
-  *Why OFF:* grounding is via **live SQL** over the dataset, not semantic retrieval over a corpus; the schema is small enough to pass into context directly.
-- [ ] **L3+ · Long-term / cross-run memory** — `harness/patterns/memory.md`  → **OFF**
-  *Why OFF:* no facts persist across separate conversations/users; within-conversation continuity is handled by the checkpointer (L8), not a semantic memory store.
-- [ ] **L6 · Multi-agent (supervisor + sub-agents)** — `harness/patterns/multi-agent.md`  → **OFF**
-  *Why OFF:* one ReAct loop (introspect → query → answer/chart) holds the whole task; no distinct sub-tasks needing isolated context.
-- [ ] **L7+ · HITL (human-in-the-loop pause)** — `harness/patterns/guardrails-and-hitl.md`  → **OFF**
-  *Why OFF:* the agent is strictly read-only; there is no irreversible/external action to pause for. Writes are refused, not escalated.
-- [ ] **L8 · Durability (checkpointer)** — `harness/patterns/durability.md`  → **OFF**
-  *Why OFF:* multi-turn (`converse-multiturn`) is delivered by **conversation-history reconstruction** (L2 + persistence), not a checkpointer. This codebase uses a plain `messages` list with **no `add_messages` reducer** (`react-agent.md` warns against it); a LangGraph checkpointer assumes accumulating state, so wiring one would fight the design and be redundant with the persisted `messages`/`conversation_turns` rows. Instead `run_agent(goal, conversation_id)` loads prior turns' (goal, answer) and seeds them into the initial window. (Crash-resume — the actual L8 job — isn't needed: runs are short and in-process.)
+- `execute_sql` — the SQL argument must begin with SELECT (case-insensitive, after stripping whitespace and SQL comments). Any other statement is blocked and returns a safe refusal message. This is enforced both in the guardrail hook and as an application-level check inside the tool itself (defence in depth).
 
 ## Domain tables (beyond runs/messages/spans)
-- `datasets` — a named collection of uploaded files (id, name, created_at).
-- `data_tables` — one per uploaded file: dataset_id, duckdb table name, original filename, row/column counts, column schema (JSON).
-- `conversations` — a multi-turn thread bound to a dataset (id, dataset_id, title, created_at).
-- `conversation_turns` — links each `runs` row to a conversation in order (conversation_id, run_id, idx).
-- `charts` — a persisted Vega-Lite spec (with embedded data) tied to the run that produced it (run_id, title, spec JSON).
-- (Analytical data itself is **not** a SQLite table — it lives in a per-dataset **DuckDB** store the agent queries read-only.)
+
+- `datasets` — id (str PK), name (str, unique within session), created_at (datetime), row_count (int), column_info (JSON — list of {name, type, sample_values})
+- `uploaded_files` — id (str PK), dataset_id (str FK → datasets.id), original_filename (str), stored_path (str), created_at (datetime)
+- Dynamic data tables — one SQLite table per uploaded file, named from the sanitised filename (e.g. `sales_q4_csv`), containing the actual data rows. These are created at upload time and dropped/replaced on re-upload of the same name.
 
 ## Notes
-- The v1 feature set ships together (ingest + query + **charts** + **multi-turn**) — no deferral. Charts are
-  collected per-run and returned in the `POST /runs` envelope; conversations link `runs` into a thread via
-  `conversation_turns`, reconstructed into context on each new turn.
-- Read-only enforcement is two-layered: a DuckDB connection opened `read_only=True` **and** a statement
-  allowlist, so a write can't fire even from a force-finalize or a malformed model output.
+
+- Short-term memory (AsyncSqliteSaver) is ON for multi-turn-conversation; this is distinct from Layer 8 Durability. The checkpointer stores conversation state per thread_id; runs are still short enough that crash recovery (durability proper) is not warranted.
+- The `generate_chart_spec` tool returns a JSON string. The `finish` tool embeds it under a `chart_spec` key in its answer payload. The web UI detects this key and renders the chart with react-plotly.js.
+- `execute_sql` result truncation to 50 rows is enforced in the tool, not by the guardrail. The guardrail's job is statement-type validation only.
+- Multi-turn context window: the context engineering layer trims tool-result messages (especially long SQL result sets) from older turns while keeping all human/assistant messages, to stay within gemini-2.5-flash's context window without losing conversation intent.

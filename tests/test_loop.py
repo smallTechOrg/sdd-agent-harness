@@ -17,8 +17,12 @@ def _tc(name, args, id):
 
 async def test_loop_runs_tool_then_finishes(FakeModelCls):
     scripted = [
-        AIMessage(content="", tool_calls=[_tc("run_sql", {"sql": "SELECT 1"}, "a")]),
-        AIMessage(content="", tool_calls=[_tc("finish", {"answer": "Electronics leads at 3000."}, "b")]),
+        AIMessage(content="", tool_calls=[
+            _tc("execute_sql", {"dataset_id": "demo", "sql": "SELECT 1"}, "a")
+        ]),
+        AIMessage(content="", tool_calls=[
+            _tc("finish", {"answer": "Electronics leads at 3000.", "chart_spec": ""}, "b")
+        ]),
     ]
     r = await run_agent("which category leads?", model=FakeModelCls(scripted))
 
@@ -29,15 +33,16 @@ async def test_loop_runs_tool_then_finishes(FakeModelCls):
     async with get_sessionmaker()() as s:
         spans = (await s.execute(select(Span).where(Span.run_id == r["run_id"]))).scalars().all()
     names = [sp.name for sp in spans]
-    assert "execute_tool.run_sql" in names          # the tool actually ran, and was traced
-    assert any(sp.kind == "LLM" for sp in spans)     # the chat span exists
+    assert "execute_tool.execute_sql" in names
+    assert any(sp.kind == "LLM" for sp in spans)
     assert not any("error" in (sp.attributes or {}) for sp in spans)
 
 
 async def test_loop_force_finalizes_on_runaway(FakeModelCls):
-    runaway = [AIMessage(content="", tool_calls=[_tc("run_sql", {"sql": "SELECT 1"}, "x")])]
+    runaway = [AIMessage(content="", tool_calls=[
+        _tc("execute_sql", {"dataset_id": "demo", "sql": "SELECT 1"}, "x")
+    ])]
     r = await run_agent("loop forever", model=FakeModelCls(runaway))
 
-    # never loops past the cap; finalizes a best-effort answer
     assert r["iterations"] == get_settings().max_iterations
     assert r["status"] == "completed"

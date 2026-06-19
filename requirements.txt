@@ -9,6 +9,7 @@ fastapi==0.137.2
 uvicorn[standard]==0.49.0
 python-multipart==0.0.32                 # file uploads
 duckdb==1.5.4                            # analytical store; read_only=True for the agent
+plotly==6.1.2                            # chart spec generation (generate_chart_spec tool)
 SQLAlchemy[asyncio]==2.0.51
 aiosqlite==0.22.1
 pydantic-settings==2.14.1

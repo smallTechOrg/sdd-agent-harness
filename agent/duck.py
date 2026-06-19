@@ -8,6 +8,7 @@ top-level JSON keys into columns on ingest.
 """
 import os
 import re
+import sqlite3
 from decimal import Decimal
 
 import duckdb
@@ -73,6 +74,52 @@ def ingest_file(dataset_id: str, table_name: str, src_path: str, filename: str) 
         con.close()
     return {"table_name": table, "filename": filename, "n_rows": int(n_rows),
             "n_cols": len(columns), "columns": columns}
+
+
+def _dataset_names() -> dict[str, str]:
+    """Read dataset id→name from the SQLite metadata DB (synchronous plain sqlite3)."""
+    db_url = get_settings().database_url
+    db_path = db_url.replace("sqlite+aiosqlite:///", "").replace("sqlite:///", "").lstrip("./")
+    if not db_path or not os.path.exists(db_path):
+        return {}
+    try:
+        con = sqlite3.connect(db_path)
+        rows = con.execute("SELECT id, name FROM datasets").fetchall()
+        con.close()
+        return {row[0]: row[1] for row in rows}
+    except sqlite3.Error:
+        return {}
+
+
+def list_all_datasets() -> list[dict]:
+    """Return a lightweight list of all uploaded datasets with their tables + row counts.
+
+    Used by the list_datasets tool so the agent can see what's been uploaded.
+    """
+    d = _data_dir()
+    results = []
+    if not os.path.isdir(d):
+        return results
+    names = _dataset_names()
+    for fname in sorted(os.listdir(d)):
+        if not fname.endswith(".duckdb"):
+            continue
+        ds_id = fname[:-7]
+        path = os.path.join(d, fname)
+        try:
+            con = duckdb.connect(path, read_only=True)
+            tnames = [r[0] for r in con.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema='main' ORDER BY table_name").fetchall()]
+            tables = []
+            for t in tnames:
+                n = con.execute(f'SELECT count(*) FROM "{t}"').fetchone()[0]
+                tables.append({"table": t, "n_rows": int(n)})
+            con.close()
+            results.append({"id": ds_id, "name": names.get(ds_id, ds_id), "tables": tables})
+        except duckdb.Error:
+            pass
+    return results
 
 
 def dataset_schema(dataset_id: str) -> dict:

@@ -1,7 +1,7 @@
 """The eval half of the demo gate (harness/workflows/gates.md).
 
-Exit 0 iff the run's answer is right (OUTCOME ≥ threshold) AND the path is sane (TRAJECTORY). The criterion
-+ steps + expect_tools come from spec/capabilities/query-data.md (the demo-gate capability).
+Exit 0 iff the run's answer is right (OUTCOME ≥ threshold) AND the path is sane (TRAJECTORY).
+Criterion + steps + expect_tools fed from spec/capabilities/nl-query.md.
 """
 import argparse
 import asyncio
@@ -12,18 +12,19 @@ from sqlalchemy import select
 from .db import Run, get_sessionmaker
 from .evals import outcome_eval, trajectory_eval
 
-# Filled from spec/capabilities/query-data.md (the demo-gate capability's EARS line + eval handles).
-CRITERION = ("WHEN the user asks a question answerable from the dataset the system SHALL ground its answer "
-             "in the result of a read-only SQL query it executed over the dataset's tables (no invented figures).")
+CRITERION = (
+    "WHEN the user asks a question answerable from the dataset the system SHALL ground its answer "
+    "in the result of a read-only SQL query it executed via execute_sql (no invented figures)."
+)
 EVALUATION_STEPS = [
-    "Does the answer identify the category with the highest total sales (the dataset's answer is Electronics) "
-    "and state its total (3000)?",
-    "Is the figure grounded — the kind of value a read-only SQL aggregation over the dataset would produce — "
-    "rather than invented or contradicted by the data?",
-    "A brief additional insight or interpretation is acceptable and even expected (see the product's domain "
-    "instructions); do NOT lower the score for including one as long as it is consistent with the data.",
+    "Does the answer identify the category with the highest total sales "
+    "(the dataset's answer is Electronics) and state its total (3000)?",
+    "Is the figure grounded — consistent with what a read-only SQL aggregation over the dataset "
+    "would produce — rather than invented or hallucinated?",
+    "A brief additional insight or interpretation is acceptable and expected; do NOT lower the "
+    "score for one as long as it is consistent with the data.",
 ]
-EXPECT_TOOLS = ["run_sql"]
+EXPECT_TOOLS = ["execute_sql"]
 FORBID_TOOLS = []
 
 

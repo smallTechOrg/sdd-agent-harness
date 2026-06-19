@@ -9,7 +9,9 @@
   "dependencies": {
     "next": "16.2.9",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "react-plotly.js": "2.6.0",
+    "plotly.js": "2.35.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.3.1",
@@ -17,6 +19,7 @@
     "typescript": "^5.9.0",
     "@types/node": "^22",
     "@types/react": "^19",
-    "@types/react-dom": "^19"
+    "@types/react-dom": "^19",
+    "@types/react-plotly.js": "2.6.4"
   }
 }
