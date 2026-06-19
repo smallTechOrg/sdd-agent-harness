@@ -1,0 +1,8 @@
+[tool.pytest.ini_options]
+# Run from the repo root; the `agent` package is importable without an install step.
+pythonpath = ["."]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+# The Playwright e2e journey needs a live UI + server; exclude it from the default unit run.
+norecursedirs = ["tests/e2e", "ui", ".venv"]

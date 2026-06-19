@@ -23,6 +23,32 @@ Intake asks four questions, fills the 4-file spec, builds the agent, and stops a
 > A funded **`APP_LLM_API_KEY`** is required for any real run (intake checks for it). The runtime LLM is
 > separate from the coding agent and defaults to a cheap tier — set it in `spec/tech-stack.md`.
 
+## The current build — DataChat
+
+This repo currently contains a built agent: **DataChat** — upload CSV/JSON into a dataset, ask questions in
+plain English, get answers grounded in **read-only SQL** (DuckDB) with a chat UI and a `/traces` viewer.
+Spec in [`spec/`](spec/), plan in `reports/implementation-plan.md`. Phase 1 is demo-gate green.
+
+```bash
+# 1. deps (a funded APP_LLM_API_KEY must be in .env — google_genai / gemini-2.5-flash)
+uv pip install -r requirements.txt
+npm --prefix ui install
+
+# 2. the demo gate — done = exit 0 (boots, /health, a real run, outcome+trajectory eval, traces)
+make gate
+
+# 3. run it
+make seed                     # seed a "Demo Sales" dataset to query
+make serve                    # agent API + /traces on http://localhost:8001
+make ui                       # chat UI on http://localhost:3000  (separate terminal)
+
+make test                     # offline unit suite (FakeModel loop, read-only guardrail, ingest) — no key
+```
+
+Endpoints: `GET /health` · `POST /runs {goal, dataset_id?}` · `POST /datasets` · `POST /datasets/{id}/files`
+· `GET /datasets/{id}` · `GET /traces`. Layers ON and the phase plan (charts → multi-turn → productionise)
+are recorded in [`spec/agent.md`](spec/agent.md) and the implementation plan.
+
 ## Everything else
 
 Read **[`harness/harness.md`](harness/harness.md)** — the operating manual (the spec contract, workflows,
