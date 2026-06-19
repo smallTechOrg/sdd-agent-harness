@@ -16,7 +16,7 @@ from sqlalchemy import select
 
 from . import duck
 from .db import Run, Span, get_sessionmaker, init_db
-from .domain import DataTable, Dataset
+from .domain import Conversation, DataTable, Dataset
 from .runner import run_agent
 
 
@@ -45,6 +45,7 @@ def err(msg):
 class RunIn(BaseModel):
     goal: str
     dataset_id: str | None = None
+    conversation_id: str | None = None
 
 
 @app.get("/health")
@@ -55,8 +56,9 @@ async def health():
 @app.post("/runs")
 async def create_run(body: RunIn):
     try:
-        r = await run_agent(body.goal, dataset_id=body.dataset_id)
-        return ok({k: r[k] for k in ("run_id", "answer", "iterations", "dataset_id", "status")})
+        r = await run_agent(body.goal, dataset_id=body.dataset_id, conversation_id=body.conversation_id)
+        return ok({k: r[k] for k in
+                   ("run_id", "answer", "iterations", "dataset_id", "conversation_id", "status", "charts")})
     except Exception as e:                            # surface key/model failures as JSON, not a 500
         return err(str(e))
 
@@ -123,6 +125,22 @@ async def get_dataset(dataset_id: str):
     return ok({"id": ds.id, "name": ds.name,
                "tables": [{"table_name": t.table_name, "filename": t.filename,
                            "n_rows": t.n_rows, "n_cols": t.n_cols, "columns": t.columns} for t in tables]})
+
+
+# ----- conversations (multi-turn threads) --------------------------------------------
+class ConversationIn(BaseModel):
+    dataset_id: str | None = None
+    title: str | None = None
+
+
+@app.post("/conversations")
+async def create_conversation(body: ConversationIn):
+    conv = Conversation(dataset_id=body.dataset_id, title=body.title or "New conversation")
+    async with get_sessionmaker()() as s:
+        s.add(conv)
+        await s.commit()
+        cid = conv.id
+    return ok({"id": cid, "dataset_id": body.dataset_id})
 
 
 # ----- /traces viewer (server-rendered HTML, no JS) ----------------------------------

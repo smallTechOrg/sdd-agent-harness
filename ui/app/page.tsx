@@ -7,11 +7,33 @@ const API = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8001";
 type Dataset = { id: string; name: string };
 type Column = { name: string; type: string };
 type Table = { table_name: string; filename: string; n_rows: number; n_cols: number; columns: Column[] };
-type Msg = { role: "user" | "assistant"; text: string; runId?: string };
+type ChartT = { title: string; spec: unknown };
+type Msg = { role: "user" | "assistant"; text: string; runId?: string; charts?: ChartT[] };
 
 async function getJSON(path: string) {
   const r = await fetch(`${API}${path}`);
   return r.json();
+}
+
+function ChartView({ spec }: { spec: unknown }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const vegaEmbed = (await import("vega-embed")).default;
+        if (!cancelled && ref.current) {
+          await vegaEmbed(ref.current, spec as object, { actions: false, renderer: "svg" });
+        }
+      } catch {
+        /* a malformed spec just renders nothing — the text answer still stands */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [spec]);
+  return <div ref={ref} className="mt-2 overflow-x-auto rounded-md border border-slate-200 bg-white p-2" />;
 }
 
 export default function Home() {
@@ -21,6 +43,7 @@ export default function Home() {
   const [newName, setNewName] = useState("");
   const [goal, setGoal] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -46,6 +69,18 @@ export default function Home() {
     loadSchema(selected);
   }, [selected, loadSchema]);
 
+  function pickDataset(id: string) {
+    setSelected(id);
+    setMessages([]);            // a new dataset starts a fresh conversation
+    setConversationId(null);
+  }
+
+  function newChat() {
+    setMessages([]);
+    setConversationId(null);
+    setError("");
+  }
+
   async function createDataset() {
     if (!newName.trim()) return;
     const r = await fetch(`${API}/datasets`, {
@@ -57,7 +92,7 @@ export default function Home() {
     if (j.ok) {
       setNewName("");
       await loadDatasets();
-      setSelected(j.data.id);
+      pickDataset(j.data.id);
     }
   }
 
@@ -73,6 +108,19 @@ export default function Home() {
     if (fileRef.current) fileRef.current.value = "";
   }
 
+  async function ensureConversation(): Promise<string | null> {
+    if (conversationId) return conversationId;
+    const r = await fetch(`${API}/conversations`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dataset_id: selected || null }),
+    });
+    const j = await r.json();
+    const cid = j.ok ? j.data.id : null;
+    setConversationId(cid);
+    return cid;
+  }
+
   async function ask() {
     const q = goal.trim();
     if (!q || busy) return;
@@ -81,14 +129,18 @@ export default function Home() {
     setMessages((m) => [...m, { role: "user", text: q }]);
     setGoal("");
     try {
+      const cid = await ensureConversation();
       const r = await fetch(`${API}/runs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ goal: q, dataset_id: selected || null }),
+        body: JSON.stringify({ goal: q, dataset_id: selected || null, conversation_id: cid }),
       });
       const j = await r.json();
       if (j.ok) {
-        setMessages((m) => [...m, { role: "assistant", text: j.data.answer ?? "(no answer)", runId: j.data.run_id }]);
+        setMessages((m) => [
+          ...m,
+          { role: "assistant", text: j.data.answer ?? "(no answer)", runId: j.data.run_id, charts: j.data.charts ?? [] },
+        ]);
       } else {
         setError(j.error ?? "run failed");
         setMessages((m) => [...m, { role: "assistant", text: `Error: ${j.error}` }]);
@@ -100,10 +152,13 @@ export default function Home() {
     }
   }
 
-  const lastAssistant = (() => {
-    for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === "assistant") return i;
-    return -1;
-  })();
+  let lastAssistant = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant") {
+      lastAssistant = i;
+      break;
+    }
+  }
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8">
@@ -111,7 +166,7 @@ export default function Home() {
         <h1 className="text-2xl font-semibold">DataChat</h1>
         <p className="text-sm text-slate-500">
           Upload CSV/JSON into a dataset, then ask questions in plain English. Answers are grounded in
-          read-only SQL over your data — every run is traced.
+          read-only SQL over your data, with charts and multi-turn follow-ups — every run is traced.
         </p>
       </header>
 
@@ -126,7 +181,7 @@ export default function Home() {
             aria-label="dataset"
             className="mb-3 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
             value={selected}
-            onChange={(e) => setSelected(e.target.value)}
+            onChange={(e) => pickDataset(e.target.value)}
           >
             {datasets.length === 0 && <option value="">— none yet —</option>}
             {datasets.map((d) => (
@@ -174,11 +229,19 @@ export default function Home() {
         </section>
 
         {/* Chat panel */}
-        <section className="flex min-h-[420px] flex-col rounded-xl border border-slate-200 bg-white p-4">
+        <section className="flex min-h-[460px] flex-col rounded-xl border border-slate-200 bg-white p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs text-slate-400">{conversationId ? "conversation active" : "new conversation"}</span>
+            <button onClick={newChat} className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50">
+              New chat
+            </button>
+          </div>
+
           <div className="flex-1 space-y-3 overflow-y-auto">
             {messages.length === 0 && (
               <p className="text-sm text-slate-400">
-                Ask a question about your data, e.g. “Which category has the highest total sales?”
+                Ask a question about your data, e.g. “Which category has the highest total sales?” or “Show a
+                bar chart of the top 8 results.” Follow-ups keep the thread.
               </p>
             )}
             {messages.map((m, i) => (
@@ -188,10 +251,11 @@ export default function Home() {
                 className={
                   m.role === "user"
                     ? "ml-auto max-w-[80%] rounded-lg bg-slate-800 px-3 py-2 text-sm text-white"
-                    : "mr-auto max-w-[85%] rounded-lg bg-slate-100 px-3 py-2 text-sm whitespace-pre-wrap"
+                    : "mr-auto max-w-[90%] rounded-lg bg-slate-100 px-3 py-2 text-sm"
                 }
               >
-                {m.text}
+                <div className="whitespace-pre-wrap">{m.text}</div>
+                {m.role === "assistant" && m.charts?.map((c, j) => <ChartView key={j} spec={c.spec} />)}
                 {m.role === "assistant" && m.runId && (
                   <div className="mt-1 text-xs">
                     <a aria-label="trace" href={`${API}/traces`} target="_blank" rel="noreferrer" className="text-blue-600 underline">
