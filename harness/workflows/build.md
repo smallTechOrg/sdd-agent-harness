@@ -1,3 +1,8 @@
+---
+description: Turn a one-line idea into a working, demo-gated production agent — intake, spec, plan, generate from harness/patterns, demo gate.
+argument-hint: "<idea>"
+---
+
 # Workflow: /build
 
 Turn a one-line idea into a working, demo-gated agent. This is the procedure; the rules are

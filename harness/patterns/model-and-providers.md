@@ -5,7 +5,7 @@ or model is a **config change, never a code change**. **Generate this fresh at b
 *current* `langchain` (and the provider package, e.g. `langchain-anthropic` / `langchain-openai` /
 `langchain-google-genai`) — check the latest first; a guessed/old version 404s.
 
-Two model roles (see `harness.md`): the **coding agent** builds the app; the **product runtime LLM** is a
+Two model roles (see `harness.md`): **Claude Code** builds the app; the **product runtime LLM** is a
 separate, cheap-tier model set in `spec/tech-stack.md`. This file is about the runtime LLM.
 
 ## Runtime default = CHEAP tier

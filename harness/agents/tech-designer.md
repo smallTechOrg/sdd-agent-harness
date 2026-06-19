@@ -1,3 +1,9 @@
+---
+name: tech-designer
+description: Fills spec/tech-stack.md — provider, runtime model (cheap tier by default), DB, deploy target, tools/libs — pinning current, verified versions. Use in the /build draft phase or for a stack / provider / model change.
+tools: Read, Write, Edit, Glob, Grep, WebFetch
+---
+
 # Agent: tech-designer
 
 Fills **`spec/tech-stack.md`** — the build-time settings that drive `agent/config.py`. One job: turn intake

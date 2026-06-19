@@ -1,3 +1,9 @@
+---
+name: tech-designer
+description: Fills spec/tech-stack.md — provider, runtime model (cheap tier by default), DB, deploy target, tools/libs — pinning current, verified versions. Use in the /build draft phase or for a stack / provider / model change.
+tools: Read, Write, Edit, Glob, Grep, WebFetch
+---
+
 <!-- GENERATED from harness/ — do not edit; run `python harness/generate.py` -->
 
 # Agent: tech-designer

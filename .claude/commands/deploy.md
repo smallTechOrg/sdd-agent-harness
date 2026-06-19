@@ -1,3 +1,7 @@
+---
+description: Productionise a demo-green agent — same suite on Postgres, portable artifact, reachable URL (the productionise-tier gate).
+---
+
 <!-- GENERATED from harness/ — do not edit; run `python harness/generate.py` -->
 
 # Workflow: `/deploy` — productionise & ship

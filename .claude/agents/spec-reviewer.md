@@ -1,3 +1,9 @@
+---
+name: spec-reviewer
+description: Advisory review of the spec (coherence, completeness, EARS testability) and the built UI (Playwright screenshots of the real journey). Reads, runs, screenshots, and reports — edits no spec or code. Use after the spec is drafted and after the UI is built.
+tools: Read, Bash, Glob, Grep
+---
+
 <!-- GENERATED from harness/ — do not edit; run `python harness/generate.py` -->
 
 # Agent: spec-reviewer

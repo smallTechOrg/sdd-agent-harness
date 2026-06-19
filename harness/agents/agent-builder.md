@@ -1,3 +1,8 @@
+---
+name: agent-builder
+description: Orchestrator that turns a one-line idea into a working, demo-gated production agent — runs intake, coordinates the spec/plan sub-agents, generates code from harness/patterns, and drives the demo gate. The conductor for /build and /maintain.
+---
+
 # Agent: agent-builder (orchestrator)
 
 The master orchestrator. Turns a one-line idea into a working production agent by **generating code from

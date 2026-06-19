@@ -1,3 +1,8 @@
+---
+description: Turn a one-line idea into a working, demo-gated production agent — intake, spec, plan, generate from harness/patterns, demo gate.
+argument-hint: "<idea>"
+---
+
 <!-- GENERATED from harness/ — do not edit; run `python harness/generate.py` -->
 
 # Workflow: /build

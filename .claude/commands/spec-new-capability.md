@@ -1,3 +1,8 @@
+---
+description: Add one capability to a built agent end to end — EARS file, tool/node, eval pair, gate, delta record.
+argument-hint: "<capability>"
+---
+
 <!-- GENERATED from harness/ — do not edit; run `python harness/generate.py` -->
 
 # Workflow: `/spec-new-capability`

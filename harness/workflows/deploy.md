@@ -1,3 +1,7 @@
+---
+description: Productionise a demo-green agent — same suite on Postgres, portable artifact, reachable URL (the productionise-tier gate).
+---
+
 # Workflow: `/deploy` — productionise & ship
 
 Take the agent from "passes the demo gate on my laptop" to "the same suite passes on Postgres, a portable

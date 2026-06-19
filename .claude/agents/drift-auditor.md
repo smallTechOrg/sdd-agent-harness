@@ -1,3 +1,9 @@
+---
+name: drift-auditor
+description: Reconciles spec↔code after a build — updates the spec to match working reality, flags code that contradicts intentional spec decisions, and emits a delta record. Edits the spec only, never agent/ code. The first step of /maintain.
+tools: Read, Write, Edit, Bash, Glob, Grep
+---
+
 <!-- GENERATED from harness/ — do not edit; run `python harness/generate.py` -->
 
 # Agent: drift-auditor

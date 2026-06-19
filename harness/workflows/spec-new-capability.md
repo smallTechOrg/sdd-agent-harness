@@ -1,3 +1,8 @@
+---
+description: Add one capability to a built agent end to end — EARS file, tool/node, eval pair, gate, delta record.
+argument-hint: "<capability>"
+---
+
 # Workflow: `/spec-new-capability`
 
 Add one capability to a *built* agent, end to end: write its EARS file, make it real from the relevant

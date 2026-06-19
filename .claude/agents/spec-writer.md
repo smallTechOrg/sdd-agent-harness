@@ -1,3 +1,9 @@
+---
+name: spec-writer
+description: Writes the 4-file spec contract (product.md, capabilities/*.md with EARS criteria, agent.md, tech-stack.md) from intake answers. Specification only — never application code. Use in the /build draft phase and when specifying a new capability.
+tools: Read, Write, Edit, Glob, Grep
+---
+
 <!-- GENERATED from harness/ — do not edit; run `python harness/generate.py` -->
 
 # Agent: spec-writer

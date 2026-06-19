@@ -1,3 +1,8 @@
+---
+name: agent-builder
+description: Orchestrator that turns a one-line idea into a working, demo-gated production agent — runs intake, coordinates the spec/plan sub-agents, generates code from harness/patterns, and drives the demo gate. The conductor for /build and /maintain.
+---
+
 <!-- GENERATED from harness/ — do not edit; run `python harness/generate.py` -->
 
 # Agent: agent-builder (orchestrator)

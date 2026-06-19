@@ -1,3 +1,9 @@
+---
+name: planner
+description: Turns a complete spec into reports/implementation-plan.md — phased and gate-shaped, with Phase 1 shipping every named capability. Sequences the work; writes no application code. Use in the /build draft phase.
+tools: Read, Write, Glob, Grep
+---
+
 <!-- GENERATED from harness/ — do not edit; run `python harness/generate.py` -->
 
 # Agent: planner

@@ -1,3 +1,7 @@
+---
+description: The mechanical definition of done — the demo and productionise gate scripts whose exit code is the verdict.
+---
+
 <!-- GENERATED from harness/ — do not edit; run `python harness/generate.py` -->
 
 # Workflow: Gates — the mechanical definition of done

@@ -6,9 +6,9 @@
 > **Verify the latest library + model versions before pinning** — a guessed/old version 404s. Pin
 > CURRENT versions at build time (`pip index versions <pkg>`, the provider's models list).
 
-## Runtime LLM (the PRODUCT's model — separate from the coding agent that builds this)
+## Runtime LLM (the PRODUCT's model — separate from Claude Code, which builds this)
 
-The coding agent that builds this product can be any capable coding model. The PRODUCT's runtime LLM is
+Claude Code builds this product. The PRODUCT's runtime LLM is
 set here and **defaults to a CHEAP tier** (Haiku / Gemini-flash class) — see `agent/config.py` defaults
 (`harness/recipes/llm-providers.md`). Override only when the task needs more capability.
 

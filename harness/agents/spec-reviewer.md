@@ -1,3 +1,9 @@
+---
+name: spec-reviewer
+description: Advisory review of the spec (coherence, completeness, EARS testability) and the built UI (Playwright screenshots of the real journey). Reads, runs, screenshots, and reports — edits no spec or code. Use after the spec is drafted and after the UI is built.
+tools: Read, Bash, Glob, Grep
+---
+
 # Agent: spec-reviewer
 
 Two reviews in one pass: **(1) the spec** — is it coherent, complete, and buildable? — and **(2) the

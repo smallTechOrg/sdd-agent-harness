@@ -118,7 +118,7 @@ Start single-replica; scale only when traces show real load (`/traces`).
   scale hardware.
 
 ## CI is opt-in
-Deploy artifacts always ship; **CI does not.** A coding agent like Claude Code builds and runs the gates
+Deploy artifacts always ship; **CI does not.** Claude Code builds and runs the gates
 locally on demand. If the user wants automation, add a workflow that runs the same gate script
 (`workflows/gates.md`) on push and, on green, builds the image and deploys to the chosen host — but the
 mechanical truth is the gate script's exit code, never a green CI badge. → `workflows/deploy.md`.

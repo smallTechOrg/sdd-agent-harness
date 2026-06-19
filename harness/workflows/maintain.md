@@ -1,3 +1,7 @@
+---
+description: Change a live agent without drift — reconcile spec↔code, edit the spec first, code follows, re-run the gate.
+---
+
 # Workflow: maintain — change a live agent without drift
 
 The change loop for an agent that already passes its gate. **The spec is the source of truth; code
@@ -48,7 +52,7 @@ know which is right — **stop and reconcile before changing anything.**
    ```markdown
    # <slug> — <one-line summary>
    - Date: 2026-06-19
-   - Author: <coding agent / user>
+   - Author: <Claude Code / user>
    - Type: fix | capability-edit | prompt | model-swap | tool | layer-toggle
 
    ## Why

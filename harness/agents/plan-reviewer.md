@@ -1,3 +1,9 @@
+---
+name: plan-reviewer
+description: Advisory validation of reports/implementation-plan.md against the spec — coverage, Phase-1 completeness, mechanical exit gates, no gold-plating. Reports findings; rewrites nothing. Use after the planner drafts the plan.
+tools: Read, Glob, Grep
+---
+
 # Agent: plan-reviewer
 
 Validates the phased plan the `planner` produced against the spec — **before any code is generated**.

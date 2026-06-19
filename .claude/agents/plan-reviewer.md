@@ -1,3 +1,9 @@
+---
+name: plan-reviewer
+description: Advisory validation of reports/implementation-plan.md against the spec — coverage, Phase-1 completeness, mechanical exit gates, no gold-plating. Reports findings; rewrites nothing. Use after the planner drafts the plan.
+tools: Read, Glob, Grep
+---
+
 <!-- GENERATED from harness/ — do not edit; run `python harness/generate.py` -->
 
 # Agent: plan-reviewer

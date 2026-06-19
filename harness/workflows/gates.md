@@ -1,3 +1,7 @@
+---
+description: The mechanical definition of done — the demo and productionise gate scripts whose exit code is the verdict.
+---
+
 # Workflow: Gates — the mechanical definition of done
 
 "Done" is not an opinion, a green badge, or "looks right." **Done = the gate script exits `0`.** This file

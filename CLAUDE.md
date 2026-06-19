@@ -6,13 +6,14 @@
 spec in `spec/` if it is filled in; otherwise run `/build "<your idea>"`.
 
 ## What this repo is
-A frontier spec-driven harness that builds a production agentic AI agent from a spec. A coding agent
-generates the agent fresh from the recipes in `harness/patterns/` (current library versions), gated by
-mechanical checks. Nothing is a frozen app — the harness ships knowledge, not lock-in.
+A frontier spec-driven harness that builds a production agentic AI agent from a spec. Claude Code generates
+the agent fresh from the recipes in `harness/patterns/` (current library versions), gated by mechanical
+checks. Nothing is a frozen app — the harness ships knowledge, not lock-in.
 
 ## Map
 - `harness/harness.md` — the rules · `harness/workflows/` — procedures (/build, /deploy, …)
 - `harness/agents/` — sub-agent roles · `harness/patterns/` — the frontier code recipes (all 11 layers)
+- `.claude/agents/` — those roles as Claude Code subagents · `.claude/commands/` — those workflows as slash commands
 - `spec/` — the 4-file input contract you fill · `.githooks/` — mechanical guardrails
 
 A funded `APP_LLM_API_KEY` is required for a real run.

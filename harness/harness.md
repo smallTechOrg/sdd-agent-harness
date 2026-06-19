@@ -1,6 +1,6 @@
 # Harness — Build a production agent from a spec
 
-How a coding agent turns a one-line idea into a working, deployable agentic AI agent. The repo gives you
+How Claude Code turns a one-line idea into a working, deployable agentic AI agent. The repo gives you
 four things: a **spec contract** (what to build), **workflows** (how), **mechanical gates** (proof it
 works), and precise **pattern recipes** in `harness/patterns/` — proven, copyable code you generate fresh from.
 
@@ -18,8 +18,8 @@ Generate this fresh at build time from the recipes in `harness/patterns/`, pinni
 recipes carry proven, copyable code, so there is no frozen app to lock you in.
 
 ## Two model roles
-The **coding agent** builds it (any capable coding model). The **product's runtime LLM** is separate and
-defaults to a cheap tier, set in `spec/tech-stack.md`.
+**Claude Code** builds it. The **product's runtime LLM** is a separate choice (Anthropic / OpenAI / Google)
+and defaults to a cheap tier, set in `spec/tech-stack.md`.
 
 ## Done = gates pass (mechanical, two-tier)
 - **Demo:** server boots, `/health` 200, a real run completes, and the **outcome eval passes** — the agent
