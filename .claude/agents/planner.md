@@ -27,13 +27,13 @@ Plan toward exactly the two gates the harness defines. Do not add a tier.
   reachable URL. → `patterns/deploy.md`, `workflows/deploy.md`.
 
 ## How to order
-1. **Walking skeleton first.** One thin slice through every ON layer that the demo gate touches: config →
-   db (`init_db`) → llm → one tool → graph → runner → server (`/health`, `POST /runs`, `/traces`). This is
-   the generated agent's spine (built from the `harness/patterns/` recipes); reaching a green demo gate on the **simplest** capability is
-   Phase 1's exit.
-2. **Then capabilities, highest success-criteria leverage first.** Order `spec/capabilities/*.md` by what
-   the product's success criteria depend on; sequence so each phase ends on a runnable agent, never a
-   half-wired layer.
+1. **Walking skeleton first.** One thin slice through every ON layer the demo gate touches: config →
+   db (`init_db`) → llm → tools → graph → runner → server (`/health`, `POST /runs`, `/traces`) — the
+   generated agent's spine, built from the `harness/patterns/` recipes.
+2. **Phase 1 ships EVERY capability the user named, not just the simplest.** v1 covers the whole product the
+   prompt asked for (e.g. query AND charts AND multi-turn), each at least minimally + end-to-end, with a
+   **top-class UI**. Scope a feature *down* (one chart type, last-N-turns context), never *out* — deferring a
+   requested feature to a "Phase 2/3" is the cardinal planning mistake. Only `/deploy` is a later phase.
 3. **Defer optional layers to where their capability needs them.** Retrieval (`patterns/retrieval.md`),
    long-term memory (`patterns/memory.md`), multi-agent / sub-agents (`patterns/multi-agent.md`),
    guardrails + HITL (`patterns/guardrails-and-hitl.md`), durability (`patterns/durability.md`) earn a
@@ -54,26 +54,22 @@ Write exactly this shape:
 Spec: spec/product.md · capabilities/*.md · agent.md · tech-stack.md
 Tier targets: Demo (/build) · Productionise (/deploy) — see harness/workflows/gates.md
 
-## Phase 1 — Walking skeleton + <simplest capability>  [tier: demo]
-- Layers ON: <from spec/agent.md, only those this phase wires>
-- Build: <thin slice — config/db/llm/tool/graph/runner/server, from harness/patterns/*>
-- Capabilities: <capability file → its EARS criteria covered here>
-- Exit gate: demo gate exits 0 (server boots, /health 200, real run completes, outcome eval passes,
-  traces at /traces)  — harness/workflows/gates.md
+## Phase 1 — Full product: <all capabilities the prompt named>  [tier: demo]
+- Layers ON: <from spec/agent.md — all the v1 build wires>
+- Build: <skeleton config/db/llm/tools/graph/runner/server + UI, from harness/patterns/*>
+- Capabilities: <EVERY capability file → its EARS criteria, each at least minimally end-to-end>
+- Exit gate: demo gate exits 0 (server boots, /health 200, real run completes, every capability's outcome
+  eval passes, traces at /traces, UI journey green) — harness/workflows/gates.md
 
-## Phase 2 — <next capability>  [tier: demo]
-- Adds: <new layer/tool/recipe by path, e.g. patterns/retrieval.md>
-- Capabilities: <file → EARS criteria>
-- Exit gate: <capability eval passes; demo gate still green>
-
-## Phase N — Productionise  [tier: productionise]
+## Phase 2 — Productionise  [tier: productionise]
 - Build: Postgres parity (asyncpg), portable artifact (langgraph build / Dockerfile), deploy
   — patterns/deploy.md, harness/workflows/deploy.md
 - Exit gate: productionise gate exits 0 (tests green on Postgres, artifact builds, reachable URL)
 ```
 
 Rules for the plan:
-- One capability (or one tight cluster) per phase. Each phase ends runnable and gate-green.
+- **Every capability the user named ships in Phase 1 (demo tier)** — each at least minimally, end-to-end,
+  gate-green; never deferred to a post-demo phase. Only productionise (`/deploy`) is its own later phase.
 - Reference recipes **by path**; don't restate them.
 - Tag every phase `[tier: demo]` or `[tier: productionise]`.
 - Plan only ON layers and real capabilities — no gold-plating, no speculative phases.
