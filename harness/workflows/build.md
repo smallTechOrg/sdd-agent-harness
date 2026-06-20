@@ -161,7 +161,7 @@ proven, copyable code — generate from them. The Phase-1 spine (the walking ske
 | `agent/evals.py` | `patterns/observability-and-evals.md` | `outcome_eval` / `stable_outcome_eval` / `trajectory_eval` (imported by the suite + `gate_eval`) |
 | `agent/eval_lint.py` | `workflows/gates.md` | the `[@eval]` binding lint — gate check 1, run as `python -m agent.eval_lint` |
 | `agent/gate_eval.py` | `workflows/gates.md` | judge-stable outcome+trajectory CLI — gate check 6, run as `python -m agent.gate_eval` |
-| `agent/sessions.py` *(generate when a capability loads a heavy resource)* | `patterns/persistence.md` | session-scoped live-resource store + `load_resource` HTTP ingest seam — **REQUIRED by `C-SESSION-SCOPE`** for any "analyze an uploaded X" / multi-turn-over-a-loaded-resource agent; without it Q2 loses the resource (`SESSION_DATA_LOST`) and the data-agent gate fails Q1 |
+| `agent/sessions.py` *(generate whenever a resource — a pasted document, transcript, CSV, file, or built index — is loaded once and reused across follow-up turns, regardless of size/cost)* | `patterns/persistence.md` | session-scoped live-resource store + `current_session_id` ContextVar + `load_resource` HTTP ingest seam — **REQUIRED by `C-SESSION-SCOPE`** for any "analyze an uploaded/pasted X" / multi-turn-over-a-loaded-resource agent (a meeting transcript is a cheap string but still needs cross-turn reuse — don't skip because it isn't "heavy"); without it Q2 loses the resource (`SESSION_DATA_LOST`) and the data-agent gate fails Q1 |
 | `agent/guardrails.py` *(generate when a tool executes code/SQL)* | `patterns/guardrails-and-hitl.md` | AST-validated `safe_eval` (never regex dispatch) — **REQUIRED by `C-ACTION-SAFETY`** for any code/SQL-executing tool; an ungated code tool is an injection surface and fails the trajectory contract |
 
 The five gate-support modules (`evals.py`, `eval_lint.py`, `gate_eval.py` + the server/main they run against)
@@ -198,7 +198,11 @@ recipe, not here.** Do not paste a second copy into this file (a divergent paste
   `AttributeError`/`ImportError` at runtime or a key that 401s on the real run while the build is green.
 - **`agent/runner.py`** → copy verbatim from `patterns/interface.md` § *Code — `agent/runner.py`*. It carries
   `session_id`/`thread_id` + the checkpointer (short-term memory, the two-turn gate), the per-run token→cost
-  rollup into `runs.cost_usd`, and the `status:"completed"` field the gate reads off the `ok()` envelope.
+  rollup into `runs.cost_usd`, the `status:"completed"` field the gate reads off the `ok()` envelope, and the
+  `current_session_id` ContextVar set around `graph.ainvoke` so a session-resource query tool finds the active
+  session WITHOUT the model supplying it (`C-SESSION-SCOPE` read path — `patterns/persistence.md`). The loop
+  does NOT inject session context into tools, so omitting this line makes the query tool always report "no data
+  loaded" — a green gate, a broken data agent.
 
 These two files are the single source of truth; this workflow references them so the two never diverge.
 

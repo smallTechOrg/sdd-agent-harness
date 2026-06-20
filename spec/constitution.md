@@ -39,8 +39,10 @@ a core rule means fix the recipe/core; a domain rule means fix the spec.
 - **C-ENV-STRIP** · MUST · Strip inline `#` comments and surrounding whitespace from every env value before
   use. pydantic-settings does **not**; an `APP_LLM_API_KEY=sk-xxx # prod key` value silently 401s on the real
   run while the build is green. One field validator, highest-ROI rule in this file.
-  → enforced by: a unit test feeding a commented `.env` asserts the parsed value is clean (DEMO 2); the real
-  run (DEMO 5) would 401 otherwise.
+  → enforced by: a unit test feeding the commented value via an **env var** (`monkeypatch.setenv("APP_LLM_API_KEY", ...)`
+  or a tmp `.env`, **never an init kwarg** — kwargs aren't `APP_`-mapped and the `SecretStr` field keeps its
+  empty default, a false-RED; `patterns/model-and-providers.md` §Gate) asserts the parsed value is clean
+  (DEMO 2); the real run (DEMO 5) would 401 otherwise.
 - **C-ENV-IGNORE** · MUST · `extra="ignore"` in the pydantic-settings `model_config`, so undeclared `.env`
   keys (`TEST_DATABASE_URL`, CI vars) don't raise at startup.
   → enforced by: `agent/config.py` recipe + a test that loads settings with an extra key present (DEMO 2).
@@ -70,10 +72,15 @@ a core rule means fix the recipe/core; a domain rule means fix the spec.
   surface).
   → enforced by: a test feeds a disallowed construct and asserts it is rejected (DEMO 2); `forbid_tools`
   trajectory assertion (DEMO 6) proves no ungated mutating tool fired.
-- **C-SESSION-SCOPE** · MUST · Heavy resources (a DataFrame, a parsed file, an index) are keyed by
-  `session_id` and persist across follow-ups; they are released **only** on explicit session delete.
-  Per-question release is a correctness bug (`SESSION_DATA_LOST` on Q2).
-  → enforced by: the two-turn gate (DEMO 5, Q2 on the same session) fails if Q2 can't see Q1's resource.
+- **C-SESSION-SCOPE** · MUST · Any resource reused across turns (a DataFrame, a parsed file, an index, a
+  pasted document/transcript — regardless of size/cost) is keyed by `session_id` and persists across
+  follow-ups; released **only** on explicit session delete. Per-question release is a correctness bug
+  (`SESSION_DATA_LOST` on Q2). The **read path** matters as much as the populate path: the query tool finds
+  the session via the `current_session_id` ContextVar set by `runner.py` around `graph.ainvoke` — NOT a
+  model-supplied `session_id` parameter (the loop injects no session context; a `session_id` arg would be
+  hallucinated, so the tool always reports "no data loaded"). `patterns/persistence.md` § read path.
+  → enforced by: the two-turn gate (DEMO 5, Q2 on the same session) fails if Q2 can't see Q1's resource —
+  and Q1 itself fails if the read path is broken (the agent answers "no data loaded").
 - **C-USAGE-COST** · MUST · `input_tokens`, `output_tokens`, `cost_usd`, and `thread_id` are first-class
   columns on `runs` from Phase 1; `usage_metadata` is read via a type-guarded `.get()`.
   → enforced by: a persistence test asserts the columns populate after a run (DEMO 2); visible in `/traces`

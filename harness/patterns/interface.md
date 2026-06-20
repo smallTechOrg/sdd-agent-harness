@@ -72,8 +72,22 @@ async def run_agent(goal: str, model=None, run_id: str | None = None,
         "messages": prior + [SystemMessage(content=DOMAIN_PROMPT), HumanMessage(content=goal)],
         "iterations": 0, "answer": None, "run_id": run_id,
     }
-    async with span(run_id, "invoke_agent", "INTERNAL", goal=goal):
-        result = await graph.ainvoke(state, config=config)
+    # SESSION CONTEXT FOR TOOLS: the loop (patterns/react-agent.md tools_node) calls tools with ONLY the
+    # model-supplied args, so a session-resource query tool can't get session_id as a parameter without the
+    # model hallucinating it. Set it on a ContextVar around ainvoke; the tool reads current_session_id.get()
+    # (patterns/persistence.md § read path). The import is guarded so this same runner works for a key-free
+    # agent that never generates sessions.py (C-SESSION-SCOPE OFF). Always reset in finally.
+    try:
+        from .sessions import current_session_id      # generated for data agents (C-SESSION-SCOPE) only
+    except ImportError:
+        current_session_id = None
+    token = current_session_id.set(session_id) if current_session_id is not None else None
+    try:
+        async with span(run_id, "invoke_agent", "INTERNAL", goal=goal):
+            result = await graph.ainvoke(state, config=config)
+    finally:
+        if token is not None:
+            current_session_id.reset(token)
 
     async with get_sessionmaker()() as s:
         for m in result["messages"]:

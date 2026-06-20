@@ -111,18 +111,27 @@ accumulates per-session token + cost totals and the active resource id — that 
 always-visible session header reads (`patterns/interface.md`).
 
 ## Session-scoped resources — key by `session_id`, persist across turns, release only on delete
-A parsed file, a loaded DataFrame, a built index — anything **expensive to derive that follow-up questions
-reuse** — is a *session* resource, not a *per-question* one. Key it by `session_id` (= `thread_id`) and keep
-it for the life of the session. **Releasing it after each question is a correctness bug**: Q2 ("now break
-that down by region") arrives, the DataFrame is gone, and the agent answers `SESSION_DATA_LOST` instead of
-the follow-up — a green build, a broken product, the single most common multi-turn failure.
+A parsed file, a loaded DataFrame, a built index, **a pasted document or transcript** — anything that is
+**loaded once and reused across follow-up turns**, regardless of size or cost — is a *session* resource, not
+a *per-question* one. (Don't gate on "heavy" / "expensive to derive": a meeting transcript is just a cheap
+string, yet a Q2 like "now group those action items by owner" still needs it without a re-paste. The trigger
+is **reuse across turns**, not cost.) Key it by `session_id` (= `thread_id`) and keep it for the life of the
+session. **Releasing it after each question is a correctness bug**: Q2 ("now break that down by region")
+arrives, the DataFrame is gone, and the agent answers `SESSION_DATA_LOST` instead of the follow-up — a green
+build, a broken product, the single most common multi-turn failure.
 
 A small in-process store does it (the resource is live objects, not rows — the DB row records *that* a
-session has one + its metadata, the store holds the object):
+session has one + its metadata, the store holds the object). It also exports the **`current_session_id`
+ContextVar** that lets a tool find the active session without the model supplying it (see the read path below):
 ```python
 # agent/sessions.py — session-scoped live resources, keyed by session_id, released ONLY on delete
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
+
+# Set by agent/runner.py around graph.ainvoke (patterns/react-agent.md / interface.md) so a @tool can read the
+# active session WITHOUT exposing session_id as a model-supplied argument. A tool does `current_session_id.get()`.
+current_session_id: ContextVar[str | None] = ContextVar("current_session_id", default=None)
 
 @dataclass
 class SessionResources:
@@ -160,11 +169,39 @@ def load_resource(session_id: str, data: str, resource_id: str = "main") -> str:
     get_session(session_id).by_id[resource_id] = df
     return resource_id
 ```
-The capability's query tool then reads it back by `session_id` (never re-parses): e.g. a `query_dataframe`
-`@tool` does `df = get_session(session_id).by_id.get("main")` and returns `"No spreadsheet is loaded"` only
-when truly absent. The tool receives `session_id` the same way the runner threads it (`patterns/react-agent.md`
-injects run/session context into tools). For binary/large uploads expose a sibling `POST /sessions/{id}/resource`
-(multipart) that calls the identical `load_resource`.
+### The read path — how a tool finds the session WITHOUT the model supplying it (the missing piece)
+The query tool reads the resource back **by the active session**, never re-parses. The session is NOT a tool
+argument: a `@tool def query_dataframe(session_id: str)` would expose `session_id` as a model-visible field the
+LLM has to hallucinate (it doesn't know the thread id), and a parameterless tool has no other way to learn it.
+The loop does **not** inject run/session context — `patterns/react-agent.md`'s `tools_node` calls each tool
+with *only* `tc["args"]` (the model-supplied arguments). So the tool reads the **`current_session_id`
+ContextVar** that `agent/runner.py` sets around `graph.ainvoke` (and `agent/sessions.py` exports, above):
+```python
+# in agent/tools.py — the query tool takes ONLY domain args; the session comes from the ContextVar
+from langchain_core.tools import tool
+from .sessions import current_session_id, get_session
+
+@tool
+def query_dataframe(question: str) -> str:                # NOTE: no session_id parameter — model never sees it
+    """Answer a question about the loaded spreadsheet/transcript for THIS session."""
+    sid = current_session_id.get()
+    df = get_session(sid).by_id.get("main") if sid else None
+    if df is None:
+        return "No spreadsheet is loaded"                 # truly absent — not a hallucinated-id miss
+    ...                                                    # run the domain query against df
+```
+The runner sets the ContextVar so any tool in the run sees the right session (one line in `runner.py`,
+`patterns/interface.md` § *Code — `agent/runner.py`*):
+```python
+from .sessions import current_session_id
+token = current_session_id.set(session_id)
+try:
+    result = await graph.ainvoke(state, config=config)
+finally:
+    current_session_id.reset(token)
+```
+For binary/large uploads expose a sibling `POST /sessions/{id}/resource` (multipart) that calls the identical
+`load_resource`.
 
 Rules: load on first use, look up by `session_id` on every later turn, **release only** from an explicit
 `DELETE /sessions/{id}` (or a TTL sweep) — never at the end of a run. For a multi-process deploy, back the

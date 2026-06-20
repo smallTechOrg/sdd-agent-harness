@@ -162,3 +162,24 @@ proves `get_model()` + the configured provider actually work end-to-end (the dem
 - **Secret hygiene** — `repr(get_settings())` and `str(settings.llm_api_key)` never reveal the key
   (`SecretStr` masks it); the raw value is only reachable via `.get_secret_value()`.
 - **Fail loud** — `validate_required_config()` raises with the missing var named when the key is blank.
+
+> **⚠️ Drive these config tests through ENV VARS (`monkeypatch.setenv` or a tmp `.env`), NEVER init kwargs.**
+> `Settings(LLM_API_KEY="sk-x # p")` (or `APP_LLM_API_KEY=...`) is the obvious shortcut and it **silently
+> fails**: pydantic-settings maps the `APP_`-prefixed env spelling case-insensitively for *env vars only* — it
+> does NOT apply that mapping to Python `__init__` kwargs, so `APP_LLM_API_KEY`/`LLM_API_KEY` passed as a kwarg
+> is treated as an undeclared extra and **ignored** (`extra="ignore"`). The `SecretStr` field keeps its empty
+> default, the `mode="before"` strip validator never sees your value, and the test asserts `"" == "sk-x"` and
+> fails on a *correct* `config.py` — a false-RED. Always go through real env vars. `get_settings()` is
+> `@lru_cache`d, so `.cache_clear()` after setting env so the new value is read. Canonical DEMO-2 test:
+> ```python
+> from agent.config import get_settings
+>
+> def test_env_comment_strip(monkeypatch):
+>     monkeypatch.setenv("APP_LLM_MODEL", "claude-haiku-4-5 # prod model")   # env var, NOT a kwarg
+>     monkeypatch.setenv("APP_LLM_API_KEY", "sk-test-123 # prod key")
+>     get_settings.cache_clear()                                            # drop the cached singleton
+>     s = get_settings()
+>     assert s.llm_model == "claude-haiku-4-5"                              # inline comment + space stripped
+>     assert s.llm_api_key.get_secret_value() == "sk-test-123"             # SecretStr strip ran on the env value
+>     assert "sk-test-123" not in repr(s)                                  # secret stays masked
+> ```
