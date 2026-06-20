@@ -48,10 +48,25 @@ A green SQLite suite is necessary, **not sufficient** — this step is what make
 references `psycopg2`, a sync session, or blocks the loop, it surfaces here. Fix it in the recipe code, not
 with a special test path.
 
-### 3 — Migrations (first time on a non-throwaway Postgres)
-`init_db()`'s `create_all` is fine for the throwaway swap test and SQLite-first dev. For a Postgres you
-can't drop, generate the first **Alembic** migration from the same `Base.metadata` before deploying —
-versioned, reviewable DDL. Procedure and rationale: `patterns/persistence.md` (Migrations).
+### 3 — Migrations (first time on a non-throwaway Postgres) — Alembic lives HERE, never in Phase 1
+`init_db()`'s `create_all` is fine for the throwaway swap test and SQLite-first dev (`SPEC-RECONCILIATION.md`
+decision #7). The moment you target a Postgres you can't drop, switch to **versioned, reviewable DDL** via
+Alembic — this is the one place alembic exists; `/build` never generates it. Run the **strict sequence** in
+order (a guessed-out-of-order step leaves the DB un-upgradeable):
+
+```bash
+uv run alembic init -t async migrations          # async mako template — NOT the sync default (asyncpg stack)
+# point migrations/env.py at Base.metadata (target_metadata) and at APP_DATABASE_URL from agent.config
+uv run alembic revision --autogenerate -m "initial schema"   # diff Base.metadata → one revision file
+#   → READ the generated revision before applying; autogenerate misses some type/index changes
+uv run alembic upgrade head                       # apply: revision → upgrade
+uv run alembic current                            # confirm: prints the applied head revision == the new file
+```
+
+The order is load-bearing: **`init -t async` → autogenerate `revision` → review → `upgrade head` →
+`current`**. The async template matters (`asyncpg`, never `psycopg2`); `current` returning the new head is
+the proof the migration actually applied. Full procedure and rationale: `patterns/persistence.md`
+(Migrations). After this, the prod DB is migration-managed; auto-`create_all` is for SQLite/throwaway only.
 
 ### 4 — Build & boot the artifact locally
 Prove the image builds and boots before pushing it anywhere.
@@ -71,11 +86,16 @@ Redis only if multi-replica — `patterns/deploy.md`). Set secrets in the host's
 or the prompt**. Then prove the live URL with a *real* run, not a smoke ping:
 
 ```bash
-DEPLOY_URL="https://<your-host-url>"
+DEPLOY_URL="https://<your-host-url>"; SID="deploy-$(date +%s)"
 curl -fsS "$DEPLOY_URL/health"                                    # 200 {"ok":true}
 curl -fsS -X POST "$DEPLOY_URL/runs" -H 'content-type: application/json' \
-     -d '{"goal":"<a real goal from spec/capabilities>"}'         # completes; answer in the response
+     -d "{\"goal\":\"<a real goal from spec/capabilities>\",\"session_id\":\"$SID\"}"   # Q1 completes
+curl -fsS -X POST "$DEPLOY_URL/runs" -H 'content-type: application/json' \
+     -d "{\"goal\":\"<a follow-up>\",\"session_id\":\"$SID\"}"    # Q2 on the SAME session must also complete
 ```
+
+The live run is **two-turn**, the same bar as the demo gate (`workflows/gates.md` check 5): a follow-up
+that errors means session state didn't survive the deploy — that's a red deploy, not a quirk.
 
 Then open `$DEPLOY_URL/traces` — the run's spans (`invoke_agent`, `chat <model>`, `execute_tool.<name>`)
 must render. No visible trace = not done.
@@ -86,7 +106,7 @@ Each line is a hard check; the first failure aborts.
 
 ```bash
 #!/usr/bin/env bash
-# scripts/gate_deploy.sh — productionise tier. Run from repo root on the feature branch.
+# scripts/prod_gate.sh — productionise tier (the `make prod-gate` script). Run from repo root on the feature branch.
 set -euo pipefail
 : "${PG_URL:?set PG_URL to a Postgres asyncpg DSN}"
 : "${DEPLOY_URL:?set DEPLOY_URL to the reachable deployed URL}"
@@ -105,17 +125,26 @@ echo "3/5 no secret in the image context, no key in the prompt"
 echo "4/5 reachable URL: /health is 200"
 curl -fsS "$DEPLOY_URL/health" | grep -q '"ok":true'
 
-echo "5/5 real run completes AND its outcome eval passes (200 + wrong answer = FAIL)"
-RUN_JSON=$(curl -fsS -X POST "$DEPLOY_URL/runs" -H 'content-type: application/json' \
-           -d "${GATE_GOAL:?set GATE_GOAL to a goal with a known-good outcome}")
-python -m agent.evals --outcome --from-json "$RUN_JSON"   # exits non-zero if the outcome eval fails
+echo "5/5 two-turn run completes AND its judge-stable outcome eval passes (200 + wrong answer = FAIL)"
+SID="deploy-gate-$(date +%s)"
+R1=$(curl -fsS -X POST "$DEPLOY_URL/runs" -H 'content-type: application/json' \
+     -d "$(jq -n --arg g "${GATE_GOAL:?set GATE_GOAL to a goal with a known-good outcome}" --arg s "$SID" \
+            '{goal:$g, session_id:$s}')")
+echo "$R1" | jq -e '.status=="completed"' >/dev/null || { echo "Q1 did not complete"; exit 1; }
+curl -fsS -X POST "$DEPLOY_URL/runs" -H 'content-type: application/json' \
+     -d "$(jq -n --arg g "${GATE_FOLLOWUP:-And what are the next steps?}" --arg s "$SID" \
+            '{goal:$g, session_id:$s}')" \
+  | jq -e '.status=="completed"' >/dev/null || { echo "Q2 (follow-up) did not complete"; exit 1; }
+python -m agent.gate_eval --run-id "$(echo "$R1" | jq -r '.run_id // .id')" --goal "$GATE_GOAL"   # judge-stable; non-zero = FAIL
 
 echo "PRODUCTIONISE GATE: PASS"
 ```
 
-The eval step is OUTCOME (and TRAJECTORY where the capability defines one), fed by the EARS acceptance
-criteria — a `200` with the wrong answer **fails** (`patterns/observability-and-evals.md`). The gate is the
-same regardless of host (`patterns/deploy.md` § Hosts).
+The eval step is the **judge-stable** OUTCOME (multi-sampled, threshold-with-margin) plus TRAJECTORY where
+the capability defines one, fed by the EARS acceptance criteria via `agent.gate_eval` — a `200` with the
+wrong answer **fails**, and a lucky single-sample pass can't sneak through (`workflows/gates.md` § judge-
+stability, `patterns/observability-and-evals.md`). The gate is the same regardless of host
+(`patterns/deploy.md` § Hosts).
 
 ## On red
 Don't ship. Most failures are one of: a sync driver slipped in (step 2 — `patterns/persistence.md`), a

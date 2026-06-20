@@ -56,7 +56,13 @@ def build_graph(model):
                 continue
             tool = TOOL_MAP.get(tc["name"])
             async with span(state["run_id"], f"execute_tool.{tc['name']}", "TOOL", args=tc["args"]) as sp:
-                result = tool.invoke(tc["args"]) if tool else f"unknown tool: {tc['name']}"
+                # GRACEFUL DEGRADATION: a tool failure must NOT crash the loop — record it, hand the model an
+                # error ToolMessage, and let it recover (retry, route around, or finish with what it has).
+                try:
+                    result = tool.invoke(tc["args"]) if tool else f"unknown tool: {tc['name']}"
+                except Exception as exc:
+                    result = f"tool '{tc['name']}' failed: {type(exc).__name__}: {exc}"
+                    sp["error"] = result                       # surfaced in /traces in red
                 sp["result_preview"] = str(result)[:300]
             out.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
         return {"messages": state["messages"] + out}

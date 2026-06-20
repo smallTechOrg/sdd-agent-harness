@@ -10,9 +10,13 @@ recipe owns the serving edge **and** the self-contained `/traces` viewer (one ru
 
 ## Contract
 - `GET /health` → `{"ok": true}` — the liveness probe the demo gate hits.
-- `POST /runs {"goal": "..."}` → runs the agent, returns the `ok()` envelope with the answer + run id.
+- `POST /runs {"goal": "...", "session_id"?: "..."}` → runs the agent, returns the `ok()` envelope with the
+  answer + run id. `session_id` (optional) ties follow-up turns to one session/thread — the two-turn gate
+  (`workflows/gates.md` check 5) posts the same `session_id` on Q1 and Q2; it is persisted as `thread_id`
+  and keys the session-scoped resource store (`patterns/persistence.md`).
 - `GET /` → redirect to `/traces`; `GET /traces` → server-rendered timeline (no JS).
-- Port **8001** (override `APP_PORT`). One envelope shape everywhere: `ok(data)` / `err(msg)`.
+- Port **8001** (override `APP_PORT`). One envelope shape everywhere: `ok(data)` / `api_error(code, …)` —
+  every failure is a coded JSON error, never an error page or a raw 500.
 
 ## Code — `agent/runner.py` (proven, verbatim)
 Drives one run end-to-end: create the `Run`, build the graph, seed the domain system prompt + goal, invoke
@@ -23,7 +27,7 @@ import uuid
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy import select
 from .config import get_settings
-from .db import Message, Run, get_sessionmaker
+from .db import Message, Run, Span, get_sessionmaker
 from .graph import build_graph
 from .llm import get_model
 from .observability import span
@@ -32,13 +36,16 @@ DOMAIN_PROMPT = (  # the spec-writer overwrites this from spec/product.md (domai
     "You are a focused task agent. Use the tools available. Call finish when you have the answer."
 )
 
-async def run_agent(goal: str, model=None, run_id: str | None = None) -> dict:
+async def run_agent(goal: str, model=None, run_id: str | None = None,
+                    session_id: str | None = None) -> dict:
     settings = get_settings()
     run_id = run_id or uuid.uuid4().hex
     model = model or get_model()
 
     async with get_sessionmaker()() as s:
-        s.add(Run(id=run_id, goal=goal, status="running", iterations=0))
+        # session_id is the multi-turn thread key (= thread_id); it scopes the session resource store
+        # (patterns/persistence.md) so a follow-up turn sees Q1's loaded resource.
+        s.add(Run(id=run_id, goal=goal, status="running", iterations=0, thread_id=session_id))
         await s.commit()
 
     graph = build_graph(model)
@@ -54,40 +61,69 @@ async def run_agent(goal: str, model=None, run_id: str | None = None) -> dict:
             role = "assistant" if isinstance(m, AIMessage) else getattr(m, "type", "system")
             content = m.content if isinstance(m.content, str) else str(m.content)
             s.add(Message(id=uuid.uuid4().hex, run_id=run_id, role=role, content=content))
+        # sum this run's LLM-span tokens into first-class cost columns (the /traces dashboard reads these)
+        spans = (await s.execute(select(Span).where(Span.run_id == run_id, Span.kind == "LLM"))).scalars().all()
+        tok_in = sum((sp.attributes or {}).get("tokens", {}).get("input", 0) for sp in spans)
+        tok_out = sum((sp.attributes or {}).get("tokens", {}).get("output", 0) for sp in spans)
         run = (await s.execute(select(Run).where(Run.id == run_id))).scalar_one()
         run.status, run.answer, run.iterations = "completed", result["answer"], result["iterations"]
+        run.input_tokens, run.output_tokens = tok_in, tok_out
+        run.cost_usd = (tok_in * settings.price_in + tok_out * settings.price_out) / 1_000_000  # per-1M rates (config.py)
         await s.commit()
 
-    return {"run_id": run_id, "answer": result["answer"],
+    return {"run_id": run_id, "thread_id": session_id, "answer": result["answer"],
             "iterations": result["iterations"], "messages": result["messages"]}
 ```
 
-## Code — `agent/server.py` (proven, verbatim — self-contained, the `/traces` viewer lives here)
+## Code — `agent/server.py` (proven, verbatim — self-contained, the `/traces` dashboard lives here)
 The whole serving edge in one runnable file: `app = FastAPI(lifespan=...)` plus `/health`, `POST /runs`,
-and the inline `/traces` viewer (server-rendered HTML, no JS — `_traces_html` is the small helper). The
-span emission feeding this viewer is owned by `patterns/observability-and-evals.md`; the rendering lives
-here. `KIND_COLOR` maps the three span kinds the loop emits: `INTERNAL` (top run span), `LLM`, `TOOL`.
+and the inline `/traces` **observability dashboard** (server-rendered HTML, no JS, no Docker, no signup).
+The span emission feeding it is owned by `patterns/observability-and-evals.md`; the rendering lives here.
+`KIND_COLOR` maps the three span kinds the loop emits: `INTERNAL` (top run span), `LLM`, `TOOL`.
+
+`/traces` is built for a **non-technical reader**, not a developer reading a flame graph. It leads with an
+**overview band** — total runs, success rate, total + average cost, total tokens, average answer time — then
+a per-run **drill-down** that narrates each step in plain English ("Asked the AI model — 1.2s", "Looked up
+the refund policy — 0.3s") with the technical span name available but secondary. The whole point: a person
+who can't read code can still see *what the agent did, whether it worked, and what it cost*.
 ```python
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select
+from .config import validate_required_config
 from .db import get_sessionmaker, init_db, Run, Span
 from .runner import run_agent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_required_config()               # fail LOUD at boot if required config is missing (config.py)
     await init_db()                          # create_all — sqlite local-first
     yield
 
 app = FastAPI(title="agent", lifespan=lifespan)
 
-def ok(data):  return {"ok": True, "data": data}
-def err(msg):  return {"ok": False, "error": msg}
+# One envelope shape EVERYWHERE: ok(data) on success, api_error(code, ...) on failure — never an error page,
+# never a raw 500 stacktrace a non-tech user has to decode.
+def ok(data):
+    return {"ok": True, "data": data}
+
+class ApiError(Exception):
+    def __init__(self, code: str, msg: str = "", status: int = 500):
+        self.code, self.msg, self.status = code, msg or code, status
+
+def api_error(code: str, msg: str = "", status: int = 500) -> ApiError:
+    return ApiError(code, msg, status)
+
+@app.exception_handler(ApiError)
+async def _api_error_handler(_req, exc: ApiError):
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"ok": False, "error": {"code": exc.code, "message": exc.msg}}, status_code=exc.status)
 
 class RunIn(BaseModel):
     goal: str
+    session_id: str | None = None        # optional — ties follow-up turns to one session/thread (two-turn gate)
 
 @app.get("/health")
 async def health():
@@ -96,18 +132,33 @@ async def health():
 @app.post("/runs")
 async def create_run(body: RunIn):
     try:
-        return ok(await run_agent(body.goal))   # run_agent returns a dict — serialized straight into ok()
-    except Exception as e:                    # surface key/model failures as JSON, not a 500 stacktrace
-        return err(str(e))
+        # session_id threads through to the Run's thread_id + the session resource store (persistence.md)
+        return ok(await run_agent(body.goal, session_id=body.session_id))   # returns a dict → straight into ok()
+    except ApiError:
+        raise                                    # already coded — the handler renders the JSON envelope
+    except Exception as e:                        # surface key/model failures as a CODED JSON error, not a 500 stacktrace
+        raise api_error("RUN_FAILED", str(e), status=500)
 
 @app.get("/", include_in_schema=False)
 async def root():
     return RedirectResponse("/traces")
 
 KIND_COLOR = {"INTERNAL": "#6b7280", "LLM": "#2563eb", "TOOL": "#16a34a"}
+# plain-English label for each span kind — what a non-coder reads instead of the technical name
+KIND_PLAIN = {"INTERNAL": "Run step", "LLM": "Asked the AI model", "TOOL": "Used a tool"}
 
 def _esc(x) -> str:
     return str(x).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+def _plain_step(sp) -> str:
+    """Turn a span name into a human sentence. `execute_tool.search_docs` -> 'Used a tool: search docs'."""
+    if sp.name.startswith("execute_tool."):
+        return "Used a tool: " + sp.name.removeprefix("execute_tool.").replace("_", " ")
+    if sp.kind == "LLM":
+        return "Asked the AI model"
+    if sp.name == "invoke_agent":
+        return "Ran the agent"
+    return KIND_PLAIN.get(sp.kind, sp.name)
 
 async def _traces_html() -> str:
     async with get_sessionmaker()() as s:
@@ -116,26 +167,65 @@ async def _traces_html() -> str:
     by_run: dict[str, list[Span]] = {}
     for sp in spans:
         by_run.setdefault(sp.run_id, []).append(sp)
+
+    # --- OVERVIEW BAND: the at-a-glance numbers a non-technical reader wants first --------------------
+    total = len(runs)
+    ok_runs = sum(1 for r in runs if r.status == "completed")
+    total_cost = sum(r.cost_usd or 0 for r in runs)
+    total_tokens = sum((r.input_tokens or 0) + (r.output_tokens or 0) for r in runs)
+    def _run_ms(rid):                                    # wall time of a run = its widest span (the invoke_agent span)
+        sp = by_run.get(rid) or []
+        return max((s.end_ms - s.start_ms for s in sp), default=0)
+    avg_ms = (sum(_run_ms(r.id) for r in runs) / total) if total else 0
+    def _card(label, value):
+        return (f"<div style='flex:1;min-width:120px;background:#f9fafb;border:1px solid #e5e7eb;"
+                f"border-radius:8px;padding:12px'><div style='font-size:22px;font-weight:700'>{value}</div>"
+                f"<div style='color:#6b7280;font-size:13px'>{_esc(label)}</div></div>")
+    overview = (
+        "<div style='display:flex;gap:12px;flex-wrap:wrap;margin:0 0 24px'>"
+        + _card("runs", total)
+        + _card("succeeded", f"{ok_runs}/{total}" + (f" ({100*ok_runs//total}%)" if total else ""))
+        + _card("total cost", f"${total_cost:.4f}")
+        + _card("avg cost / run", f"${(total_cost/total if total else 0):.4f}")
+        + _card("total tokens", f"{total_tokens:,}")
+        + _card("avg answer time", f"{avg_ms/1000:.1f}s")
+        + "</div>"
+    )
+
+    # --- DRILL-DOWN: one collapsible card per run, each step narrated in plain English ----------------
     rows = []
     for r in runs:
         rspans = by_run.get(r.id, [])
         maxd = max((sp.duration_ms for sp in rspans), default=1) or 1
-        rows.append(f"<h2>{_esc(r.goal)} <small>[{_esc(r.status)}] · {len(rspans)} spans</small></h2>")
+        badge = "#16a34a" if r.status == "completed" else "#dc2626" if r.status == "error" else "#d97706"
+        meta = (f"<span style='color:{badge};font-weight:600'>{_esc(r.status)}</span> · "
+                f"{len(rspans)} steps · ${r.cost_usd or 0:.4f} · "
+                f"{(r.input_tokens or 0)+(r.output_tokens or 0):,} tokens")
+        steps = []
         for sp in rspans:
             color = KIND_COLOR.get(sp.kind, "#6b7280")
             bar = max(2, int(200 * sp.duration_ms / maxd))
             err_attr = sp.attributes.get("error") if isinstance(sp.attributes, dict) else None
-            err_html = f"<div style='color:#dc2626'>{_esc(err_attr)}</div>" if err_attr else ""
-            rows.append(
+            err_html = f"<div style='color:#dc2626;margin-left:8px'>⚠ {_esc(err_attr)}</div>" if err_attr else ""
+            steps.append(
                 f"<div style='margin:4px 0'>"
-                f"<span style='background:{color};color:#fff;padding:1px 6px;border-radius:4px'>{_esc(sp.kind)}</span> "
-                f"<b>{_esc(sp.name)}</b> "
+                f"<b>{_esc(_plain_step(sp))}</b> "
                 f"<span style='display:inline-block;height:8px;width:{bar}px;background:{color};vertical-align:middle'></span> "
-                f"{sp.duration_ms}ms"
-                f"<pre style='margin:2px 0;color:#374151'>{_esc(sp.attributes)}</pre>{err_html}</div>"
+                f"<span style='color:#6b7280'>{sp.duration_ms/1000:.2f}s</span> "
+                f"<span style='color:#9ca3af;font-size:12px'>{_esc(sp.name)}</span>"
+                f"<pre style='margin:2px 0 2px 8px;color:#374151;font-size:12px;white-space:pre-wrap'>{_esc(sp.attributes)}</pre>"
+                f"{err_html}</div>"
             )
-    body = "".join(rows) or "<p>No runs yet. POST a goal to /runs.</p>"
-    return f"<html><body style='font-family:system-ui;max-width:900px;margin:2rem auto'><h1>Traces</h1>{body}</body></html>"
+        rows.append(
+            f"<details style='border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin:0 0 12px'{' open' if r is runs[0] else ''}>"
+            f"<summary style='cursor:pointer'><b>{_esc(r.goal)}</b><br><small>{meta}</small></summary>"
+            f"<div style='margin-top:8px'>{''.join(steps) or '<i>no steps recorded</i>'}</div></details>"
+        )
+    body = overview + ("".join(rows) or "<p>No runs yet. POST a goal to /runs.</p>")
+    return (f"<html><body style='font-family:system-ui;max-width:900px;margin:2rem auto'>"
+            f"<h1>Observability dashboard</h1>"
+            f"<p style='color:#6b7280'>Every run the agent did, in plain English — what it did, whether it worked, what it cost.</p>"
+            f"{body}</body></html>")
 
 @app.get("/traces", response_class=HTMLResponse)
 async def traces():

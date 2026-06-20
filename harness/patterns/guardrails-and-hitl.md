@@ -132,6 +132,65 @@ available, an irreversible action must clear a deterministic check:
   runaway loop**, and either is HITL-gated (below) or is refused. The classification lives next to the tool
   (`patterns/tools-and-mcp.md` § action-safety); guardrails enforce it.
 
+### Code-executing tools: AST-validated eval — NEVER regex dispatch (proven, verbatim)
+If a tool runs **LLM-generated code** (a pandas/SQL expression, a calculator, a transform), you cannot
+gate it with a regex allowlist of substrings: the LLM emits chained calls (`df.groupby('x').agg(...).reset_index()`)
+that a regex can't reason about, and a substring filter is an injection surface (`__import__`, dunder
+attribute walks, `().__class__.__mro__`). **Parse it, walk the tree, and `eval` in a sealed namespace.**
+The check is: `ast.parse` (rejects syntax errors before they run) → walk every node and reject any
+disallowed node type / blocked attribute / out-of-allowlist name → `eval` with an **empty `__builtins__`**
+so nothing global is reachable.
+```python
+import ast
+
+# Safe builtins the expression MAY call — these are injected into the sealed namespace (an empty
+# `__builtins__` means even `len`/`sum` are unreachable unless bound here). Add domain-safe ones; never add
+# eval/exec/open/__import__.
+SAFE_BUILTINS = {"abs": abs, "min": min, "max": max, "sum": sum, "len": len, "round": round, "sorted": sorted}
+# allowlist of names the expression may reference (the safe builtins + objects bound at call time, e.g. {"df": df})
+ALLOWED_NAMES = frozenset(SAFE_BUILTINS) | frozenset({"df", "pd"})
+# attribute/name fragments that must never appear — the dunder + import + fs/process escape hatches
+BLOCKED_ATTRS = frozenset({
+    "__class__", "__bases__", "__mro__", "__subclasses__", "__globals__", "__builtins__",
+    "__import__", "__dict__", "__getattribute__", "eval", "exec", "compile", "open",
+    "os", "sys", "subprocess", "socket", "input",
+})
+# node types the expression grammar permits — anything else (Import, comprehension w/ calls, etc.) is rejected
+ALLOWED_NODES = (
+    ast.Expression, ast.Call, ast.Attribute, ast.Name, ast.Load, ast.Constant,
+    ast.BinOp, ast.UnaryOp, ast.BoolOp, ast.Compare, ast.Subscript, ast.Slice,
+    ast.Index if hasattr(ast, "Index") else ast.Slice,
+    ast.List, ast.Tuple, ast.Dict, ast.Set, ast.keyword,
+    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow, ast.FloorDiv,
+    ast.USub, ast.UAdd, ast.And, ast.Or, ast.Not,
+    ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn,
+)
+
+def safe_eval(expr: str, names: dict):
+    """Validate then evaluate an LLM-generated expression. Raises ValueError on anything unsafe — the
+    caller turns that into a fail-soft ToolMessage so the model can recover (never a process crash)."""
+    try:
+        tree = ast.parse(expr, mode="eval")          # syntax-reject before any evaluation
+    except SyntaxError as e:
+        raise ValueError(f"unparseable expression: {e}")
+    for node in ast.walk(tree):
+        if not isinstance(node, ALLOWED_NODES):
+            raise ValueError(f"disallowed syntax: {type(node).__name__}")
+        if isinstance(node, ast.Attribute) and node.attr in BLOCKED_ATTRS:
+            raise ValueError(f"blocked attribute: {node.attr}")
+        if isinstance(node, ast.Name):
+            if node.id in BLOCKED_ATTRS:
+                raise ValueError(f"blocked name: {node.id}")
+            if node.id not in ALLOWED_NAMES and node.id not in names:
+                raise ValueError(f"name not in allowlist: {node.id}")
+    ns = {**SAFE_BUILTINS, **names}                          # only the safe builtins + caller objects are visible
+    return eval(compile(tree, "<safe_eval>", "eval"), {"__builtins__": {}}, ns)  # sealed: no real globals
+```
+Wire it inside the tool body (`patterns/tools-and-mcp.md`), passing the live objects as `names`
+(e.g. `safe_eval(code, {"df": session_df, "pd": pd})`). The allowlists are the contract — widen
+`ALLOWED_NAMES` for your domain, never widen `BLOCKED_ATTRS` open. A `ValueError` returns a fail-soft
+`ToolMessage` (same contract as any tool error) so the model retries with a safer expression.
+
 ## HITL: pause for a human via `interrupt()` + a persistent checkpointer
 HITL is **not** a guardrail variant — it suspends the graph mid-run, persists full state, and resumes on a
 human decision that may arrive minutes or hours later. That durability is mandatory: **HITL requires a
@@ -240,6 +299,10 @@ truth. → `patterns/observability-and-evals.md`.
 No key needed; drive the loop with the scripted `FakeModel` (`patterns/react-agent.md`).
 - **Guardrails:** feed a goal/answer with a card number → assert `on_output` returns `block`; feed an email
   → assert `transform` and the address is masked in the payload; assert a `guardrail.*` span was recorded.
+- **AST safe-eval** (if a code-executing tool exists): `safe_eval("df.groupby('x').sum()", {"df": df})`
+  returns a real result; `safe_eval("__import__('os').system('id')", {})`, `safe_eval("().__class__.__mro__", {})`,
+  and `safe_eval("open('/etc/passwd')", {})` each raise `ValueError` — proving the allowlist + blocked-attrs
+  + empty-`__builtins__` actually seal the namespace, not a regex that a chained call slips past.
 - **HITL:** script the fake model to call a trigger-set tool; assert `ainvoke` returns an `__interrupt__`
   (the run paused, the tool did **not** run); resume with `Command(resume={"approved": False, ...})` →
   assert the tool body never executed and a rejection reason reached the model; resume a second run with

@@ -10,19 +10,36 @@ Turn a one-line idea into a working, demo-gated agent. This is the procedure; th
 does not restate them. Sub-agents share no memory: pass every intake answer to each explicitly.
 
 ```
-/build "<idea>"  →  intake (all questions upfront)  →  spec-writer + tech-designer + planner
-                 →  generate from harness/patterns on feature/<slug>-<date>  →  demo gate  →  running
+/build "<idea>"  →  intake (one round, ≤4 Qs upfront)  →  spec-writer + tech-designer + planner
+                 →  /analyze pre-flight (mechanical)  →  generate from harness/patterns
+                 →  demo gate (run→read→fix→re-run loop)  →  running
 ```
+
+**What "done" means here, and what we promise the user.** `/build` does not hand back a document — it
+hands back an agent that **booted and gave the right answer, proven by a gate that exits 0**. Lead with
+that proof. Be honest about the two zones it spans (`SPEC-RECONCILIATION.md` § F):
+
+- a **reused, version-pinned TESTED CORE** (server, ReAct loop, config, envelope, persistence, traces,
+  the gate harness, the UI shell) — *code is the source of truth there, like any framework dependency*;
+- a **GENERATED DOMAIN** (capability nodes, tools, prompts, EARS evals, domain UI screens) — *the spec
+  is the source of truth there.* `/build` fills only the domain seams; it does not regenerate the core.
+
+Do not tell the user "the spec authored everything." Tell them: the core is proven once and reused; the
+spec drives the domain; **every acceptance criterion is bound to an executable check** and the gate
+proves the agent ran.
 
 After intake, run to the demo gate without pausing (`agent-builder.md` § Autonomy). Pause only on a
 true blocker — then ask via the dynamic question UI, never guess.
 
 ---
 
-## 1. Intake — one round, 4 questions
+## 1. Intake — one round, ≤4 questions
 
-One pass through the dynamic question UI (`AskUserQuestion`). Ask all four at once; do not drip-feed.
-The idea may already answer Q1 — still confirm it. The answers seed the spec, so capture them verbatim.
+**Load `AskUserQuestion` first.** It is a deferred tool — run `ToolSearch` with
+`select:AskUserQuestion` (or search `"ask user question"`) to fetch its schema BEFORE intake, then use
+it for every question and for the (rare) blocker prompt. A text-only "Proceed?" is never acceptable
+(`harness.md`; user memory). One pass through it; ask all four at once; do not drip-feed. The idea may
+already answer Q1 — still confirm it. The answers seed the spec, so capture them verbatim.
 
 | # | Question | Options (pick or free-type) | Feeds |
 |---|----------|-----------------------------|-------|
@@ -39,8 +56,9 @@ model in `patterns/tools-and-mcp.md`: in-process `@tool` for own logic/data, MCP
 **Collect the API key here (Q4) — the build runs unattended to the green gate.**
 If the user skips it, ask once before generating code. Never pause mid-build for it.
 
-If the spec or plan needs clarification after drafting, ask a second round upfront before touching any
-file. All questions in, then build — no gates in between.
+The only sanctioned second question round is the `/analyze` pre-flight (§2a) surfacing an unresolved
+`[NEEDS CLARIFICATION]` — ask it upfront via `AskUserQuestion`, resolve it, then build with no further
+pauses. All questions in, then build — no gates in between, no mid-build "Proceed?" (user memory).
 
 ## 2. Draft the spec + plan (no code yet)
 
@@ -48,16 +66,50 @@ With the four answers, fan out (`agent-builder.md` § Draft):
 
 - **spec-writer** fills `spec/product.md` (what / success criteria / domain / out-of-scope) and one
   `spec/capabilities/<name>.md` per capability — each criterion as an EARS line
-  *"WHEN `<trigger>` the system SHALL `<response>`"* (these become the eval gate's inputs).
+  *"WHEN `<trigger>` the system SHALL `<response>`"*, and **every EARS line carries an `[@eval: …]`
+  token** binding it to its executable check. This token is the differentiator (`COMPETITIVE-RESEARCH.md`
+  §5): the criterion is not "documented," it is *bound* to a check that the gate runs. Shape:
+
+  ```markdown
+  - WHEN asked about refund timing the system SHALL state 5 business days.
+    [@eval: tests/test_refunds_gate.py::test_refund_timing]
+  ```
+
+  The agent fills the token; **the non-coder never sees it** — it surfaces only as the gate's pass/fail
+  line. Stories are **prioritised P1/P2/P3** so the v1 slice is an explicit choice, not an accident
+  (`COMPETITIVE-RESEARCH.md` §2.6): P1 is the one real capability; P2/P3 are spec-registered, deterministic,
+  journey-complete **stubs** (`SPEC-RECONCILIATION.md` decision #2/#3) — never silent gaps.
 - **tech-designer** fills `spec/tech-stack.md` (provider, runtime model, DB = local-first
   `sqlite+aiosqlite`, deploy target, tools) and marks layers in `spec/agent.md` — default baseline ON:
   ReAct Deep-Agent, in-process tools (+ MCP if Q2 = external), memory, observability, evals; everything
   else OFF until a capability needs it (`planner.md` § How to order).
 - **planner** writes `reports/implementation-plan.md` (`planner.md` shape): Phase 1 = walking skeleton +
-  simplest capability, tagged `[tier: demo]`.
+  the **P1** capability real + P2/P3 as deterministic stubs, tagged `[tier: demo]`.
 - **spec-reviewer** + **plan-reviewer** validate in the background — advisory only; the gate is mechanical.
 
 Every layer marked ON must trace to a capability; no speculative layers (`agent.md` is the on/off ledger).
+
+## 2a. `/analyze` pre-flight — mechanical, BEFORE any code
+
+Catch drift *before* generation, when it is cheap (`COMPETITIVE-RESEARCH.md` §2.4). This is a checklist
+the agent runs against the drafted spec; **every line is a hard pass/fail**, and any failure stops the
+build until the spec is fixed — no code is written against a spec that fails pre-flight.
+
+| # | Pre-flight check | Fails when |
+|---|------------------|-----------|
+| 1 | **Every success criterion → ≥1 capability** | a `spec/product.md` success criterion maps to no `spec/capabilities/*.md` |
+| 2 | **Every capability's layer is ON** | a capability needs a layer (retrieval, memory, MCP…) that `spec/agent.md` leaves OFF |
+| 3 | **Every tool has a tech-stack home** | a tool a capability calls is absent from `spec/tech-stack.md` |
+| 4 | **Every EARS line has a resolvable `[@eval]`** | a `WHEN … SHALL …` line has no `[@eval:]` token, or the token points at a path the build won't create |
+| 5 | **No unresolved `[NEEDS CLARIFICATION]`** | any such marker remains in the spec — this **blocks generation** |
+| 6 | **Exactly one P1; P2/P3 are stubs** | zero or many P1 capabilities, or a non-P1 marked as a real build target |
+
+On a check-1/2/3/6 failure the agent self-corrects the spec and re-runs the pre-flight (it is a loop, like
+the gate). On check-4 it adds the missing token. On check-5 — an unresolved `[NEEDS CLARIFICATION]` — it
+asks the user one focused question via `AskUserQuestion` (this is the legitimate second intake round, all
+questions upfront), resolves it, then proceeds. The build never generates code against a spec that still
+fails pre-flight. This is the honest version of "spec-driven": the spec must be internally consistent and
+fully bound to checks before a single line is written.
 
 ## 3. Generate code fresh — on `feature/<slug>-<date>`
 
@@ -143,23 +195,27 @@ async def run_agent(goal: str, model=None, run_id: str | None = None) -> dict:
 
 Build only what the spec needs — no gold-plating (`agent-builder.md`).
 
-## 4. Demo-tier gate — run → diagnose → fix → repeat until green
+## 4. Demo-tier gate — run → read → fix → re-run until green
 
-**Done = the gate exits 0**, never prose. Run it (`workflows/gates.md`); when it fails, read the
-output, fix the cause, and re-run. The gate is a loop exit condition, not a one-shot checkpoint.
+**Done = the gate exits 0**, never prose. The gate is the loop's exit condition, not a one-shot
+checkpoint: run it, read the failure, fix the cause, re-run. The full check list and the exact script
+live in `workflows/gates.md` — this is the one-line entry:
 
 ```bash
-python -m pytest -q                                   # FakeModel loop, no key needed
-python -m agent &                                     # uvicorn on :8001 (agent/__main__.py)
-until curl -sf localhost:8001/health; do sleep 1; done
-curl -sf -X POST localhost:8001/runs -d '{"goal":"<a real success-criterion task>"}' \
-     -H 'content-type: application/json'              # real run → outcome eval
-# open localhost:8001/traces — timeline of runs + spans must render
+make gate          # the whole DEMO suite; echo $? — 0 is the only pass (workflows/gates.md)
 ```
 
-**When a step fails:** read the actual error output, trace it to the source file, fix it, re-run
-the gate from that step. Don't ask the user; don't guess. The only external blocker is an unfunded
-key — everything else is diagnosable from logs and `/traces`. qa-auditor confirms the exit code.
+What that script proves (do not weaken any of these — see `workflows/gates.md` for the full table):
+server boots over real HTTP, `/health` 200, a real **TWO-TURN** run (Q1 then a follow-up Q2 on the same
+session — **any Q2 error fails the gate**), the **outcome eval passes with judge-stability** (a 200 with
+a wrong answer fails; the judge is multi-sampled so exit-0 is deterministic, not probabilistic), the
+`[@eval]` lint (every EARS line resolves to a real check), the deterministic test pyramid **and** a
+Playwright UI E2E (post-JS DOM, no console error), and `/traces` renders the run's spans.
+
+**When a step fails — self-diagnose, don't pause.** Read the actual error, trace it to the source file,
+read the failing span at `/traces`, fix the cause, re-run the gate from that step. The only external
+blocker is an unfunded/missing key — everything else is diagnosable from logs + `/traces`, so resolve it
+yourself. qa-auditor confirms the exit code; "should pass" is never a pass (`harness.md` § honest).
 
 **After the gate passes**, leave the server running and tell the user how to reach it:
 - Backend: `http://localhost:8001` · Traces: `http://localhost:8001/traces`

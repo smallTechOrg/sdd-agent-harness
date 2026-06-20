@@ -110,6 +110,48 @@ the start it's free. For **multi-turn** products add a `threads` (session) table
 accumulates per-session token + cost totals and the active resource id — that row is what the UI's
 always-visible session header reads (`patterns/interface.md`).
 
+## Session-scoped resources — key by `session_id`, persist across turns, release only on delete
+A parsed file, a loaded DataFrame, a built index — anything **expensive to derive that follow-up questions
+reuse** — is a *session* resource, not a *per-question* one. Key it by `session_id` (= `thread_id`) and keep
+it for the life of the session. **Releasing it after each question is a correctness bug**: Q2 ("now break
+that down by region") arrives, the DataFrame is gone, and the agent answers `SESSION_DATA_LOST` instead of
+the follow-up — a green build, a broken product, the single most common multi-turn failure.
+
+A small in-process store does it (the resource is live objects, not rows — the DB row records *that* a
+session has one + its metadata, the store holds the object):
+```python
+# agent/sessions.py — session-scoped live resources, keyed by session_id, released ONLY on delete
+from dataclasses import dataclass, field
+from typing import Any
+
+@dataclass
+class SessionResources:
+    by_id: dict[str, Any] = field(default_factory=dict)   # resource_id -> live object (DataFrame, index, …)
+
+_SESSIONS: dict[str, SessionResources] = {}
+
+def get_session(session_id: str) -> SessionResources:
+    """Return (creating if absent) the resource bag for a session. Survives every turn on that session."""
+    return _SESSIONS.setdefault(session_id, SessionResources())
+
+def release_session(session_id: str) -> None:
+    """Drop a session's resources — call ONLY on explicit session delete, NEVER per question."""
+    _SESSIONS.pop(session_id, None)
+```
+Rules: load on first use, look up by `session_id` on every later turn, **release only** from an explicit
+`DELETE /sessions/{id}` (or a TTL sweep) — never at the end of a run. For a multi-process deploy, back the
+same interface with Redis/disk so the resource survives the worker that loaded it; the *contract* (key by
+session, release on delete) is identical. The `threads` row (below) records the active resource id so a
+reconnecting UI knows what's loaded.
+
+## The JSON envelope — `ok()` / `api_error()`, never an error page
+Every route returns one shape, so the UI parses one contract and a non-tech user never hits a raw stacktrace
+or an `error.html`. On success: `ok(data)`. On failure: read `state["error"]`, log it **with the `run_id`**,
+and raise/return `api_error("RUN_FAILED", status=500)` — a coded, JSON error the UI renders as a friendly
+message with the run id to deep-link into `/traces`. The envelope helpers live in `agent/server.py`
+(`patterns/interface.md`); persistence's part is that a failed run writes `status="error"` + the reason so
+`/traces` and the envelope tell the same story.
+
 ## Adding domain entities — extend, don't fork
 Your capability's nouns (tickets, invoices, documents, …) are new models on the **same `Base`**. Same engine,
 same session, same SQLite→Postgres ladder — `init_db()` creates them automatically.
