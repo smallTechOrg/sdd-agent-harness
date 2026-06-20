@@ -1,7 +1,7 @@
 [project]
 name = "agentic-boilerplate"
 version = "0.1.0"
-description = "Opinionated agentic-AI boilerplate — a grounded assistant (retrieval, memory, guardrails/HITL, streaming) proven by a mechanical gate"
+description = "Opinionated agentic-AI boilerplate — a data-analysis assistant (pandas tools, memory, guardrails/HITL, streaming) proven by a mechanical gate"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "fastapi==0.115.6",
@@ -38,5 +38,12 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["."]
 testpaths = ["tests"]
+# Browser e2e tests import Playwright's sync API, which installs greenlet-based
+# event-loop machinery at *collection* time — that poisons pytest-asyncio's
+# per-test loops and makes every async test error. So a bare `pytest` excludes
+# the e2e dir and runs the unit/gate suite clean. Run e2e explicitly against a
+# live server with: pytest tests/e2e/ -o addopts=""  (gate check 8 does this).
+addopts = "--ignore=tests/e2e"
