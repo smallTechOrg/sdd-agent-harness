@@ -20,18 +20,25 @@ Don't hand-roll session state. LangGraph's checkpointer persists `AgentState` pe
 turn resumes with full history. Same SQLite-then-Postgres ladder as the rest of the app (`agent/db.py`).
 
 ```python
-# agent/memory/short_term.py — wire a checkpointer into build_graph(...).compile(checkpointer=cp)
+# agent/memory/short_term.py — the checkpointer is passed INTO build_graph (it owns the one .compile()).
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver      # pip: langgraph-checkpoint-sqlite
 # prod: from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  (asyncpg DSN — NEVER psycopg2)
 
-# In server lifespan, open once and keep:
-#   cp = await AsyncSqliteSaver.from_conn_string("checkpoints.db").__aenter__()
-#   graph = build_graph(model).compile(checkpointer=cp)
-# Then invoke with a thread:
+# In the server lifespan, open ONCE and keep on app.state (patterns/interface.md server.py):
+#   cm = AsyncSqliteSaver.from_conn_string("checkpoints.db")
+#   app.state.checkpointer = await cm.__aenter__()
+# build_graph takes it as a parameter — DO NOT call .compile() on build_graph's result (that double-compiles):
+#   graph = build_graph(model, checkpointer=cp)          # NOT build_graph(model).compile(checkpointer=cp)
+# Then invoke with a thread (runner.py also reloads prior messages — see below):
 #   await graph.ainvoke(state, config={"configurable": {"thread_id": session_id}, "recursion_limit": 50})
 ```
-The thread is the session. Resuming the same `thread_id` replays prior messages automatically — that is the
-whole feature. Surface `thread_id` on `POST /runs` so a client can continue a conversation.
+The thread is the session. Resuming the same `thread_id` keeps the transcript in the checkpoint — but note
+the `AgentState` has **no `add_messages` reducer** (`patterns/react-agent.md` WARNING), so the freshly-seeded
+`messages` would *overwrite* the replay. The **runner owns the merge**: on a follow-up turn it reads
+`cp["channel_values"]["messages"]` out of the checkpoint, strips the stale `SystemMessage`, and prepends them
+to a fresh system prompt + the new goal (`patterns/interface.md` `run_agent`). The plain-list rule and the
+checkpointer coexist exactly this way. Surface `thread_id` on `POST /runs` so a client can continue a
+conversation.
 
 ## Long-term memory — the 3-type external store
 One store, three record types (the namespace tells them apart). Earns its place beyond working/short-term.

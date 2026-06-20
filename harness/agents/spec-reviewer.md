@@ -60,7 +60,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
 OUT = Path("reports/ui"); OUT.mkdir(parents=True, exist_ok=True)
-BASE = "http://localhost:3000"
+BASE = "http://localhost:3001"        # the Next.js dev port (NOT 3000 — patterns/interface.md, nextjs.md)
 # One entry per PRIMARY screen the spec describes (usually just the journey page). Keep it to the journey,
 # not a shot per capability — same scoping rule as patterns/interface.md.
 SCREENS = [

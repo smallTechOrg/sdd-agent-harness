@@ -40,7 +40,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from .config import get_settings
 from .graph import build_graph          # patterns/react-agent.md — the ReAct loop
-from .llm import get_model              # patterns/llm-providers.md — get_model(tier=...)
+from .llm import get_model              # patterns/model-and-providers.md — get_model(tier=...)
 from .observability import span         # patterns/observability-and-evals.md
 from .state import AgentState           # +run_id
 
@@ -82,7 +82,7 @@ Wire the supervisor as a normal ReAct graph whose `TOOLS` include `make_delegate
 supervisor = build_graph(get_model(tier="orchestrator"))   # stronger tier — it plans, it doesn't grind
 ```
 `get_model(tier=...)` resolves to the per-role model IDs in `spec/tech-stack.md` (e.g. orchestrator →
-Sonnet-4.6 class, cheap → Haiku-4.5 / Gemini-flash class) → `patterns/llm-providers.md`.
+Sonnet-4.6 class, cheap → Haiku-4.5 / Gemini-flash class) → `patterns/model-and-providers.md`.
 
 ## Mandatory mechanics (do not omit)
 - **Isolated context** — fresh message list per sub-agent; never thread the supervisor's history in.

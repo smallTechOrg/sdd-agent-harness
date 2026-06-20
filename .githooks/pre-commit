@@ -1,10 +1,50 @@
 #!/usr/bin/env bash
-# Mechanical guardrails (decisions Q180 secret-scan, Q190 git-as-hooks). Enable once with:
+# Mechanical guardrails — the local owners of C-SECRET-TYPE, C-BRANCH-PR, C-NO-ADD-ALL (spec/constitution.md).
+# Enable once (the build does this as its first action; or run it by hand):
 #   git config core.hooksPath .githooks
 set -euo pipefail
 
 staged=$(git diff --cached --name-only --diff-filter=ACM || true)
 [ -z "$staged" ] && exit 0
+
+# -1) GENERATED-FRONT-END FRESHNESS — the mechanical owner of the harness/ ⇄ .claude/ + CLAUDE.md equivalence
+#     (harness.md § generated). CLAUDE.md and generate.py assert ".claude/ ARE the harness roles/workflows as
+#     Claude Code subagents/slash commands, never hand-edited" — but for three iterations nothing enforced it
+#     and the slash commands a user actually invokes drifted stale (HARDENING-LOG iter 6). If a commit touches
+#     the harness source of those front-ends (or generate.py itself), the committed front-ends must already be
+#     regenerated. `generate.py --check` diffs disk vs what it would emit; a stale tree blocks the commit.
+if echo "$staged" | grep -qE '^harness/(workflows|agents)/|^harness/generate\.py$'; then
+  if command -v python >/dev/null 2>&1; then PY=python; else PY=python3; fi
+  if ! "$PY" harness/generate.py --check; then
+    echo "BLOCKED (generated front-ends stale): you edited harness/ but .claude/ + CLAUDE.md weren't regenerated."
+    echo "  -> run:  python harness/generate.py   then stage .claude/ + CLAUDE.md and re-commit."
+    exit 1
+  fi
+fi
+
+# 0) C-BRANCH-PR — `main` is boilerplate-only: block app code (agent/**, ui/**, tests/**) on the default
+#    branch. App code belongs on a feature/<slug>-<date> branch with a PR open. Allow harness/spec/docs edits.
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
+  if echo "$staged" | grep -qE '^(agent/|ui/|tests/)'; then
+    echo "BLOCKED (C-BRANCH-PR): app code (agent/, ui/, tests/) staged on '$branch'."
+    echo "  -> branch first:  git switch -c feature/<slug>-$(date +%Y-%m-%d)   (main is boilerplate-only)"
+    exit 1
+  fi
+fi
+
+# 0b) C-NO-ADD-ALL — refuse a commit that looks like a `git add -A`/`git add .` sweep: many unrelated paths
+#     staged at once (a leftover/secret-sweeping smell). Stage specific files. Override a genuine wide commit
+#     with ALLOW_WIDE_COMMIT=1.
+if [ "${ALLOW_WIDE_COMMIT:-0}" != "1" ]; then
+  count=$(printf '%s\n' "$staged" | grep -c . || true)
+  topdirs=$(printf '%s\n' "$staged" | sed 's#/.*##' | sort -u | grep -c . || true)
+  if [ "$count" -gt 30 ] && [ "$topdirs" -gt 3 ]; then
+    echo "BLOCKED (C-NO-ADD-ALL): $count files across $topdirs top-level dirs staged — looks like 'git add -A/.'."
+    echo "  -> stage specific files; re-run with ALLOW_WIDE_COMMIT=1 only if this wide commit is intentional."
+    exit 1
+  fi
+fi
 
 # 1) never commit a .env (or any *.env)
 if echo "$staged" | grep -qE '(^|/)\.env$|\.env\.local$'; then

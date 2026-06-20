@@ -9,6 +9,7 @@ subagents and slash commands.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -46,24 +47,46 @@ def _emit(src: str) -> str:
     return BANNER + src
 
 
+def _targets() -> list[tuple[Path, str]]:
+    """The (path, expected-content) pairs generate.py owns — the single source of the harness→.claude map."""
+    out: list[tuple[Path, str]] = [(ROOT / "CLAUDE.md", ENTRY)]
+    for a in sorted((HARNESS / "agents").glob("*.md")):
+        out.append((ROOT / ".claude" / "agents" / a.name, _emit(a.read_text())))
+    for w in sorted((HARNESS / "workflows").glob("*.md")):
+        out.append((ROOT / ".claude" / "commands" / w.name, _emit(w.read_text())))
+    return out
+
+
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     print("wrote", path.relative_to(ROOT))
 
 
+def check() -> int:
+    """Mechanical owner of the harness→front-end equivalence: exit 0 iff every generated file on disk matches
+    what generate.py would emit from harness/. A stale .claude/ (the rules a user reads diverging from the
+    rules the authors edit) is a BUILD-BLOCKING failure, wired into .githooks/pre-commit (HARDENING-LOG iter 6)."""
+    stale = [p for p, text in _targets()
+             if not p.exists() or p.read_text() != text]
+    if stale:
+        print("STALE Claude Code front-ends — run `python harness/generate.py` and commit the result:",
+              file=sys.stderr)
+        for p in stale:
+            print(f"  {p.relative_to(ROOT)}", file=sys.stderr)
+        return 1
+    print("generate-check: .claude/ + CLAUDE.md are in sync with harness/ ✓")
+    return 0
+
+
 def main() -> None:
-    _write(ROOT / "CLAUDE.md", ENTRY)
-
-    agents = sorted((HARNESS / "agents").glob("*.md"))
-    for a in agents:
-        _write(ROOT / ".claude" / "agents" / a.name, _emit(a.read_text()))
-
-    for w in sorted((HARNESS / "workflows").glob("*.md")):
-        _write(ROOT / ".claude" / "commands" / w.name, _emit(w.read_text()))
-
-    print(f"generated Claude Code front-ends from harness/ ({len(agents)} agents)")
+    targets = _targets()
+    for path, text in targets:
+        _write(path, text)
+    print(f"generated Claude Code front-ends from harness/ ({len(targets) - 1} files + CLAUDE.md)")
 
 
 if __name__ == "__main__":
+    if "--check" in sys.argv[1:]:
+        sys.exit(check())
     main()

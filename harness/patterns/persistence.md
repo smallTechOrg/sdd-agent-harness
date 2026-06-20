@@ -110,6 +110,128 @@ the start it's free. For **multi-turn** products add a `threads` (session) table
 accumulates per-session token + cost totals and the active resource id — that row is what the UI's
 always-visible session header reads (`patterns/interface.md`).
 
+## Session-scoped resources — key by `session_id`, persist across turns, release only on delete
+A parsed file, a loaded DataFrame, a built index, **a pasted document or transcript** — anything that is
+**loaded once and reused across follow-up turns**, regardless of size or cost — is a *session* resource, not
+a *per-question* one. (Don't gate on "heavy" / "expensive to derive": a meeting transcript is just a cheap
+string, yet a Q2 like "now group those action items by owner" still needs it without a re-paste. The trigger
+is **reuse across turns**, not cost.) Key it by `session_id` (= `thread_id`) and keep it for the life of the
+session.
+
+**The discriminator — supplied vs generated (read before reaching for this).** sessions.py exists for a
+resource that **ARRIVES from the user**: uploaded or pasted via the `data` field, parsed by `load_resource`,
+then reused. A resource the **model GENERATES on Q1 and then REFINES on Q2** — an itinerary, a draft email, a
+story, a project plan, the whole *generate-then-refine* class — is **not** a session resource: it is carried
+across turns by **short-term memory** (the checkpointer transcript + the `runner.py` prior-message merge —
+`patterns/memory.md`, `patterns/react-agent.md`). It needs **no sessions.py**, no `load_resource`, no `data`
+field, no `current_session_id` read tool. Generating that machinery for a generated-then-refined resource is
+a bug: there is **nothing to populate it** (the user uploads nothing), so you ship dead code, or a read tool
+that always reports "no data loaded." Rule of thumb: *user uploads/pastes it → sessions.py; the model writes
+it → checkpointer transcript, no sessions.py.* Example: "plan a 3-day Lisbon itinerary" (Q1) then "make day 2
+rainy-day-friendly" (Q2) carries the itinerary in the transcript — no sessions.py; "analyze this CSV" (Q1,
+`data` carries the file) then "now break it down by region" (Q2) keeps the DataFrame in sessions.py.
+
+**Releasing it after each question is a correctness bug**: Q2 ("now break that down by region")
+arrives, the DataFrame is gone, and the agent answers `SESSION_DATA_LOST` instead of the follow-up — a green
+build, a broken product, the single most common multi-turn failure.
+
+A small in-process store does it (the resource is live objects, not rows — the DB row records *that* a
+session has one + its metadata, the store holds the object). It also exports the **`current_session_id`
+ContextVar** that lets a tool find the active session without the model supplying it (see the read path below):
+```python
+# agent/sessions.py — session-scoped live resources, keyed by session_id, released ONLY on delete
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from typing import Any
+
+# Set by agent/runner.py around graph.ainvoke (patterns/react-agent.md / interface.md) so a @tool can read the
+# active session WITHOUT exposing session_id as a model-supplied argument. A tool does `current_session_id.get()`.
+current_session_id: ContextVar[str | None] = ContextVar("current_session_id", default=None)
+
+@dataclass
+class SessionResources:
+    by_id: dict[str, Any] = field(default_factory=dict)   # resource_id -> live object (DataFrame, index, …)
+
+_SESSIONS: dict[str, SessionResources] = {}
+
+def get_session(session_id: str) -> SessionResources:
+    """Return (creating if absent) the resource bag for a session. Survives every turn on that session."""
+    return _SESSIONS.setdefault(session_id, SessionResources())
+
+def release_session(session_id: str) -> None:
+    """Drop a session's resources — call ONLY on explicit session delete, NEVER per question."""
+    _SESSIONS.pop(session_id, None)
+```
+
+### The HTTP ingest seam — how the resource actually gets IN (the missing populate path)
+The store above describes *holding* a resource; this is how a resource *arrives over HTTP* for an "analyze
+an uploaded X" agent. `POST /runs` carries an optional `data` field (`patterns/interface.md` RunIn); on a
+turn that has it, the server calls `load_resource(session_id, data)` **before** the run, so the run's tools
+see it and **Q2 on the same session reuses it** (no re-upload). Without this populate path the demo gate's
+Q1 hits an empty session and the agent answers "no data is loaded" — a 200 that the outcome eval fails.
+Generate `load_resource` only for a data-ingesting capability (`C-SESSION-SCOPE`); key-free/own-data agents
+omit it. The parse is domain-specific — a CSV example, parsed once and reused every turn:
+```python
+# agent/sessions.py (cont.) — populate the session store from an uploaded blob, parsed ONCE
+import io
+import pandas as pd                                   # pin current pandas in pyproject.toml
+
+def load_resource(session_id: str, data: str, resource_id: str = "main") -> str:
+    """Parse an uploaded blob ONCE and stash the live object in the session bag (survives every turn).
+    Idempotent per turn: if the agent re-POSTs the same data on a follow-up it just refreshes the object,
+    it does NOT release prior resources (release happens only on explicit session delete)."""
+    df = pd.read_csv(io.StringIO(data))               # domain parse — swap for your resource type
+    get_session(session_id).by_id[resource_id] = df
+    return resource_id
+```
+### The read path — how a tool finds the session WITHOUT the model supplying it (the missing piece)
+The query tool reads the resource back **by the active session**, never re-parses. The session is NOT a tool
+argument: a `@tool def query_dataframe(session_id: str)` would expose `session_id` as a model-visible field the
+LLM has to hallucinate (it doesn't know the thread id), and a parameterless tool has no other way to learn it.
+The loop does **not** inject run/session context — `patterns/react-agent.md`'s `tools_node` calls each tool
+with *only* `tc["args"]` (the model-supplied arguments). So the tool reads the **`current_session_id`
+ContextVar** that `agent/runner.py` sets around `graph.ainvoke` (and `agent/sessions.py` exports, above):
+```python
+# in agent/tools.py — the query tool takes ONLY domain args; the session comes from the ContextVar
+from langchain_core.tools import tool
+from .sessions import current_session_id, get_session
+
+@tool
+def query_dataframe(question: str) -> str:                # NOTE: no session_id parameter — model never sees it
+    """Answer a question about the loaded spreadsheet/transcript for THIS session."""
+    sid = current_session_id.get()
+    df = get_session(sid).by_id.get("main") if sid else None
+    if df is None:
+        return "No spreadsheet is loaded"                 # truly absent — not a hallucinated-id miss
+    ...                                                    # run the domain query against df
+```
+The runner sets the ContextVar so any tool in the run sees the right session (one line in `runner.py`,
+`patterns/interface.md` § *Code — `agent/runner.py`*):
+```python
+from .sessions import current_session_id
+token = current_session_id.set(session_id)
+try:
+    result = await graph.ainvoke(state, config=config)
+finally:
+    current_session_id.reset(token)
+```
+For binary/large uploads expose a sibling `POST /sessions/{id}/resource` (multipart) that calls the identical
+`load_resource`.
+
+Rules: load on first use, look up by `session_id` on every later turn, **release only** from an explicit
+`DELETE /sessions/{id}` (or a TTL sweep) — never at the end of a run. For a multi-process deploy, back the
+same interface with Redis/disk so the resource survives the worker that loaded it; the *contract* (key by
+session, release on delete) is identical. The `threads` row (below) records the active resource id so a
+reconnecting UI knows what's loaded.
+
+## The JSON envelope — `ok()` / `api_error()`, never an error page
+Every route returns one shape, so the UI parses one contract and a non-tech user never hits a raw stacktrace
+or an `error.html`. On success: `ok(data)`. On failure: read `state["error"]`, log it **with the `run_id`**,
+and raise/return `api_error("RUN_FAILED", status=500)` — a coded, JSON error the UI renders as a friendly
+message with the run id to deep-link into `/traces`. The envelope helpers live in `agent/server.py`
+(`patterns/interface.md`); persistence's part is that a failed run writes `status="error"` + the reason so
+`/traces` and the envelope tell the same story.
+
 ## Adding domain entities — extend, don't fork
 Your capability's nouns (tickets, invoices, documents, …) are new models on the **same `Base`**. Same engine,
 same session, same SQLite→Postgres ladder — `init_db()` creates them automatically.
@@ -177,6 +299,11 @@ async def _fresh_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 ```
+This autouse fixture is `async` — it only runs if the generated `pyproject.toml` sets
+`[tool.pytest.ini_options] asyncio_mode = "auto"` (`workflows/build.md` §3). Under pytest-asyncio's default
+strict mode it is silently skipped, so every test runs against an un-migrated DB. The `asyncio_mode = "auto"`
+line is mandatory.
+
 The local demo gate runs these on SQLite. The **deploy gate runs the identical suite with
 `APP_DATABASE_URL` pointed at a real Postgres+`asyncpg`** — same models, same code path, proving the URL
 swap before any deploy. A green SQLite suite is necessary, not sufficient. → `workflows/gates.md`.

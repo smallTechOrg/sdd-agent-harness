@@ -128,7 +128,7 @@ Productionise is mechanical, not prose (`workflows/gates.md`):
 - The image **builds** (`docker build` / `langgraph build`) and **boots**; `GET /health` returns 200.
 - The **same test suite passes on Postgres**, not just SQLite — flip `APP_DATABASE_URL` to a throwaway
   Postgres and run the suite (the async stack means no code change). The DB-swap tests reuse the conftest
-  create_all/drop_all-per-test fixture (`patterns/react-agent.md` gate harness).
+  create_all/drop_all-per-test fixture (`patterns/persistence.md` § Tests use the SAME driver as prod).
 - A real `POST /runs` completes against the deployed URL and its **outcome eval passes** — a 200 with a
   wrong answer fails (`patterns/observability-and-evals.md`).
 - `git grep` finds **no secret** in the image context and no key reaches the prompt.

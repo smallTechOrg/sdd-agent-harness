@@ -25,7 +25,7 @@ concern, not yours.
 | File | What goes in it | Recipe to align with |
 |------|-----------------|----------------------|
 | `spec/product.md` | why/what · success criteria (feed the outcome eval) · domain instructions · out-of-scope | — |
-| `spec/capabilities/<slug>.md` | one capability each, **EARS** acceptance criteria | `observability-and-evals.md` (evals consume these) |
+| `spec/capabilities/<slug>.md` | one capability each: `Priority:` (P1/P2/P3) · **EARS** criteria, each bound by an `[@eval]` token · Eval cases | `observability-and-evals.md` (evals consume these) |
 | `spec/agent.md` | which agentic **layers are ON** (the default baseline + this product's extras) | every `patterns/*.md` |
 | `spec/tech-stack.md` | provider · runtime model (cheap) · DB · deploy target · tools · UI yes/no | `model-and-providers.md`, `tools-and-mcp.md`, `interface.md`, `deploy.md` |
 
@@ -34,9 +34,11 @@ a remaining marker means the spec is not ready and the build must not start (CLA
 three you create from the templates below.
 
 ## EARS — the one format for acceptance criteria
-Every criterion in `spec/capabilities/*.md` is a single EARS line:
+Every criterion in `spec/capabilities/*.md` is a single EARS line **bound to an executable check by an
+`[@eval]` token** (the exact shape `spec/capabilities/_template.md` + `spec/constitution.md` § C-EARS-EVAL-BOUND
+fix — match them, don't reinvent):
 
-> **WHEN** `<trigger>` **the system SHALL** `<observable response>`.
+> **WHEN** `<trigger>` **the system SHALL** `<observable response>`. `[@eval: tests/test_<slug>_gate.py::<case>]`
 
 One EARS line ⇒ exactly **one outcome assertion + one trajectory assertion** in the eval gate
 (`harness/patterns/observability-and-evals.md`). So make each line **observable and testable** — a grader
@@ -44,27 +46,61 @@ One EARS line ⇒ exactly **one outcome assertion + one trajectory assertion** i
 use: *WHILE* `<state>`, *WHERE* `<feature present>`, *IF* `<error>` *THEN the system SHALL*. Avoid vague
 verbs ("handle", "support", "be robust") — name the visible outcome.
 
-Each capability file also carries the two eval handles the gate reads directly:
-- **evaluation_steps** — 2–4 yes/no checks a judge walks to score the OUTCOME.
+### `[@eval]` — the binding the gate lints (our one real differentiator)
+**Every EARS line MUST end with an `[@eval: tests/test_<slug>_gate.py::<case>]` token** — the `path::case`
+naming the executable check that proves it. This is the "proves it ran" contract: "*every acceptance
+criterion is bound to an executable check, and done means the agent booted and gave the right answer.*" A
+line with no `[@eval]` token, or a token pointing at a `path::case` the gate can't run, **fails the
+eval-lint** (the analyze pre-flight + the gate lint, `workflows/gates.md`, qa-auditor) — a gate failure, not a
+style note. **You** fill the token; the non-coder never types it and never sees it surfaced. For a **P2/P3
+stub** the `[@eval]` asserts the **stub contract** (the fixed shape/sentinel the stub returns), so the
+journey stays green even though the capability is registered, not yet verified against real behaviour.
+
+### P1/P2/P3 — which capability is the real v1 slice (set in the capability heading)
+Tag every capability file with a **priority in its heading** (`# Capability: <name>  ·  Priority: <P1|P2|P3>`)
+so the planner + `/build` know which one Phase 1 builds *real* and which become deterministic
+journey-complete stubs (decision #3, SPEC-RECONCILIATION §B):
+- **P1** — the single capability the product is *about*; built real and end-to-end in Phase 1, calls the
+  real runtime LLM, proven live by the outcome eval. **Exactly one P1 per build.**
+- **P2 / P3** — the other capabilities the user named; spec'd in full EARS now, shipped as **deterministic,
+  journey-complete, spec-registered stubs** in Phase 1 (wired into the graph, reachable end-to-end, return a
+  fixed contract; no dead links). Promote one to real per follow-up build via `/spec-new-capability`.
+- This is the thin-slice rule: v1 ships one real capability + the rest as honest stubs, **never five
+  half-builds** (the cardinal mistake — SPEC-RECONCILIATION §A).
+
+(These capability priorities are **distinct** from the `P1–P4` *productionise checks* in
+`workflows/gates.md` — those are deploy-gate line numbers, not capability tiers.)
+
+Each capability file also carries, under `## Evaluation`, the eval handles the gate reads directly:
+- **outcome evaluation_steps** — 2–4 yes/no rubric bullets the LLM-judge scores the OUTCOME 0–5 against.
 - **expect_tools / forbid_tools** — the tools that SHALL (or must NOT) appear in the TRAJECTORY.
 
-### Template — `spec/capabilities/<slug>.md`
+### Template — `spec/capabilities/<slug>.md` (copy `spec/capabilities/_template.md`)
 ```markdown
-# Capability: <name>
+# Capability: <name>  ·  Priority: <P1 | P2 | P3>
 
-## Acceptance criteria (EARS — each becomes one eval assertion)
-- WHEN <trigger> the system SHALL <observable response>.
-- WHEN <trigger> the system SHALL <observable response>.
-- IF <error condition> THEN the system SHALL <safe, observable fallback>.
+## What & why
+<one paragraph — the user-visible behaviour + the product.md success criterion it serves. For a P2/P3 stub,
+state in one line what the stub returns until it is promoted.>
 
-## Eval handles (consumed by harness/patterns/observability-and-evals.md)
-- evaluation_steps: ["Does the answer <check 1>?", "Does it <check 2>?", "Is it free of <failure>?"]
-- expect_tools: [<tool the run SHALL call>]
-- forbid_tools: [<unsafe/mutating tool that must NOT fire ungated>]
+## Acceptance criteria (EARS — these ARE the eval inputs; each ENDS with its [@eval] token)
+- WHEN <trigger> the system SHALL <observable response>. [@eval: tests/test_<slug>_gate.py::<case-1>]
+- WHILE <state> WHEN <trigger> the system SHALL <response>. [@eval: tests/test_<slug>_gate.py::<case-2>]
+- IF <unwanted condition> THEN the system SHALL <safe response>. [@eval: tests/test_<slug>_gate.py::<case-3>]
 
-## Notes
-<data sources, edge cases, what's explicitly out of scope for this capability>
+## Tools & layers touched
+- tool: <name>  (in-process @tool | MCP — harness/patterns/tools-and-mcp.md)
+- layers: <e.g. retrieval ON — only a layer that IS ON in spec/agent.md>
+
+## Evaluation (feeds the mechanical gate — harness/patterns/observability-and-evals.md)
+- outcome evaluation_steps:        # 2–4 rubric bullets the LLM-judge scores 0–5 against (no vibes)
+  - <bullet 1>
+  - <bullet 2>
+- expect_tools: [<tool that MUST fire>]
+- forbid_tools: [<mutating/irreversible tool that must NOT fire ungated>]
 ```
+Every `[@eval: <path>::<case>]` token on an EARS line MUST resolve to a case the gate can run, and every
+gate case MUST trace back to one EARS line — the eval-lint checks both directions.
 
 ## Layers — fill `spec/agent.md`, don't over-build
 The build generates only the layers you mark **ON**. The **default Phase-1 baseline is real, not stubbed**:
@@ -150,8 +186,21 @@ Specify it in `spec/product.md` and set `Web UI: yes` in `spec/tech-stack.md`; t
 `/traces`, no rebuilt trace viewer). A **headless** product sets `Web UI: no` and ships no web UI — say so
 explicitly so the build skips it and the gate drops the Playwright journey for the API + outcome-eval gate.
 
+## Living canonical spec — fold deltas in (you own this on /maintain too)
+`spec/capabilities/*.md` is the **living, canonical narrative** of what the whole agent does — it must always
+answer "what does this agent do, today?" When the drift-auditor emits a delta record
+(`reports/drift/*.yaml`, OpenSpec-style ADDED/MODIFIED/REMOVED — `agents/drift-auditor.md`) and the
+orchestrator approves it, **you fold the delta into the canonical capability file**: add the new EARS line
+(with its `[@eval: tests/...::<case>]` token + its `## Evaluation` handles), modify the changed one, or remove the dropped one — so the spec
+stays current and never accumulates a separate changelog. A `spec->code` delta the auditor flagged as a
+**human-review event** (working-but-wrong code) is NOT auto-folded: you wait for the human decision the
+auditor surfaced, then fold whichever way it resolves. The spec is the source of truth; the deltas are how
+it stays true.
+
 ## Done means
-All four files written, **zero `<!-- FILL IN -->` markers left**, every capability has at least one EARS
-line + its eval handles, `spec/agent.md` marks the baseline ON with later layers justified by a capability,
-and `spec/tech-stack.md` model ID is one you flagged for build-time verification. Return the list of files
-written to the agent-builder. spec-reviewer validates (advisory); the eval gate is the mechanical check.
+All four files written, **zero `<!-- FILL IN -->` markers left**, every capability has a `Priority:` (exactly
+one P1) and at least one EARS line, **every EARS line ends with an `[@eval]` token that has a matching Eval
+case** (the eval-lint blocks otherwise — `workflows/gates.md`), `spec/agent.md` marks the baseline ON with
+later layers justified by a capability, and `spec/tech-stack.md` model ID is one you flagged for build-time
+verification. Return the list of files written to the agent-builder. spec-reviewer validates (advisory); the
+eval gate + eval-lint are the mechanical checks.

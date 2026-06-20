@@ -77,7 +77,7 @@ visible in `/traces` (→ `patterns/observability-and-evals.md`).
 - **JIT default** — retrieval pulls context on demand; no upfront stuffing. → `patterns/retrieval.md`.
 - **Compaction preserves** goal + decisions + open items + verbatim tail. Lossy elsewhere is fine.
 - **Budget guard** — count tokens before each model call; reserve response headroom.
-- **Long-term memory** (carrying context *across runs*) is a separate concern → `patterns/memory-and-context.md`.
+- **Long-term memory** (carrying context *across runs*) is a separate concern → `patterns/memory.md`.
 
 ## Gate (the test that proves it — run it, don't trust it)
 With a `FakeModel` (no key → `patterns/react-agent.md`) and a tiny `limit`, feed a long message list and

@@ -23,15 +23,28 @@ reconcile (drift-auditor)  →  spec authoritative  →  code follows spec  → 
 Never edit code first and backfill the spec. If the running code and the spec disagree, you do not yet
 know which is right — **stop and reconcile before changing anything.**
 
+**Intent stays authoritative — the drift fix the competitive critique demanded** (`COMPETITIVE-RESEARCH.md`
+§4). "Reconcile, reality wins" was an inversion: it let working-but-*wrong* code silently overwrite the
+spec and earn a green gate, certifying the wrong behaviour. The fixed drift-auditor
+(`agents/drift-auditor.md`) splits reconciliation by *kind* of mismatch and only ever **records** the one
+narrow, intent-cited, purely-stale case; every working-but-wrong rewrite is **flagged as a human-review
+event**, never auto-applied. The user's intent arbitrates, not the code.
+
 ## Loop
 
 1. **Reconcile (drift-auditor).** Before touching anything, run the drift-auditor (`agents/drift-auditor.md`)
-   to diff `spec/` against the code for the area you're about to change. Three outcomes:
-   - *spec right, code wrong* → the change is a fix; proceed.
-   - *code right, spec stale* → first correct the spec to match reality (its own delta record), THEN make
-     your change on top. Don't stack a new change on a lie.
-   - *both agree* → clean baseline; proceed.
-   Resolve drift to zero for the touched area before step 2. → `agents/drift-auditor.md`.
+   to diff `spec/` against the code for the area you're about to change. It returns a verdict —
+   **IN-SYNC / RECORDED / REVIEW-REQUIRED / DRIFT-BLOCKER** — and a delta record. Handle by kind (the
+   auditor classifies; you act):
+   - *spec right, code wrong* (code contradicts an intentional decision) → the change is a fix; proceed.
+   - *purely-stale spec, intent cited* → the auditor already **recorded** reality into the spec (a
+     `review: auto` delta); build your change on top of the corrected spec.
+   - *working-but-wrong code* → the auditor **flagged** it `review: human` and did NOT bless it into the
+     spec. **Do not proceed past a REVIEW-REQUIRED verdict**: decide (bless into spec / remove the code)
+     before stacking a new change — intent must arbitrate first (`agents/drift-auditor.md`).
+   - *both agree (IN-SYNC)* → clean baseline; proceed.
+   Resolve drift — including every pending human-review event — to zero for the touched area before
+   step 2. A REVIEW-REQUIRED or DRIFT-BLOCKER verdict is itself a blocker. → `agents/drift-auditor.md`.
 
 2. **Spec first (authoritative).** Edit the spec to describe the desired end state, not the code:
    - behaviour/acceptance → the capability's EARS line(s) in `spec/capabilities/*.md`
@@ -83,7 +96,7 @@ know which is right — **stop and reconcile before changing anything.**
    ```bash
    # the exit code is the verdict; pipefail + tee preserves it (see agents/qa-auditor.md)
    set -o pipefail
-   python -m harness.workflows.gate --tier demo 2>&1 | tee /tmp/gate.out
+   make gate 2>&1 | tee /tmp/gate.out          # make prod-gate if the change touched the deploy path
    echo "GATE_EXIT=${PIPESTATUS[0]}"   # 0 = done; anything else = the change is not done
    ```
 

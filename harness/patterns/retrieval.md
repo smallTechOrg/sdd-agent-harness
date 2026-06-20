@@ -95,7 +95,7 @@ async def retrieve(query, k=5, pool=20):
 
 ## Rerank (precision pass — keep it, it's cheap)
 Re-score the fused pool against the query, keep the best `k`. A cross-encoder is fastest/cheapest; an LLM
-judge needs no extra model. Use the **cheap runtime model** (→ `patterns/llm-providers.md`), never a frontier one.
+judge needs no extra model. Use the **cheap runtime model** (→ `patterns/model-and-providers.md`), never a frontier one.
 ```python
 async def rerank(query, candidates, model, k=5):     # model = get_model() from agent/llm.py
     if len(candidates) <= k:

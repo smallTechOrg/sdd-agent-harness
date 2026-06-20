@@ -24,6 +24,15 @@ class AgentState(TypedDict):
 > LangGraph `add_messages` reducer would **append on top of an already-complete list and double-append**,
 > corrupting the transcript (and the `/traces` history). Keep `AgentState` a plain `TypedDict`; the nodes own
 > the merge. This is the single gap most likely to silently break a build — do not "helpfully" add a reducer.
+>
+> **Multi-turn consequence (no reducer ⇒ the runner owns history, not the channel).** With a checkpointer,
+> resuming a `thread_id` reloads the saved `messages` channel — but because there is no reducer, the fresh
+> `state["messages"]` the runner seeds **overwrites** that replay rather than appending. So on a follow-up
+> turn the runner MUST read the prior messages out of the checkpoint itself and build the seed as
+> `prior_messages (stale SystemMessage stripped) + [fresh SystemMessage] + [new HumanMessage]`
+> (`runner.py` below, `patterns/memory.md`). The plain-list rule and the checkpointer coexist: the channel
+> persists the transcript, the runner composes each turn's seed. Never `compile(checkpointer=...)` a graph
+> `build_graph` already returned — pass the saver *into* `build_graph` (one compile).
 
 ## Code — `agent/graph.py`
 ```python
@@ -34,7 +43,10 @@ from .observability import span          # patterns/observability-and-evals.md
 from .state import AgentState            # TypedDict: messages, iterations, answer, run_id
 from .tools import FINISH, TOOL_MAP, TOOLS   # patterns/tools-and-mcp.md
 
-def build_graph(model):
+def build_graph(model, checkpointer=None):
+    # checkpointer is OPTIONAL: pass an AsyncSqliteSaver (patterns/memory.md) to turn on short-term
+    # (multi-turn) memory; leave None for a single-shot run. build_graph owns the ONE .compile() — never
+    # compile its return value again (that double-compiles). See the checkpointer note under the loop.
     bound = model.bind_tools(TOOLS)
     settings = get_settings()
 
@@ -56,7 +68,21 @@ def build_graph(model):
                 continue
             tool = TOOL_MAP.get(tc["name"])
             async with span(state["run_id"], f"execute_tool.{tc['name']}", "TOOL", args=tc["args"]) as sp:
-                result = tool.invoke(tc["args"]) if tool else f"unknown tool: {tc['name']}"
+                # GRACEFUL DEGRADATION: a tool failure must NOT crash the loop — record it, hand the model an
+                # error ToolMessage, and let it recover (retry, route around, or finish with what it has).
+                try:
+                    if not tool:
+                        result = f"unknown tool: {tc['name']}"
+                    elif getattr(tool, "coroutine", None) is not None:
+                        # ASYNC tool (any I/O tool — web search, DB, HTTP API): await ainvoke. Calling .invoke
+                        # on an async StructuredTool raises NotImplementedError, which the except below would
+                        # swallow as a tool failure every iteration → a sourceless force-finalized answer.
+                        result = await tool.ainvoke(tc["args"])
+                    else:
+                        result = tool.invoke(tc["args"])      # sync tool (pure-compute, no I/O)
+                except Exception as exc:
+                    result = f"tool '{tc['name']}' failed: {type(exc).__name__}: {exc}"
+                    sp["error"] = result                       # surfaced in /traces in red
                 sp["result_preview"] = str(result)[:300]
             out.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
         return {"messages": state["messages"] + out}
@@ -98,7 +124,7 @@ def build_graph(model):
     g.add_edge(START, "agent")
     g.add_conditional_edges("agent", route, {"tools": "tools", "finalize": "finalize"})
     g.add_edge("tools", "agent"); g.add_edge("finalize", END)
-    return g.compile()
+    return g.compile(checkpointer=checkpointer)   # None = no persistence; a saver = short-term memory
 ```
 
 ## Mandatory mechanics (do not omit)

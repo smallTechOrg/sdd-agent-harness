@@ -14,6 +14,35 @@ How the agent acts on the world. **Generate this fresh at build time**, pinning 
 Rule of thumb: **own it and it's in-process → `@tool`. Cross a process/trust boundary → MCP.** Don't
 reach for MCP to call your own function; the overhead (serialization, a second process, auth) is pure cost.
 
+**A static-key third-party HTTP API (web search, a vendor REST API) stays IN-PROCESS — it is NOT an MCP
+case.** MCP requires OAuth 2.1 and forbids static secrets (§ MCP security below), but most external HTTP APIs
+authenticate with a long-lived API key. So a web-search / vendor-REST call is an **async in-process `@tool`**
+that reads its key from an `APP_`-prefixed `SecretStr` in `config.py` (e.g. `APP_SEARCH_API_KEY`) — the key
+lives in `Settings`, the tool body sends it in the request header, and the **model never sees it** (it gets
+the tool name only). MCP (Layer 2) is reserved for **OAuth-protected SaaS** integrations, not "any external
+API." Such a tool does network I/O, so it MUST be `async def` and dispatched via `ainvoke` (see below).
+
+```python
+# agent/tools.py — a static-key external API as an async in-process @tool (web search shown).
+import httpx
+from langchain_core.tools import tool
+from .config import get_settings
+
+@tool
+async def web_search(query: str) -> str:
+    """Search the web and return the top results as text the model can cite."""
+    s = get_settings()
+    key = s.search_api_key.get_secret_value()        # APP_SEARCH_API_KEY: SecretStr, unwrapped only here
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:   # async I/O → this tool is awaited via ainvoke
+            r = await c.get("https://api.example-search.com/v1/search",
+                            params={"q": query}, headers={"Authorization": f"Bearer {key}"})
+            r.raise_for_status()
+        return "\n\n".join(f"[{h['url']}] {h['snippet']}" for h in r.json()["results"][:5]) or "no results"
+    except Exception as exc:                          # fail soft — hand the model an error, don't crash the run
+        return f"search failed: {type(exc).__name__}: {exc}"
+```
+
 ## Layer 1 — internal tools, `agent/tools.py` (proven, verbatim)
 ```python
 from langchain_core.tools import tool
@@ -51,6 +80,15 @@ The loop binds `TOOLS`, runs `TOOL_MAP[name]` per call, and treats `FINISH` as t
 docstring the model reads as the description, return a string (or JSON string) the model can reason over,
 and **fail soft** — return an error message, don't raise; an unhandled exception kills the run while a
 returned `"error: rate limited, retry later"` lets the model recover.
+
+**Any I/O tool MUST be `async def` and is dispatched via `ainvoke`.** A tool that does network/DB/file I/O
+(web search, an HTTP API call, a DB query, retrieval) must be an `async def @tool`. The loop's `tools_node`
+(`patterns/react-agent.md`) branches on `tool.coroutine` and `await tool.ainvoke(...)` for async tools —
+calling the sync `.invoke` on an async `StructuredTool` raises `NotImplementedError: StructuredTool does not
+support sync invocation`, which graceful-degradation then swallows as a tool failure *every* iteration, so
+the agent never gets results and force-finalizes an empty/wrong answer. Keep pure-compute tools (no I/O)
+sync — they run via `.invoke`. `finish` and `write_todos` are sync; `search_docs` over a real index/API is
+async (`patterns/retrieval.md`).
 
 ## Layer 2 — MCP for external integrations
 Use MCP when the capability lives in another process or is owned by someone else. Two transports:
@@ -93,7 +131,10 @@ MCP crosses a trust boundary, so treat every MCP tool like an outbound API call 
 - **OAuth 2.1, no static secrets.** Remote MCP servers authenticate via OAuth 2.1 — short-lived bearer
   tokens minted per session (`mint_oauth_token` above), never a long-lived key pasted into `headers` or
   committed to `.env`. Tokens are audience-bound to the specific MCP resource. Use PKCE for the auth-code
-  flow; for service-to-service use the client-credentials flow against your IdP.
+  flow; for service-to-service use the client-credentials flow against your IdP. **If the integration only
+  offers a static API key (most third-party HTTP APIs — web search, vendor REST), it is NOT an MCP case: make
+  it an async in-process `@tool` with an `APP_`-prefixed `SecretStr` key (Layer 1, above).** MCP is for OAuth
+  SaaS, not "anything external."
 - **Pin the server identity.** Only connect to MCP URLs/binaries on an allowlist in `spec/tech-stack.md`.
   A streamable-http URL must be HTTPS. Don't let the model choose servers.
 - **Audit via OTel — MCP has no standard audit log.** The protocol doesn't define one, so the harness's

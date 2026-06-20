@@ -23,24 +23,67 @@ Capable tiers for escalation: Anthropic `claude-sonnet-4-6` / `claude-opus-4-8`;
 always on, opt-in refusal fallbacks). Always confirm IDs at build time.
 
 ## Code — `agent/config.py`
-Settings via pydantic-settings, env prefix `APP_`. The runtime model defaults CHEAP.
+Settings via pydantic-settings, env prefix `APP_`. The runtime model defaults CHEAP. **Three correctness
+rules below are copy-verbatim — each one is a silent-failure killer that a green build won't catch.**
 ```python
 from functools import lru_cache
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
+    # extra="ignore": undeclared .env keys (TEST_DATABASE_URL, CI vars) MUST NOT raise. Without it the app
+    # crashes on boot the moment the environment carries one key you didn't declare.
     model_config = SettingsConfigDict(env_prefix="APP_", env_file=".env", extra="ignore")
     llm_provider: str = "anthropic"
     llm_model: str = "claude-haiku-4-5-20251001"   # CHEAP tier — escalate via spec/tech-stack.md
-    llm_api_key: str = ""
+    llm_api_key: SecretStr = SecretStr("")          # SecretStr: never logged/repr'd; read only at the use boundary
     database_url: str = "sqlite+aiosqlite:///./agent.db"
     port: int = 8001
     max_iterations: int = 6
+    price_in: float = 1.0       # USD per 1M input tokens  — set to the chosen model's rate (cost_usd column)
+    price_out: float = 5.0      # USD per 1M output tokens — see patterns/persistence.md / interface.md
+
+    # RULE 1 — strip inline `#` comments + surrounding whitespace from EVERY string env value.
+    # pydantic-settings does NOT do this: `APP_LLM_API_KEY=sk-xxx # prod key` is read as the literal
+    # "sk-xxx # prod key", the build stays green (no call yet), and the real run 401s. Highest-ROI fix.
+    @field_validator("llm_provider", "llm_model", "database_url", mode="before")
+    @classmethod
+    def _strip_inline_comment(cls, v):
+        if isinstance(v, str):
+            # split on " #" (space-hash) so URLs with a literal '#' fragment survive; then strip whitespace
+            return v.split(" #", 1)[0].strip()
+        return v
+
+    @field_validator("llm_api_key", mode="before")
+    @classmethod
+    def _clean_secret(cls, v):
+        return v.split(" #", 1)[0].strip() if isinstance(v, str) else v
 
 @lru_cache
 def get_settings() -> Settings:                      # cached Settings singleton — the one config accessor
     return Settings()
 ```
+
+### RULE 2 — validate required config at startup (fail loud, not on the 50th request)
+A missing/blank key must crash the boot with a named error, never surface as a mid-run 500 a non-tech user
+has to decode. Call this from the FastAPI lifespan (`agent/server.py`) before `init_db()`:
+```python
+def validate_required_config() -> None:
+    """Fail LOUD at boot if config the agent can't run without is missing. One named error, not a 500 later."""
+    s = get_settings()
+    missing = []
+    if not s.llm_api_key.get_secret_value():        # the SecretStr is empty
+        missing.append("APP_LLM_API_KEY")
+    if not s.llm_model:
+        missing.append("APP_LLM_MODEL")
+    if missing:
+        raise RuntimeError(f"missing required config: {', '.join(missing)} — set them in .env (see README).")
+```
+
+### RULE 3 — `get_secret_value()` ONLY at the use boundary
+The key is a `SecretStr` everywhere; you unwrap it with `.get_secret_value()` at the single point it's
+handed to the provider SDK (in `agent/llm.py` below) — never log it, never `print`/`repr` it, never put it in
+a span attribute. `SecretStr` makes an accidental log print `**********` instead of the key.
 
 ## Code — `agent/llm.py`
 One accessor. Raises clearly if no funded key (a real run requires `APP_LLM_API_KEY` — see `harness.md`).
@@ -50,9 +93,10 @@ from .config import get_settings
 
 def get_model():
     s = get_settings()
-    if not s.llm_api_key:
+    key = s.llm_api_key.get_secret_value()           # unwrap the SecretStr ONLY here — the use boundary
+    if not key:
         raise RuntimeError("APP_LLM_API_KEY is required for a real run (see README / spec/tech-stack.md).")
-    return init_chat_model(s.llm_model, model_provider=s.llm_provider, api_key=s.llm_api_key)
+    return init_chat_model(s.llm_model, model_provider=s.llm_provider, api_key=key)
 ```
 `init_chat_model` dispatches on `model_provider`; the graph binds tools to whatever it returns
 (`patterns/react-agent.md`). The rest of the agent never imports a provider SDK — that's the whole point.
@@ -113,4 +157,29 @@ Token usage from each call lands on `resp.usage_metadata` and is captured into t
 The loop tests inject a scripted `FakeModel` with **no key** (`patterns/react-agent.md`) — so the graph is
 provider-agnostic and runs in CI offline. Separately, one live smoke run with a funded `APP_LLM_API_KEY`
 proves `get_model()` + the configured provider actually work end-to-end (the demo gate →
-`workflows/gates.md`).
+`workflows/gates.md`). Also assert the config rules deterministically (no key needed):
+- **Comment strip** — `APP_LLM_MODEL=foo # note` parses to `"foo"`, not `"foo # note"`.
+- **Secret hygiene** — `repr(get_settings())` and `str(settings.llm_api_key)` never reveal the key
+  (`SecretStr` masks it); the raw value is only reachable via `.get_secret_value()`.
+- **Fail loud** — `validate_required_config()` raises with the missing var named when the key is blank.
+
+> **⚠️ Drive these config tests through ENV VARS (`monkeypatch.setenv` or a tmp `.env`), NEVER init kwargs.**
+> `Settings(LLM_API_KEY="sk-x # p")` (or `APP_LLM_API_KEY=...`) is the obvious shortcut and it **silently
+> fails**: pydantic-settings maps the `APP_`-prefixed env spelling case-insensitively for *env vars only* — it
+> does NOT apply that mapping to Python `__init__` kwargs, so `APP_LLM_API_KEY`/`LLM_API_KEY` passed as a kwarg
+> is treated as an undeclared extra and **ignored** (`extra="ignore"`). The `SecretStr` field keeps its empty
+> default, the `mode="before"` strip validator never sees your value, and the test asserts `"" == "sk-x"` and
+> fails on a *correct* `config.py` — a false-RED. Always go through real env vars. `get_settings()` is
+> `@lru_cache`d, so `.cache_clear()` after setting env so the new value is read. Canonical DEMO-2 test:
+> ```python
+> from agent.config import get_settings
+>
+> def test_env_comment_strip(monkeypatch):
+>     monkeypatch.setenv("APP_LLM_MODEL", "claude-haiku-4-5 # prod model")   # env var, NOT a kwarg
+>     monkeypatch.setenv("APP_LLM_API_KEY", "sk-test-123 # prod key")
+>     get_settings.cache_clear()                                            # drop the cached singleton
+>     s = get_settings()
+>     assert s.llm_model == "claude-haiku-4-5"                              # inline comment + space stripped
+>     assert s.llm_api_key.get_secret_value() == "sk-test-123"             # SecretStr strip ran on the env value
+>     assert "sk-test-123" not in repr(s)                                  # secret stays masked
+> ```

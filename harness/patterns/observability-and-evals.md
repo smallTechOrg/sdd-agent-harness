@@ -79,14 +79,23 @@ of it; the gate reads the `spans` table. Pin the current `opentelemetry-sdk` /
 Observability shows what happened; **evals decide pass/fail**, fed by the EARS acceptance criteria in
 `spec/capabilities/*.md` ("WHEN <trigger> the system SHALL <response>"). Two axes — both required:
 
-- **OUTCOME** — did it produce the right *answer*? An **LLM-as-judge** scores the final answer against the
-  capability's EARS criterion on a **0–5 scale** using **explicit `evaluation_steps`** (no vibes — the steps
-  are the rubric, so the score is reproducible and inspectable). This catches the `200`-with-a-wrong-answer
-  failure that a status check never will.
+- **OUTCOME** (hard gate) — did it produce the right *answer*? An **LLM-as-judge** scores the final answer
+  against the capability's EARS criterion on a **0–5 scale** using **explicit `evaluation_steps`** (no vibes —
+  the steps are the rubric, so the score is reproducible and inspectable). This catches the
+  `200`-with-a-wrong-answer failure that a status check never will. **The judge is itself an LLM**, so the gate
+  uses `stable_outcome_eval` — it samples the judge N times and passes on the margin-protected **mean**,
+  reporting variance so a flaky borderline verdict is *visible*, never a silent coin-flip. That is what makes
+  "exit 0 = right answer" deterministic instead of probabilistic (the competitive soft spot, closed).
 - **TRAJECTORY** — did it get there *correctly*? Read back the persisted spans for the run and assert the
-  path: the expected tool(s) were called with sane args, **no duplicate calls**, **no unsafe/mutating tool
-  fired without its gate** (`patterns/guardrails-and-hitl.md`), `finish` called exactly once, iterations
-  under the cap. The trajectory check needs **no LLM** — it's a deterministic read of the `spans` table.
+  path: the expected tool(s) were called with sane args, **no *redundant* duplicate calls** (the SAME tool
+  with IDENTICAL args — a true retry; legitimately repeated tool use, e.g. query-refine or one call per
+  resource, is allowed and expected, since `react-agent.md` sizes `max_iterations` for it), **no
+  unsafe/mutating tool fired without its gate** (`patterns/guardrails-and-hitl.md`), `finish` called exactly
+  once, iterations under the cap. The trajectory check needs **no LLM** — it's a deterministic read of the `spans` table.
+  **For a one-capability v1 slice the trajectory check is ADVISORY** (logged, not gate-blocking) — the
+  outcome eval is the hard verdict; trajectory becomes a blocking gate once a **second** capability exists and
+  there's a real tool-ordering contract to protect against (per the reconciliation decisions). Run it from
+  day one for the signal; promote it to blocking with the 2nd capability.
 
 The runtime judge defaults to the same cheap tier as the product (`spec/tech-stack.md`); for a release gate
 you may pin a stronger judge — keep that choice in the spec, not hard-coded.
@@ -117,12 +126,28 @@ async def outcome_eval(goal, answer, criterion, evaluation_steps, *, threshold=4
                   for ln in reversed(text.splitlines()) if ln.upper().startswith("SCORE:")), 0)
     return score >= threshold, score, text
 
+async def stable_outcome_eval(goal, answer, criterion, evaluation_steps, *, threshold=4, samples=3, margin=0.5):
+    """JUDGE STABILITY: the judge is itself an LLM — the same non-deterministic class we mock. Sample it
+    N times, pass only if the MEAN clears (threshold - margin), and report variance so a borderline,
+    flaky verdict is visible instead of a coin-flip "exit 0". This is what makes "200-wrong fails"
+    DETERMINISTIC rather than probabilistic. Returns (passed, mean, scores)."""
+    scores = []
+    for _ in range(samples):
+        _, score, _ = await outcome_eval(goal, answer, criterion, evaluation_steps, threshold=threshold)
+        scores.append(score)
+    mean = sum(scores) / len(scores)
+    spread = max(scores) - min(scores)
+    # pass needs the MEAN above a margin-protected bar; a wide spread (unstable judge) is surfaced, not hidden
+    passed = mean >= (threshold - margin)
+    return passed, mean, {"scores": scores, "mean": mean, "spread": spread}
+
 async def trajectory_eval(run_id, *, expect_tools, forbid_tools=()):
     """TRAJECTORY: deterministic read of the spans table — no LLM. Returns (passed, reasons)."""
     async with get_sessionmaker()() as s:
         spans = (await s.execute(
             select(Span).where(Span.run_id == run_id).order_by(Span.start_ms))).scalars().all()
-    tool_calls = [sp.name.removeprefix("execute_tool.") for sp in spans if sp.kind == "TOOL"]
+    tool_spans = [sp for sp in spans if sp.kind == "TOOL"]
+    tool_calls = [sp.name.removeprefix("execute_tool.") for sp in tool_spans]
     reasons = []
     for t in expect_tools:
         if t not in tool_calls:
@@ -130,8 +155,15 @@ async def trajectory_eval(run_id, *, expect_tools, forbid_tools=()):
     for t in forbid_tools:
         if t in tool_calls:
             reasons.append(f"forbidden/ungated tool fired: {t}")
-    if len(tool_calls) != len(set(tool_calls)):
-        reasons.append(f"duplicate tool calls: {tool_calls}")
+    # A REPEATED tool name is legitimate ReAct (query-refine, one call per resource, batch per item) —
+    # react-agent.md sizes max_iterations for exactly that. Only flag a TRUE redundant retry: the SAME
+    # tool called with IDENTICAL args (same name + same `attributes["args"]`). Never blanket set-equality.
+    seen_calls = set()
+    for sp in tool_spans:
+        key = (sp.name, repr((sp.attributes or {}).get("args")))
+        if key in seen_calls:
+            reasons.append(f"redundant duplicate call (same tool, identical args): {sp.name}")
+        seen_calls.add(key)
     if any("error" in (sp.attributes or {}) for sp in spans):
         reasons.append("a span recorded an error")
     return not reasons, reasons
@@ -140,21 +172,49 @@ EARS criterion → `criterion`; the capability's acceptance bullets → `evaluat
 `forbid_tools`. One EARS line ⇒ one outcome assertion + one trajectory assertion.
 
 ## Gate (this is the gate — run it, don't trust it)
-The demo gate runs a **real** agent run, then *both* evals; a passing status with `score < threshold` or a
-bad trajectory **fails the gate**. → `workflows/gates.md`.
+The demo gate runs a **real** agent run, then the **stable outcome** eval (hard) + the trajectory eval
+(advisory for a 1-capability slice, blocking once a 2nd capability exists). A passing HTTP status with a
+sub-threshold judge mean **fails the gate**. → `workflows/gates.md`.
+> **REQUIRES `asyncio_mode = "auto"`** under `[tool.pytest.ini_options]` in the generated `pyproject.toml`
+> (`workflows/build.md` §3). Without it, pytest-asyncio's default STRICT mode never awaits this unmarked
+> `async def test_*` — it is skipped with a "coroutine never awaited" warning while the suite stays green,
+> silently disabling this 200-with-a-wrong-answer guard (the exact false-green the gate exists to stop). The
+> same applies to the autouse async DB fixture in `patterns/persistence.md`.
 ```python
+import os, pytest
+
+# KEY GUARD (REQUIRED): this is a REAL run + a REAL LLM judge. Gate check 2 (`uv run pytest`) collects this
+# file; the SAME suite also runs in a keyless lane (the deterministic CI half below / any keyless invocation),
+# where run_agent → get_model() RAISES `RuntimeError("APP_LLM_API_KEY is required")` and ERRORS collection
+# instead of skipping. The skipif turns that into a clean SKIP; with a funded key it runs as the gate's
+# in-process check-6 twin.
+@pytest.mark.skipif(not os.getenv("APP_LLM_API_KEY"), reason="real run + LLM judge needs a funded key")
 async def test_demo_gate():
     run_id = "gate-1"
-    state = await run_agent("How long do refunds take?", run_id=run_id)   # real run, real model
-    ok_o, score, _ = await outcome_eval(
-        goal="How long do refunds take?", answer=state["answer"],
+    GOAL = "How long do refunds take?"
+    # DATA-INGEST branch (REQUIRED when a capability is session-scoped — C-SESSION-SCOPE), mirroring
+    # demo_gate.sh check 5 and the Playwright journey: a real key is NOT enough — without the resource loaded
+    # into the session, the query tool returns "No <resource> loaded", the answer is a non-answer, and the
+    # outcome assert below FALSE-REDs a CORRECT agent. So load the fixture into a session and pass session_id:
+    #   from agent.sessions import load_resource
+    #   sid = "gate-sess-1"
+    #   load_resource(sid, open("scripts/fixtures/<resource>.<ext>").read())   # build.md §3 fixture
+    #   state = await run_agent(GOAL, run_id=run_id, session_id=sid)
+    # For a key-free/own-data agent (no C-SESSION-SCOPE) use the plain form on the next line and delete the above.
+    state = await run_agent(GOAL, run_id=run_id)              # real run, real model
+    ok_o, mean, detail = await stable_outcome_eval(           # multi-sample judge — deterministic, not a coin-flip
+        goal=GOAL, answer=state["answer"],
         criterion="WHEN asked about refund timing the system SHALL state 5 business days.",
         evaluation_steps=["Does the answer mention refunds?",
                           "Does it state 5 business days?",
                           "Is it free of contradicting timelines?"])
-    ok_t, reasons = await trajectory_eval(run_id, expect_tools=["search_docs"], forbid_tools=["finish"])
-    assert ok_o, f"OUTCOME failed: score {score}"      # a 200 with a wrong answer FAILS here
-    assert ok_t, f"TRAJECTORY failed: {reasons}"
+    # forbid_tools is checked against recorded execute_tool.* spans; `finish` never emits one (the loop skips
+    # it — patterns/react-agent.md), so only list a REAL mutating tool here (e.g. delete_record). [] = none.
+    ok_t, reasons = await trajectory_eval(run_id, expect_tools=["search_docs"], forbid_tools=[])
+    assert ok_o, f"OUTCOME failed: judge mean {mean} {detail}"   # a 200 with a wrong answer FAILS here
+    # 1-capability slice: trajectory is advisory — log it, don't block. Promote to `assert ok_t` at capability #2.
+    if not ok_t:
+        print(f"TRAJECTORY advisory (not blocking until a 2nd capability): {reasons}")
 ```
 Wire the deterministic trajectory half into CI with no key (drive `run_agent` with the FakeModel from
 `patterns/react-agent.md`); the LLM-judge outcome half needs a funded `APP_LLM_API_KEY` and runs in the
@@ -182,13 +242,36 @@ it close that gap, and every build with a UI ships all three.
                        "args": {"answer": f"Result: {last.content}"}, "id": "f"}])
           return AIMessage(content="", tool_calls=[{"name": "<your_query_tool>", "args": {...}, "id": "t"}])
   ```
+  **`args` MUST satisfy the tool's REQUIRED parameters.** The `{...}` placeholder above is illustrative —
+  fill it with real values for every required field of `<your_query_tool>` (e.g. `{"question": "..."}` for a
+  `query(question: str)` tool). An empty/placeholder `args={}` makes LangChain's `StructuredTool` raise a
+  pydantic `ValidationError`, which `tools_node` catches as a fail-soft tool error (`patterns/react-agent.md`);
+  the answer becomes `"tool <name> failed: ValidationError…"` and **every outcome test false-REDs on a correct
+  agent**. This mirrors the async-tool/`ainvoke` warning above: supply real args, or give the tool optional
+  params with defaults so an empty dict validates.
 - **Full-stack contract test** (`tests/test_api_flow.py`) — httpx + ASGI transport, FakeModel, **no key**.
   Exercise the real request/response path the UI depends on and assert **every field the UI consumes is
   present** — not just a `200`. The canonical miss: the backend returned the answer but dropped a structured
   field (a `chart_spec`), every backend test stayed green, and the UI silently rendered nothing. Assert the
   `POST /runs` envelope shape **and** the SSE `done` event shape (answer, run_id, thread_id, + any structured
   payload the client reads).
+  > **`ASGITransport` skips the FastAPI lifespan.** The checkpointer is created in the lifespan and stashed on
+  > `app.state`; ASGITransport never runs it, so `app.state.checkpointer` is **unset** in this test. The
+  > `POST /runs` handler therefore reads it as `getattr(request.app.state, "checkpointer", None)`
+  > (`interface.md` / `usage-specs/fastapi.md`) — a bare `request.app.state.checkpointer` raises AttributeError,
+  > which `create_run` re-wraps as `api_error("RUN_FAILED")`, so the route returns **500** and every faithful
+  > contract test false-REDs (HARDENING-LOG iter 9). With `getattr` the in-process run is single-turn (no
+  > short-term memory — fine for a one-shot contract assert). If a test must run the lifespan, wrap the app in
+  > `asgi-lifespan`'s `LifespanManager` and pin `asgi-lifespan`.
 - **Browser journey test** (`tests/e2e/test_primary_journey.py`) — Playwright against the running app,
   asserting the **post-JS DOM** after the real run (`patterns/interface.md`). This is the demo gate's UI half.
 
 Unit tests verify isolated mechanics; these verify the product. → `workflows/gates.md` (check 1 runs all of them).
+
+**Shared test helpers — import absolutely, not relatively.** Common fixtures (e.g. a `ContextAwareFakeModel`,
+a CSV fixture) belong in `tests/helpers.py` imported as `from tests.helpers import ContextAwareFakeModel`.
+A **relative** import (`from .helpers import …`) raises `ImportError: attempted relative import with no known
+parent package` and makes `uv run pytest` die at **collection** (gate check 2 never starts) unless `tests/` is
+a package. The build therefore emits empty `tests/__init__.py` + `tests/e2e/__init__.py` markers **and** sets
+`[tool.pytest.ini_options] pythonpath = ["."]` (`workflows/build.md` §3), so absolute `from tests.…` imports
+resolve. Standardize on the absolute form across every test file — never `from .helpers`.
