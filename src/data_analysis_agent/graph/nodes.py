@@ -1,4 +1,5 @@
 import json
+import math
 import sqlite3
 
 import pandas as pd
@@ -9,6 +10,42 @@ from data_analysis_agent.graph.state import AgentState
 log = structlog.get_logger()
 
 _db_cache: dict[str, sqlite3.Connection] = {}
+
+
+class _VarFunc:
+    """Sample variance aggregate (matches Excel/pandas VAR / ddof=1)."""
+    is_stddev = False
+
+    def __init__(self) -> None:
+        self._values: list[float] = []
+
+    def step(self, value) -> None:
+        if value is None:
+            return
+        try:
+            self._values.append(float(value))
+        except (TypeError, ValueError):
+            pass
+
+    def finalize(self):
+        n = len(self._values)
+        if n < 2:
+            return 0.0
+        mean = sum(self._values) / n
+        var = sum((x - mean) ** 2 for x in self._values) / (n - 1)
+        return math.sqrt(var) if self.is_stddev else var
+
+
+class _StddevFunc(_VarFunc):
+    is_stddev = True
+
+
+def _register_sql_functions(conn: sqlite3.Connection) -> None:
+    """Add statistical aggregates SQLite lacks by default (STDDEV, VARIANCE, …)."""
+    for name in ("STDDEV", "STDEV", "STDDEV_SAMP"):
+        conn.create_aggregate(name, 1, _StddevFunc)
+    for name in ("VARIANCE", "VAR", "VAR_SAMP"):
+        conn.create_aggregate(name, 1, _VarFunc)
 
 
 def _cleanup_db(run_id: str) -> None:
@@ -71,14 +108,30 @@ def _build_plan_prompt(state: AgentState) -> str:
     question = state["question"]
     history: list[dict] = state.get("action_history", [])
 
-    lines = ["<node:plan_action>"]
+    lines = [
+        "<node:plan_action>",
+        "You are a data-analysis agent operating in a ReAct (Reason + Act) loop.",
+        "On each turn you either (a) call a tool to gather more data, or (b) give the",
+        "final answer. After each tool call you will see its result and may call another",
+        "tool. Build up a plan across multiple queries — and across multiple tables when",
+        "more than one data source is attached — until you can answer the question.",
+        "",
+        "SQL dialect: SQLite. Notes:",
+        "- Aggregates available: COUNT, SUM, AVG, MIN, MAX, and (added) STDDEV, VARIANCE.",
+        "- Use SQRT/ABS/ROUND for math; there is no STDEV alias beyond STDDEV/VARIANCE.",
+        "- Only SELECT statements are permitted.",
+        "- If a column is numeric but stored as text, CAST(col AS REAL) before aggregating.",
+        "",
+    ]
 
     # Tool descriptions
     if tools:
-        lines.append("Available tools:")
+        lines.append("Available tools (call a tool by its CAPABILITY name, never the tool name):")
         lines.append("")
         for tool in tools:
-            lines.append(f"Tool: {tool['name']}")
+            ds = tool.get("config", {}).get("table_name")
+            suffix = f" (queries table: {ds})" if ds else ""
+            lines.append(f"Tool: {tool['name']}{suffix}")
             for cap in tool.get("capabilities", []):
                 lines.append(f"  Capability: {cap['name']}")
                 lines.append(f"  Description: {cap['description']}")
@@ -96,7 +149,7 @@ def _build_plan_prompt(state: AgentState) -> str:
         else:
             table_cols["data"].append(col)
 
-    lines.append("Dataset schema:")
+    lines.append(f"Dataset schema ({len(table_cols)} table(s) — query each by its exact name):")
     for tbl, cols in table_cols.items():
         lines.append(f"  Table: {tbl} — Columns: {', '.join(cols)}")
     lines.append("")
@@ -119,11 +172,15 @@ def _build_plan_prompt(state: AgentState) -> str:
 
     lines.extend([
         "",
-        "Decide your next step:",
-        "- If you need more data: respond with a JSON tool call (no markdown, no backticks):",
-        '  {"capability": "run_query", "parameters": {"query": "SELECT ..."}}',
-        "- If you have enough information to answer: respond with exactly:",
-        "  FINAL ANSWER: <your complete answer here>",
+        "Decide your next step. Respond with EXACTLY ONE of the following, and nothing else",
+        "(no explanations, no markdown, no backticks):",
+        "",
+        "1. A JSON tool call to gather more data:",
+        '   {"capability": "run_query", "parameters": {"query": "SELECT ..."}}',
+        "   ('capability' MUST be a capability name listed above, e.g. run_query.)",
+        "",
+        "2. The final answer, when you have enough information:",
+        "   FINAL ANSWER: <your complete answer here>",
     ])
 
     return "\n".join(lines)
@@ -147,6 +204,7 @@ def load_data(state: AgentState) -> AgentState:
             return {**state, "error": "No data sources attached to this session"}
 
         conn = sqlite3.connect(":memory:")
+        _register_sql_functions(conn)
         _db_cache[state["run_id"]] = conn
 
         all_column_names: list[str] = []
@@ -247,26 +305,63 @@ def _execute_csv_query(conn: sqlite3.Connection, sql: str) -> tuple[str, bool]:
         return str(exc), True
 
 
+def _available_capabilities(tools: list[dict]) -> list[str]:
+    return [cap["name"] for tool in tools for cap in tool.get("capabilities", [])]
+
+
+def _loop_back(state: AgentState, entry: dict, max_iterations: int) -> AgentState:
+    """Append an observation (success or recoverable error) and continue the ReAct loop.
+
+    Recoverable errors are fed back to plan_action so the LLM can self-correct;
+    we only give up (set state['error']) once max_iterations is hit.
+    """
+    run_id = state["run_id"]
+    history = list(state.get("action_history", []))
+    history.append(entry)
+    iteration_count = state.get("iteration_count", 0) + 1
+
+    log.info("execute_action.done", run_id=run_id, capability=entry.get("capability"),
+             iteration=iteration_count, is_error=entry.get("is_error", False))
+
+    new_state = {**state, "action_history": history, "iteration_count": iteration_count}
+
+    if iteration_count >= max_iterations:
+        _cleanup_db(run_id)
+        return {**new_state, "error": f"Max iterations ({max_iterations}) reached without a final answer"}
+
+    return new_state
+
+
 def execute_action(state: AgentState) -> AgentState:
     try:
         from data_analysis_agent.config.settings import get_settings
         max_iterations = get_settings().max_agent_iterations
 
         run_id = state["run_id"]
+        tools: list[dict] = state.get("tools", [])
         raw = _strip_json_fences(state.get("llm_response", ""))
 
-        # Parse the tool call JSON
+        # Parse the tool call JSON — on failure, feed it back as a correctable observation
         try:
             call = json.loads(raw)
             capability_name: str = call["capability"]
             parameters: dict = call.get("parameters", {})
-        except (json.JSONDecodeError, KeyError) as exc:
-            _cleanup_db(run_id)
-            return {**state, "error": f"LLM returned invalid tool call JSON: {exc} — raw: {raw[:200]}"}
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            log.warning("execute_action.bad_json", run_id=run_id, error=str(exc), raw=raw[:200])
+            return _loop_back(state, {
+                "capability": "(invalid)",
+                "parameters": {},
+                "result": (
+                    f"Your response could not be parsed as a tool call ({exc}). "
+                    f"Respond with EITHER a single JSON object "
+                    f'{{"capability": "run_query", "parameters": {{"query": "SELECT ..."}}}} '
+                    f"(no prose, no markdown) OR a line starting with 'FINAL ANSWER:'."
+                ),
+                "is_error": True,
+            }, max_iterations)
 
         # Find the capability across loaded tools
         found_tool_type: str | None = None
-        tools: list[dict] = state.get("tools", [])
         for tool in tools:
             for cap in tool.get("capabilities", []):
                 if cap["name"] == capability_name:
@@ -276,13 +371,23 @@ def execute_action(state: AgentState) -> AgentState:
                 break
 
         if found_tool_type is None:
-            _cleanup_db(run_id)
-            return {**state, "error": f"Unknown capability: {capability_name}"}
+            valid = ", ".join(_available_capabilities(tools)) or "(none)"
+            log.warning("execute_action.unknown_capability", run_id=run_id, capability=capability_name)
+            return _loop_back(state, {
+                "capability": capability_name,
+                "parameters": parameters,
+                "result": (
+                    f"Unknown capability '{capability_name}'. Note: 'capability' must be one of "
+                    f"the capability names, not a tool name. Valid capabilities: {valid}."
+                ),
+                "is_error": True,
+            }, max_iterations)
 
         # Dispatch by tool type
         if found_tool_type == "csv_query" and capability_name == "run_query":
             conn = _db_cache.get(run_id)
             if conn is None:
+                _cleanup_db(run_id)
                 return {**state, "error": "In-memory DB not found — load_data must run before execute_action"}
             sql = parameters.get("query", "")
             log.debug("execute_action.sql", run_id=run_id, sql=sql)
@@ -290,28 +395,19 @@ def execute_action(state: AgentState) -> AgentState:
             if is_error:
                 log.warning("execute_action.sql_error", run_id=run_id, sql=sql, error=result_str)
         else:
-            _cleanup_db(run_id)
-            return {**state, "error": f"No executor for tool type '{found_tool_type}' capability '{capability_name}'"}
+            return _loop_back(state, {
+                "capability": capability_name,
+                "parameters": parameters,
+                "result": f"No executor available for tool type '{found_tool_type}'. Use 'run_query'.",
+                "is_error": True,
+            }, max_iterations)
 
-        history = list(state.get("action_history", []))
-        history.append({
+        return _loop_back(state, {
             "capability": capability_name,
             "parameters": parameters,
             "result": result_str,
             "is_error": is_error,
-        })
-        iteration_count = state.get("iteration_count", 0) + 1
-
-        log.info("execute_action.done", run_id=run_id, capability=capability_name,
-                 iteration=iteration_count, is_error=is_error)
-
-        new_state = {**state, "action_history": history, "iteration_count": iteration_count}
-
-        if iteration_count >= max_iterations:
-            _cleanup_db(run_id)
-            return {**new_state, "error": f"Max iterations ({max_iterations}) reached without a final answer"}
-
-        return new_state
+        }, max_iterations)
     except Exception as exc:
         log.error("execute_action.failed", run_id=state.get("run_id"), error=str(exc))
         _cleanup_db(state.get("run_id", ""))

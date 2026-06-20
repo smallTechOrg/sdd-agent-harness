@@ -1,0 +1,60 @@
+# Render Infrastructure-as-Code
+# Docs: https://render.com/docs/infrastructure-as-code
+#
+# HOW TO USE:
+# 1. Push this file to your repo (already done after this commit).
+# 2. In the Render dashboard → New → Blueprint → connect your GitHub repo.
+# 3. Render will read this file and create the service automatically.
+#
+# IMAGE NOTE:
+# The image below is built and pushed by .github/workflows/deploy.yml.
+# Render pulls it on every deploy triggered by the GitHub Actions deploy hook.
+
+services:
+  - type: web
+    name: data-analysis-agent
+    runtime: image
+
+    image:
+      # GitHub Container Registry — built by deploy.yml
+      # GitHub lowercases the owner/repo in GHCR, so use all lowercase.
+      url: ghcr.io/tommykewl/ai-spec-driven-boilerplate:latest
+
+    plan: starter       # Change to "free" if you want the always-free tier (sleeps after inactivity)
+    region: oregon      # us-west-2; change to frankfurt / singapore as needed
+
+    # Render injects PORT automatically — the entrypoint script uses it
+    # No need to set PORT here; Render handles it.
+
+    healthCheckPath: /health
+
+    envVars:
+      # ── LLM ────────────────────────────────────────────────────────────
+      - key: DATAANALYSIS_OPENROUTER_API_KEY
+        sync: false           # Set this manually in the Render dashboard (never commit secrets)
+
+      - key: DATAANALYSIS_LLM_MODEL
+        value: google/gemini-2.5-flash
+
+      # ── Database + Storage ─────────────────────────────────────────────
+      # These paths point inside the persistent disk mounted at /data
+      - key: DATAANALYSIS_DATABASE_URL
+        value: sqlite:////data/app.db
+
+      - key: DATAANALYSIS_UPLOAD_DIR
+        value: /data/uploads
+
+      # ── Logging ────────────────────────────────────────────────────────
+      - key: DATAANALYSIS_LOG_FILE
+        value: /data/logs/app.log
+
+      - key: DATAANALYSIS_LOG_LEVEL
+        value: INFO
+
+    # Persistent disk — survives redeploys and restarts.
+    # SQLite DB and uploaded CSV files are stored here.
+    # Minimum size is 1 GB ($0.25/month on starter plan).
+    disk:
+      name: app-data
+      mountPath: /data
+      sizeGB: 1

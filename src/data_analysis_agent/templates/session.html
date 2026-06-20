@@ -38,11 +38,11 @@
     </div>
   </div>
 
-  <form method="post" action="/sessions/{{ sess.id }}/query" id="query-form">
+  <form method="post" action="/sessions/{{ sess.id }}/query" id="query-form" onsubmit="return onFormSubmit()">
     <div class="field">
       <textarea name="question" placeholder="e.g. What is the average revenue by region?" rows="3" id="question-input"></textarea>
     </div>
-    <button class="btn" type="submit" id="submit-btn" onclick="startLoading()">
+    <button class="btn" type="submit" id="submit-btn">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       Ask
     </button>
@@ -137,6 +137,7 @@ const STEPS = [
 ];
 let _stepIdx = 0;
 let _stepTimer = null;
+let _submitting = false;
 
 function _showOverlay() {
   const overlay = document.getElementById('loading-overlay');
@@ -147,13 +148,18 @@ function _showOverlay() {
     _stepIdx = (_stepIdx + 1) % STEPS.length;
     document.getElementById('loading-step').textContent = STEPS[_stepIdx];
   }, 2000);
-  document.getElementById('submit-btn').disabled = true;
 }
 
-function startLoading() {
+// Returns true to allow the form to submit, false to block it.
+// NOTE: never set submit-btn.disabled here — disabling a submit button
+// inside its own submit handler cancels the form submission in browsers.
+function onFormSubmit() {
+  if (_submitting) return false;
   const q = document.getElementById('question-input').value.trim();
-  if (!q) return;
+  if (!q) return false;
+  _submitting = true;
   _showOverlay();
+  return true;
 }
 
 {% if new_record_id and new_record_status == 'pending' %}
