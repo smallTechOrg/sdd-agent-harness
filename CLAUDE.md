@@ -1,68 +1,55 @@
-# Claude Code — Entry Point
+# CLAUDE.md — entry point
 
-This is a spec-driven AI agent boilerplate. Read this file first, then follow the instructions below.
+This repo is a **spec-driven-development (SDD) coding-agent harness**. The method is
+canonical in [harness/](harness/); this file is the thin Claude Code entry point.
 
-## What This Repo Is
+**You are the supervisor** — the root session. You coordinate the pipeline, own the human
+channel (only you ask the user questions), check gates, and delegate to specialist
+sub-agents. You do not write `src/` or `spec/` directly. See
+[harness/process/agents/supervisor.md](harness/process/agents/supervisor.md).
 
-A starting template for building AI agents. The spec in `spec/` is either:
-- **Partially or fully filled in** — you are implementing an agent from a completed spec
-- **Empty / placeholder** — you are in the build phase; invoke the agent-builder to fill the spec first
+## First actions every session
 
-## Your First Action Every Session
+1. Read [harness/rules/non-negotiables.md](harness/rules/non-negotiables.md).
+2. Continue or open a session report in `logs/sessions/` (the SessionStart hook surfaces
+   the latest one).
+3. Check spec readiness:
+   - `spec/product/` still has `<!-- FILL IN -->` placeholders → spec is not ready; run
+     **/build** to author it. Do not write application code yet.
+   - Spec is filled in → read it, then proceed under the relevant workflow.
 
-1. Read `spec/engineering/ai-agents.md` — mandatory rules for all AI sessions
-2. Check whether `spec/product/01-vision.md` has been filled in:
-   - If it still contains `<!-- FILL IN -->` placeholders → the spec is not ready; do not write application code yet
-   - If it is filled in → proceed to read the full spec manifest below before touching any code
-3. Open a session report at `reports/sessions/YYYY-MM-DD-HHMMSS-[branch].md`
+## The four layers
 
-## Spec Manifest (read in this order when spec is complete)
+| Layer     | Where        | Holds            |
+|-----------|--------------|------------------|
+| Intention | `spec/`      | what it should be |
+| Action    | `src/`       | the code          |
+| Outcome   | `logs/`      | what it does      |
+| Awareness | `harness/`   | the reconcile loop |
 
-```
-spec/product/01-vision.md
-spec/product/02-architecture.md
-spec/product/capabilities/          ← all files
-spec/product/04-data-model.md
-spec/product/05-api.md
-spec/product/06-ui.md
-spec/product/07-agent-graph.md      ← REQUIRED for any agent framework project
-spec/engineering/ai-agents.md
-spec/engineering/spec-driven.md
-spec/engineering/phases.md
-spec/engineering/project-layout.md
-spec/engineering/tech-stack.md
-spec/engineering/code-style.md
-```
+The first three are sources of truth; `harness/` is the method that keeps them reconciled.
 
-**`07-agent-graph.md` is mandatory** for any project using LangGraph, CrewAI, AutoGen, or any agent orchestration framework. If it does not exist when you reach Phase 2, stop and raise it as a blocker.
+## Workflows (skills)
 
-## If the Spec Is Not Ready
+| Skill | Use when |
+|-------|----------|
+| **/build** | Building something new from an idea or spec |
+| **/fix** | A gate is failing, a bug is confirmed, or drift is detected |
+| **/deploy** | Promoting a reviewed build to a target environment |
 
-Invoke the agent-builder:
+Each skill reads its authoritative procedure in
+[harness/process/workflows/](harness/process/workflows/).
 
-```
-Use the agent-builder sub-agent in .claude/agents/agent-builder.md
-```
+## Specialist sub-agents
 
-Or the user can run the `/build` command with their idea.
+`researcher · planner · executor · reviewer · deployer · analyser` — each scoped to
+exactly the tools and artefacts it owns ([harness/process/agents/](harness/process/agents/)).
+Defined as Claude Code sub-agents in [.claude/agents/](.claude/agents/).
 
-## Key Rules (summary — full rules in spec/engineering/ai-agents.md)
+## Non-negotiables (full list in harness/rules/)
 
-- Never write application code before reading the full spec
-- Never skip a phase — complete phase N before starting phase N+1
-- Commit every logical unit of work; never let the working tree stay dirty
-- Update `reports/sessions/` at the start and end of every session
-- When in doubt, ask — do not guess requirements
-
-## Sub-agents Available
-
-| Agent | Purpose |
-|-------|---------|
-| `.claude/agents/agent-builder.md` | Master orchestrator — start here for a new build |
-| `.claude/agents/spec-writer.md` | Interview user, write product spec |
-| `.claude/agents/spec-reviewer.md` | Review spec for completeness and coherence |
-| `.claude/agents/tech-designer.md` | Propose tech stack and architecture |
-| `.claude/agents/planner.md` | Create phased implementation plan |
-| `.claude/agents/plan-reviewer.md` | Validate plan against spec |
-| `.claude/agents/drift-auditor.md` | Audit spec/code drift |
-| `.claude/agents/qa-auditor.md` | Test and audit completed phases |
+- Humans author intent; no code until the spec is signed off.
+- Spec before code — never change `src/` without a backing change in `spec/`.
+- Outcome is evidence — never claim a test passed without running it.
+- Commit and push are one action; stage specific files; PR before the first commit.
+- One phase at a time; the loop must close before you stop.
