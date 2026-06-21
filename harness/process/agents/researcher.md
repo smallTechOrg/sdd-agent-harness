@@ -69,17 +69,45 @@ be able to feel the product's direction. The goal is a genuine wow in 30 minutes
 - Mark every stub clearly in the FR so the user knows what is real vs indicative.
 - Everything outside FR-1's 30-minute ceiling goes to a numbered `proposed` FR or `spec/ROADMAP.md`.
 
-From the user's brief alone, write the **complete** FR-1 immediately — every field filled with
-the best-fit inference or default. Where the brief doesn't say, **decide and mark it**, do not ask:
+From the user's brief alone, write the **complete** FR-1 immediately. Every field filled.
+Where the brief doesn't say, **decide and mark it** — do not ask.
 
-- Use `[ASSUMPTION: …]` inline for any non-obvious choice you made (the data shape, a non-goal,
-  the golden-path scenario, an integration). An assumption is a *decision the loop can correct*,
-  not a question that blocks the draft.
-- Reserve `[NEEDS CLARIFICATION: …]` for the rare unknown that is **genuinely
-  architecture-changing and cannot be defaulted** — i.e. guessing wrong would force a rebuild,
-  not a tweak. Most briefs yield zero of these.
-- Pick the stack from the defaults below by best fit; state it in the draft with one-line
-  rationale. Don't ask permission to draft — ask for approval once, in Step 2.
+- Use `[ASSUMPTION: …]` for non-obvious choices. Reserve `[NEEDS CLARIFICATION: …]` for the
+  rare genuinely architecture-changing unknown that can't be defaulted.
+- Pick the stack from the defaults below by best fit; state it with one-line rationale.
+
+**The FR must be product-grade, not API-spec-grade.** A thin FR produces a thin build. Before
+finishing the draft, check every Success Criterion against this bar:
+
+> *"Could an executor satisfy this criterion with a stub that returns an empty list and a 200?"*
+
+If yes, the criterion is too weak — add the user-visible behaviour it must produce. Examples:
+
+| Weak (passes with a stub) | Strong (actually tested) |
+|---|---|
+| `GET /datasets` returns a list | `WHEN ≥1 dataset is uploaded, GET /datasets SHALL return each with name, row_count ≥ 1, and upload_timestamp` |
+| The UI renders a chart | `WHEN a query returns numeric data, the UI SHALL render an interactive Plotly chart with axis labels, hover tooltips, and a download button` |
+| Follow-up suggestions are returned | `WHEN a query result contains column data, the response SHALL include ≥1 follow-up suggestion referencing a specific column name, rendered as a clickable chip in the UI` |
+
+**Every FR must include a Golden Path Demo Script** — a numbered walkthrough of exactly what a
+product demo would look like, written in user terms (not API terms). This is the primary
+acceptance test: can the supervisor run the demo script on the delivered build and have it work
+end-to-end without explanation?
+
+```
+## Golden Path Demo Script
+
+1. Open the app in a browser — stub-mode banner is visible across the top.
+2. Upload "sales.csv" (3 columns, 50 rows) — dataset appears in the sidebar with row count.
+3. Ask "What are the top 5 products by revenue?" — a Markdown table renders with 5 rows and a
+   bar chart below it. Chart has axis labels and hover tooltips.
+4. Click the follow-up chip "Break down by region" — a new query runs with that text pre-filled.
+5. Switch to a new tab — a fresh session starts (session sidebar shows two sessions).
+6. Check the audit log — both queries appear with timestamp, SQL, and row count.
+```
+
+Write this for the specific FR being drafted — not a generic template. The demo script is what
+the reviewer uses to sign off, not the test suite alone.
 
 ### Step 2 — one consolidated approval moment via `AskUserQuestion`
 

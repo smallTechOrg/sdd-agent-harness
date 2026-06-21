@@ -19,14 +19,10 @@
 
 ---
 
-## Step Plan (one iteration → parallel steps)
+## FR reference
 
-> Planner writes this once. FR holds requirements; this file holds execution state.
-
-| # | Deliverable | Depends on | Parallel group | Gate command | Est. |
-|---|-------------|-----------|----------------|-------------|------|
-| 0 | scaffold — /health green | — | — | `curl :8001/health` | ~8m |
-| 1 | <!-- --> | 0 | A | `uv run pytest` | ~12m |
+> Step Plan + Progress Tracker live in the FR — the coordination hub all agents read and write.
+> **FR:** `spec/features/FR-NNN.md`
 
 ---
 

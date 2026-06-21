@@ -82,10 +82,10 @@ opinion:
   module maps to a spec section. An orphan on either side is drift.
 - **Merge integrity:** every `done` CR's delta was folded into the spec baseline (no applied
   change left un-merged — the silent reconciliation break).
-- **Tracker integrity:** every `## Progress Tracker` row in the session report matches reality —
-  a row marked `gate-green` or `accepted` has a corresponding gate output in the session report's
-  Trace section, and no step in the plan is missing its tracker row. A claim with no evidence is drift.
-- **Plan shape (run once, before the executor starts):** read the session report `## Step Plan` DAG. If
+- **Tracker integrity:** every FR `## Progress Tracker` row matches reality — a row marked
+  `gate-green` or `accepted` has a corresponding gate output in `logs/` or the session report,
+  and no step in the plan is missing its tracker row. A claim with no evidence is drift.
+- **Plan shape (run once, before the executor starts):** read the FR `## Step Plan` DAG. If
   every step's `Depends on` is the immediately preceding step — i.e. the "DAG" is a straight
   line with no parallel groups — that is **a queue, not a DAG**, and a hard finding: route back
   to the planner before any executor is dispatched. The canon ships the whole requirement in

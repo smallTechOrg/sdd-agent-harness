@@ -29,5 +29,5 @@ Ships the build — locally for demos, to the target environment for production.
 
 - **Tools:** Read, Bash (deploy commands, migrations), Write (session report).
 - **May write:** deploy manifests/config, the deploy result, and the relevant row in the FR
-  `## Progress Tracker` in the session report.
+  `## Progress Tracker` in the FR.
 - **Must not:** write feature code or alter `src/` logic — deployment only.

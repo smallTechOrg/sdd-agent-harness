@@ -42,19 +42,14 @@ named here or in a `proposed` FR — never a vague "later."
 
 ## patterns/
 
-Two kinds of files live here, flat:
-
-**Lateral patterns** — cross-cutting concerns that apply broadly (retry strategy, caching,
-observability conventions). Optional; the coding agent adds these when a pattern emerges.
-
-**Usage-specs** — version-**pinned** API-shape guardrails, one short file per library the
+**Usage-specs only** — version-pinned API-shape guardrails, one short file per library the
 project pins (correct/forbidden shapes for *that* version), so a generated seam can't drift
-onto a wrong-version call. These are **project artefacts, not method**: they belong here in
-`spec/` (not `harness/`) because the libs and versions are this project's choice. They are
-**established and edited as part of a feature request** — especially the first, which pins the
-initial stack. When a feature bumps a pinned lib, its usage-spec is refreshed in the same
-change (see [harness/recipes/README.md](../harness/recipes/README.md) → re-sync convention). The
-canonical *recipes* that these guard stay in `harness/recipes/`.
+onto a wrong-version call. These are **project artefacts**: they belong here because the libs
+and versions are this project's choice. Established at intake; refreshed when a feature bumps
+a pinned lib (see [harness/recipes/README.md](../harness/recipes/README.md) → re-sync convention).
+
+Method patterns (engineering, observability, UX, LLM, agentic) live in `harness/patterns/` —
+not here.
 
 Files: `fastapi.md`, `langgraph.md`, `langchain-core.md`, `google-genai.md`,
 `sqlalchemy-async.md`, `pydantic-settings.md`, `nextjs.md`.

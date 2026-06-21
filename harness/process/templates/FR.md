@@ -81,9 +81,37 @@
 
 - [ ] <!-- question + the resolved decision + who resolved it -->
 
-## Execution
+## Golden Path Demo Script
 
-> The step plan (DAG) and progress tracker live in the **session report** (`logs/sessions/`),
-> not here. The FR is the requirements record — what the system must do and why. Execution
-> state (what was built, gate results, who signed off) belongs in the log where it was produced.
-> See the session report's **Step Plan** and **Progress Tracker** sections.
+> Numbered walkthrough of what a 2-minute product demo looks like. Written in user terms, not
+> API terms. This is the primary acceptance test — the supervisor runs it on the delivered build.
+> If any step requires the demonstrator to explain why something looks unfinished, quality has
+> not been met. The researcher writes this; the reviewer runs it.
+
+1. <!-- e.g. Open the app — stub-mode banner is visible across the top -->
+2. <!-- e.g. Upload "sales.csv" — dataset appears in the sidebar with row count -->
+3. <!-- e.g. Ask a question — Markdown table renders + chart below it -->
+
+## Step Plan
+
+> **The FR is the single trackable file.** The planner writes this DAG once the spec is
+> signed off. Every stage reads it to know what to build next and updates its step row as
+> control passes back to the supervisor. This file is how parallel sub-agents coordinate —
+> it is the one artefact everyone writes to and reads from. The session report holds the
+> execution log; this file holds the execution plan.
+
+| # | Deliverable | Depends on | Parallel group | Gate command | Est. |
+|---|-------------|-----------|----------------|-------------|------|
+| 0 | scaffold — /health green | — | — | `curl :8001/health` | ~8m |
+| 1 | <!-- --> | 0 | A | `uv run pytest` | ~12m |
+
+## Progress Tracker
+
+> **Everyone updates their row on handoff.** Status: `todo → in-progress → gate-green → accepted`.
+> `accepted` only when the user accepts the whole at the iteration boundary. The analyser
+> cross-checks this against gate output in the session report — a `gate-green` row with no
+> matching output is drift. Reading this table alone tells anyone where the build stands.
+
+| Step | Status | Gate output (session ref) | Reviewer sign-off | Dominant cost |
+|------|--------|--------------------------|-------------------|---------------|
+| 0 | todo | — | — | — |

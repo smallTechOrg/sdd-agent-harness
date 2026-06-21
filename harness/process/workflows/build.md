@@ -49,20 +49,19 @@ file.
 | Stage      | Reads                            | Writes                                          |
 |------------|----------------------------------|-------------------------------------------------|
 | researcher | user's brief                     | `spec/features/FR-NNN.md`, `spec/rules/`        |
-| planner    | `spec/`                          | Step Plan (DAG) + Progress Tracker in session report |
-| executor   | `spec/`, step plan               | `src/`, `tests/`, recipe scaffold, tracker row  |
-| reviewer   | `spec/`, `src/`, `tests/`        | acceptance tests, sign-off, tracker row         |
-| deployer   | `src/`, config                   | local demo running, result, tracker row         |
+| planner    | `spec/`                          | FR Step Plan (DAG) + seeded Progress Tracker rows |
+| executor   | `spec/`, FR step plan            | `src/`, `tests/`, recipe scaffold, FR tracker row |
+| reviewer   | `spec/`, `src/`, `tests/`        | acceptance tests, sign-off, FR tracker row      |
+| deployer   | `src/`, config                   | local demo running, result, FR tracker row      |
 | analyser   | `spec/`, `src/`, `logs/`         | `logs/analysis/`, spec amendment proposals      |
 
 Sub-agents share no memory. Coordination is through durable artefacts on disk.
 
-**The session report is the single execution-tracking file.** The planner writes the
-`## Step Plan` and seeds the `## Progress Tracker` in `logs/sessions/YYYY-MM-DD-…md`; every
-stage thereafter updates its tracker row as control passes back to the supervisor. The FR is
-the requirements record — what and why; the session report is the execution record — how, when,
-and what happened. The analyser cross-checks the tracker against gate output in the session
-report — a `gate-green` row with no matching output is drift.
+**The FR is the single trackable file.** The planner writes the `## Step Plan` and seeds the
+`## Progress Tracker` in `spec/features/FR-NNN.md`; every stage thereafter updates its tracker
+row as control passes back to the supervisor. Reading the FR alone tells anyone where the build
+stands — it is how parallel sub-agents coordinate. The session report holds the execution log
+(breadcrumbs, gate output text, latency ledger); the FR holds the execution plan and status.
 
 ---
 
@@ -105,9 +104,9 @@ of this one iteration — scope each capability DOWN to ship it minimally, never
 - Step 0: scaffold — `/health` returns 200 (~8 min)
 - Step 1: first model + unit test (~12 min)
 
-Writes the full step DAG into the session report's `## Step Plan` section and seeds the
-`## Progress Tracker` rows (one per step, status `todo`). The session report is the source of
-truth for execution; the FR is the source of truth for requirements.
+Writes the full step DAG into the FR's `## Step Plan` section and seeds the `## Progress
+Tracker` rows (one per step, status `todo`). The FR is the source of truth for both
+requirements and execution plan — it is the coordination hub all sub-agents read and write.
 
 ### 3. executor — one step at a time, many in parallel
 
