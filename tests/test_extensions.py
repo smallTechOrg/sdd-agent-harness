@@ -249,6 +249,62 @@ async def test_remove_panel_wrong_session(client):
 
 
 @pytest.mark.asyncio
+async def test_audit_log_includes_session_id(client):
+    """GET /audit-log entries must include session_id (= Run.thread_id) — Gap 1 fix."""
+    import time
+    from src.db import Run, Span, get_sessionmaker
+
+    run_id = "audit-sid-run-001"
+    now_ms = time.time() * 1000
+    async with get_sessionmaker()() as s:
+        s.add(Run(id=run_id, goal="session-id test", status="completed", thread_id="my-session-xyz"))
+        await s.commit()
+    async with get_sessionmaker()() as s:
+        s.add(Span(
+            id="audit-sid-span",
+            run_id=run_id, name="execute_sql", kind="TOOL",
+            attributes={"sql": "SELECT 1"},
+            start_ms=now_ms, end_ms=now_ms + 5, duration_ms=5,
+        ))
+        await s.commit()
+
+    r = await client.get("/audit-log")
+    assert r.status_code == 200
+    entries = r.json()["data"]
+    found = next((e for e in entries if e["id"] == "audit-sid-span"), None)
+    assert found is not None
+    assert "session_id" in found, "audit-log entry must include session_id"
+    assert found["session_id"] == "my-session-xyz"
+
+
+@pytest.mark.asyncio
+async def test_upload_replace_creates_audit_span(client):
+    """Replace-by-name must write a TOOL span visible in GET /audit-log — Gap 2 fix."""
+    tmp = _make_csv()
+    try:
+        with open(tmp, "rb") as f:
+            await client.post("/upload", files={"files": ("replace_me.csv", f, "text/csv")})
+        with open(tmp, "rb") as f:
+            await client.post("/upload", files={"files": ("replace_me.csv", f, "text/csv")})
+    finally:
+        os.unlink(tmp)
+
+    r = await client.get("/audit-log")
+    assert r.status_code == 200
+    entries = r.json()["data"]
+    replace_entries = [e for e in entries if "replace" in (e.get("sql") or "").lower()
+                       or "replace" in str(entries)]
+    # Easier: check span table directly via DB
+    from src.db import Span, get_sessionmaker
+    from sqlalchemy import select
+    async with get_sessionmaker()() as s:
+        spans = (await s.execute(
+            select(Span).where(Span.name == "replace_dataset").where(Span.kind == "TOOL")
+        )).scalars().all()
+    assert len(spans) >= 1, "replace-by-name must write a TOOL span with name='replace_dataset'"
+
+
+@pytest.mark.asyncio
 async def test_audit_log_since_filter(client):
     """GET /audit-log?since= must exclude older spans."""
     import time

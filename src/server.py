@@ -312,6 +312,21 @@ async def upload_files(files: list[UploadFile]):
                 await s.delete(existing)
                 await s.commit()
                 await asyncio.to_thread(duck.delete_dataset, old_id)
+                # Write audit Span so the replacement is visible in GET /audit-log
+                import time as _time
+                _sys_run_id = str(uuid.uuid4())
+                now_ms = int(_time.time() * 1000)
+                async with get_sessionmaker()() as _s:
+                    from .db import Run as _Run, Span as _Span
+                    _s.add(_Run(id=_sys_run_id, goal=f"replace_dataset:{ds_name}", status="completed"))
+                    await _s.flush()
+                    _s.add(_Span(
+                        id=str(uuid.uuid4()), run_id=_sys_run_id,
+                        name="replace_dataset", kind="TOOL",
+                        attributes={"ds_name": ds_name, "old_id": old_id},
+                        start_ms=now_ms, end_ms=now_ms, duration_ms=0,
+                    ))
+                    await _s.commit()
                 _logger.info("audit: replaced dataset name=%r old_id=%s", ds_name, old_id)
 
         async with get_sessionmaker()() as s:
@@ -472,14 +487,23 @@ async def audit_log(session_id: str | None = None, since: str | None = None):
             )
         spans = (await s.execute(stmt)).scalars().all()
 
+        # Batch-load Run.thread_id for session_id in response (Gap 1 fix)
+        run_ids = list({sp.run_id for sp in spans})
+        thread_map: dict[str, str | None] = {}
+        if run_ids:
+            run_rows = (await s.execute(select(Run).where(Run.id.in_(run_ids)))).scalars().all()
+            thread_map = {r.id: r.thread_id for r in run_rows}
+
     data = []
     for sp in spans:
         attrs = sp.attributes or {}
+        args = attrs.get("args") if isinstance(attrs.get("args"), dict) else {}
         data.append({
             "id": sp.id,
             "run_id": sp.run_id,
-            "sql": attrs.get("sql") or attrs.get("args", {}).get("sql") if isinstance(attrs.get("args"), dict) else attrs.get("sql"),
-            "rows_returned": attrs.get("rows_returned") or (attrs.get("result_preview") and None),
+            "session_id": thread_map.get(sp.run_id),
+            "sql": attrs.get("sql") or args.get("sql"),
+            "rows_returned": attrs.get("rows_returned"),
             "duration_ms": sp.duration_ms,
             "timestamp_ms": sp.start_ms,
         })
