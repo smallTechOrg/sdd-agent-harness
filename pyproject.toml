@@ -1,0 +1,54 @@
+[project]
+name = "analyst"
+version = "0.1.0"
+description = "FastAPI + LangGraph + DuckDB conversational data-analysis agent (re-homed recipe)"
+requires-python = ">=3.11"
+dependencies = [
+    # Persistence spine: SQLAlchemy async (metadata) + per-dataset DuckDB analytics files
+    "duckdb",
+    "sqlalchemy[asyncio]",
+    "aiosqlite",
+    # Serving
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",        # FastAPI UploadFile (multipart CSV/JSON upload)
+    # ReAct agent loop
+    "langgraph",
+    "langgraph-checkpoint-sqlite",
+    "langchain",
+    "langchain-core",
+    # Config
+    "pydantic",
+    "pydantic-settings",
+]
+
+[project.optional-dependencies]
+# Real-run LLM provider (offline tests use FakeModel and need none of this)
+llm = [
+    "langchain-google-genai",
+]
+# Dev/test toolchain. Playwright drives the excluded e2e journey; httpx backs the e2e client.
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-timeout",
+    "ruff",
+    "httpx",
+    "playwright",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+# Run from the recipe root; the `src` package is importable without an install step.
+pythonpath = ["."]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+# The Playwright e2e journey needs a live UI + server; exclude it from the default unit run.
+norecursedirs = ["tests/e2e", "ui", ".venv"]
