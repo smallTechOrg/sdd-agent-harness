@@ -33,23 +33,34 @@ class StubLLMClient(BaseLLMClient):
 
 
 class GeminiClient(BaseLLMClient):
-    """Thin wrapper around google-generativeai."""
+    """Thin wrapper around google-genai SDK."""
+
+    SYSTEM = (
+        "You are a senior data analyst. Always respond with valid JSON only — "
+        "no markdown fences, no explanation, just the raw JSON object."
+    )
 
     def __init__(self, model: str, api_key: str):
-        import google.generativeai as genai
-
-        genai.configure(api_key=api_key)
-        self._model = genai.GenerativeModel(
-            model_name=model,
-            system_instruction=(
-                "You are a senior data analyst. Always respond with valid JSON only — "
-                "no markdown fences, no explanation, just the JSON object."
-            ),
-        )
+        from google import genai
+        self._client = genai.Client(api_key=api_key)
+        self._model = model
 
     def complete(self, prompt: str, system: str = "") -> str:
-        response = self._model.generate_content(prompt)
-        return response.text.strip()
+        from google import genai
+        from google.genai import types
+        response = self._client.models.generate_content(
+            model=self._model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system or self.SYSTEM,
+            ),
+        )
+        text = response.text.strip()
+        # Strip markdown fences in case the model wraps its output
+        if text.startswith("```"):
+            lines = text.splitlines()
+            text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+        return text.strip()
 
 
 def get_llm_client() -> BaseLLMClient:
