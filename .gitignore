@@ -11,7 +11,7 @@ build/
 *.egg-info/
 .DS_Store
 *.log
-logs/runtime/
+logs/
 
 # recipe runtime artifacts (created by scaffold verification — never committed)
 *.duckdb
