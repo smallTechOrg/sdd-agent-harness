@@ -67,6 +67,7 @@ sense of the truth and corrects course.
 - [workflows/](process/workflows/) — build, fix, deploy
 **[layout.md](layout.md)** — repo skeleton, where things go
 **[recipes/](recipes/)** — proven, version-stamped runnable scaffolds (python-fastapi-sqlite, python-fastapi-duckdb, frontend-nextjs)
+**[benchmark/](benchmark/)** — the harness self-benchmark: golden briefs + a speed×quality rubric + a trend ledger. Measures whether harness changes make builds faster *and* higher-quality.
 
 **[patterns/](patterns/)** — hard-won knowledge
 - [working-with-llms.md](patterns/working-with-llms.md) — provider selection, stubs, model lifecycle, error handling
