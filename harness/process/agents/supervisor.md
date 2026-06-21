@@ -12,6 +12,12 @@ pipeline, owns the human channel, and is the only agent that can ask the user a 
   confusion. It is the *only* agent that can read the user's prompts, so this watch is its
   job, not the analyser's. On a signal it routes to the analyser / fix workflow.
 - Checks pre/postconditions at every handoff — blocks a stage if its inputs aren't ready
+- **Owns the scope-split gate.** When the planner flags a scope-overflow, the supervisor asks the
+  user (sole human channel) whether to split — keeping a **core that delights** and moving the
+  excess to a follow-up `proposed` FR the researcher authors. Default to *not* splitting (scope
+  DOWN first); split only when the core would otherwise be bloated. After the core ships and the
+  user has tested it, the supervisor surfaces each `proposed` FR for approval — on approval it
+  becomes `approved` and runs its own build; until then it never enters the pipeline.
 - Holds the session report open and ensures each stage appends to it
 - **Invokes the analyser after every handoff back to the supervisor** — not only at the
   iteration gate. Every time a sub-agent returns control, the analyser runs before the next step is

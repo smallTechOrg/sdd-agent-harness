@@ -42,7 +42,11 @@
 
 **Start:** YYYY-MM-DD HH:MM:SS  
 **End:** YYYY-MM-DD HH:MM:SS  
-**Duration:** Nm Ns
+**Duration:** Nm Ns  
+**Model / effort:** <!-- sonnet / medium -->  
+**Ran parallel with:** <!-- step 2, step 3 — or "—" if serial -->  
+**Dominant cost:** <!-- model-latency | tooling/network | rework/retry | waiting-on-user | waiting-on-background — the ONE thing that ate the most wall-clock here -->  
+**Tool calls:** <!-- N -->  •  **Retries:** <!-- N (and why, in Trace) -->
 
 ### Decisions
 <!-- What was decided and why — AND the alternatives rejected. One bullet per decision. -->
@@ -88,17 +92,38 @@ $ <command run>          # stamped: YYYY-MM-DD HH:MM:SS
 |----------|----------|-------|------------------------|--------------|
 | <!-- e.g. intake asked 2 serial rounds --> | slow | researcher | researcher.md | <!-- draft-first --> |
 
-## Run telemetry
+## Latency ledger — where the wall-clock actually went
 
-> The numbers that make latency regressions visible run-over-run.
+> **The primary speed-diagnosis artifact.** One row per stage/step **in execution order**, filled
+> *as you go* (not reconstructed at the end). This is what tells a harness-improver how to make the
+> next run faster: it exposes the **critical path** (the longest dependency chain — the only thing
+> whose reduction shortens the run) and the **dominant cost** of each unit (so we optimise the real
+> bottleneck — model latency vs tooling vs rework vs idle — not a guessed one). A run with this
+> table empty or undated is **non-compliant** (#12) and the analyser flags it.
 
-| Metric | Value |
-|--------|-------|
-| Model / effort | <!-- e.g. sonnet / max --> |
-| Wall-clock: brief → FR approved | <!-- Nm --> |
-| Wall-clock: approval → iteration 0 green | <!-- Nm --> |
-| Wall-clock: total | <!-- Nm --> |
-| Human round-trips | <!-- N --> |
-| Slowest single stage | <!-- stage — Nm --> |
+| # | Stage/Step | Start | End | Dur | Model/effort | Ran ∥ with | Dominant cost | Tool calls | Retries |
+|---|-----------|-------|-----|-----|--------------|-----------|---------------|-----------|---------|
+| 0 | scaffold  | <!--HH:MM:SS--> | | | | — | tooling/network | | |
+| 1 | <!--model--> | | | | | <!--2,3--> | | | |
+| … | | | | | | | | | |
+
+**Parallel front actually achieved:** <!-- max steps in flight at once — compare to the plan's parallel groups; if 1, the swarm collapsed to a queue (the baseline failure) -->  
+**Critical path:** <!-- the step chain that set total time, and its length Nm -->  
+**Biggest single cost:** <!-- the one stage/cost that, if halved, helps most -->
+
+## Run telemetry — rubric rollup (derive from the ledger)
+
+> The [benchmark rubric](../../benchmark/rubric.md) metrics, computed from the ledger above.
+
+| Metric | Value | Rubric target |
+|--------|-------|---------------|
+| Model / effort | <!-- e.g. sonnet / medium --> | cheapest tier that clears the bar |
+| Wall-clock: brief → FR approved | <!-- Nm --> | ≤ 3 min |
+| Wall-clock: FR approved → Step 0 green | <!-- Nm --> | ≤ 5 min |
+| Wall-clock: brief → iteration delivered | <!-- Nm --> | ≤ 30 min |
+| Human round-trips | <!-- N --> | ≤ 2 |
+| Parallel-step front (max in flight) | <!-- N --> | ≥ 3 |
+| Slowest single stage | <!-- stage — Nm --> | (trend) |
+| Critical-path length | <!-- Nm --> | (trend) |
 
 ---

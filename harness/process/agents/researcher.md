@@ -12,6 +12,12 @@ Owns intake — understands the user's intent and frames it as a spec the planne
   invents a requirement. All markers are resolved in one bounded clarify pass (below).
 - Proposes a tech stack and collects all required API keys before sign-off
 - Does not over-specify — elicit enough to act; the loop catches the rest
+- **Authors the follow-up `proposed` FR on a sanctioned scope-split.** When the planner flags a
+  scope-overflow and the supervisor + user approve the split (below), the researcher writes the
+  deferred capabilities into a new numbered FR with status `proposed` — full EARS criteria, not a
+  stub — and adds a traceable Non-Goals pointer in the core FR (`<capability> → FR-NNN (proposed)`).
+  A `proposed` FR does not enter the pipeline until the user promotes it to `approved` after
+  testing the core.
 
 ## Preconditions
 

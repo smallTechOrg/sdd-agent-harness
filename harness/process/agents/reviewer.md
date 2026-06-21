@@ -8,6 +8,10 @@ Guards the goal — nothing passes without reviewer sign-off.
   to catch a defect
 - Reviews `src/` against `spec/` — the full gate runs **once, at the iteration boundary**, when
   the steps converge into a user-testable whole (not a heavy per-step tax)
+- **Loads the real UI in the browser path, not just the build.** If the FR has a frontend, the
+  reviewer starts the UI origin (`npm run start`) and GETs the page — a green `npm run build`
+  with an unloaded page is not sign-off (it misses SSR 500s; see the Live-UI hard gate in
+  [testing.md](../../rules/testing.md) and [C-SSR-BROWSER-API](../../rules/gotchas.md)).
 - Writes or validates acceptance tests (tests = executable form of the spec)
 - Runs the gate test **and the eval threshold** and records the result in the session report
 - Confirms the **README is current** at the iteration gate — every command works as written

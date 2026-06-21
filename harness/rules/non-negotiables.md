@@ -58,7 +58,11 @@ override is a deliberate, recorded act, never a silent one.
     Never ask mid-build. If a key is missing and was not collected at intake, pause and
     surface to the user — do not continue in a degraded state without telling them.
 
-12. **Timestamp every action.** Each stage records a wall-clock **start and end time** in its
-    session-report section (and gate commands log their own timestamps). Durations must be
-    derivable from the report so latency is debuggable — a stage with no timing is incomplete.
-    Use the host clock (`date '+%Y-%m-%d %H:%M:%S'`); never invent a time.
+12. **Timestamp every action, and account for the wall-clock.** Each stage **and each step**
+    records a wall-clock **start and end time** in its session-report section (and gate commands
+    log their own timestamps), plus a one-word **dominant cost** (model-latency | tooling/network |
+    rework/retry | waiting-on-user | waiting-on-background). Every run fills the **Latency ledger**
+    (one row per step, in execution order) so the critical path and dominant cost are *computable*,
+    not guessed — this is the data we mine to make runs faster. A stage/step with no timing, or a
+    run with an empty ledger, is **incomplete** and the analyser flags it. Use the host clock
+    (`date '+%Y-%m-%d %H:%M:%S'`); never invent a time.

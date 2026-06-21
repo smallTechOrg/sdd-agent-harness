@@ -45,7 +45,8 @@ re-invent these, it selects which apply:
 | Offline stub | always (from the scaffold step on) | full unit suite passes with `…_LLM_PROVIDER=stub`, no key, no network |
 | Production driver | any DB | tests run on the store you ship (SQLite/DuckDB), not a substitute engine |
 | Golden-path smoke | any UI/HTTP surface | walks the primary user journey end-to-end, asserts response **content** |
-| Live-server | any server | `python -m src` starts; `/health` + one real page return 200 (curl, logged) |
+| Live-server (backend) | any server | `python -m src` starts; `/health` + one real API route return 200 (curl, logged) |
+| Live-UI (frontend) | any browser UI | the **UI origin** is started (`npm run start`, not just `npm run build`) and `GET http://localhost:3000/` returns 200 with an **expected rendered DOM string** in the body. `npm run build` passing is necessary, not sufficient — it prerenders, it does not exercise the request path where SSR browser-API crashes ([C-SSR-BROWSER-API]) surface. Curl the **frontend** port, never the backend, for this line. |
 | Stub banner | any UI in stub mode | a visible banner marks stubbed output so no viewer mistakes it for real AI |
 | Eval threshold | any agent-behaviour change | `evals/` golden cases pass at threshold (see below) |
 | README current | the iteration gate | every README command works as written from the stated directory |
@@ -79,5 +80,12 @@ burn a key.
   stand in for external calls; stubbed mode is visibly labelled in any UI so a viewer
   never mistakes a stub for real output.
 - A golden-path smoke test walks the primary user journey end-to-end and asserts response
-  **content**, not just status codes. 
+  **content**, not just status codes.
+- **No prompt-string theater.** A behavioural criterion's gate may **not** be satisfied by a
+  test that only asserts the *prompt text* contains a substring (e.g. `assert "Markdown table"
+  in DOMAIN_PROMPT`). Asserting the instruction exists is not asserting the behaviour happens.
+  Every behavioural criterion needs a **behavioural test**: drive the path with a stub/fake model
+  and assert the *output* satisfies the criterion (the table is in the response; the follow-up
+  references a real column). Prompt-substring asserts are allowed only as a *supplement*, never
+  as the gate itself. A real run shipped three such tautological gates — green, proving nothing.
 

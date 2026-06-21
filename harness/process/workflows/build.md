@@ -163,7 +163,12 @@ Every line is pass/fail — the iteration is not deliverable if any applicable l
 1. Gate command run, **output shown** in the session report (not "should pass").
 2. Tests green against the **production driver**; offline (`…=stub`, no key, no network).
 3. Golden-path smoke asserts rendered **content**, not just a 200 status.
-4. Live-server: `python -m src` up; `curl /health` + one real page → 200, **exit codes logged**.
+4. Live-server (backend): `python -m src` up; `curl /health` + one real API route → 200, **exit codes logged**.
+4b. Live-UI (if the FR has a frontend): the **UI origin is started** (`npm run start`, not just
+   `npm run build`) and `curl http://localhost:3000/` → 200 **with an expected rendered DOM string
+   in the body**. `npm run build` exiting 0 is *not* this check — it prerenders, it does not load
+   the page, so it misses SSR browser-API 500s ([C-SSR-BROWSER-API]). A green build with an unloaded
+   UI is exactly how the `localStorage` 500 reached deploy. Curl the frontend port, never :8001.
 5. Stub mode is visibly **banner-labelled** in any UI (C-STUB-BANNER).
 6. **No carry-forward defect deferred a second time** — a flagged defect is fixed, not re-noted.
 7. Evals pass at threshold (agent-behaviour requirements); README current.

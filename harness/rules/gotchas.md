@@ -131,10 +131,22 @@ add one only on real demand. Both bootstrap schema with `create_tables()` (SQLAl
 - **[C-PLOTLY-SSR]** `react-plotly.js` needs `window` and breaks SSR.
   → `dynamic(() => import('react-plotly.js'), { ssr: false })`.
 
+- **[C-SSR-BROWSER-API]** Any browser-only API (`localStorage`, `sessionStorage`, `window`,
+  `document`, `crypto`, `navigator`) read at **module top-level** or inside a `useState`/`useRef`
+  **initialiser** crashes the Next.js server render — those initialisers run during SSR, where the
+  API is `undefined`. This shipped a real `localStorage.getItem is not a function` 500 that
+  `npm run build` did **not** catch (build prerenders, it does not exercise the request path).
+  → Read browser APIs only inside `useEffect` (client-only), or guard every access with
+  `typeof window !== 'undefined'`. **`npm run build` passing is not proof the page renders** —
+  the gate must `npm run start` and GET the page (see [testing.md](testing.md) Live-server gate).
+
 - **[C-SESSION-SCOPE]** Hardcoded `session_id: 'default'` makes every browser tab share one
   conversation.
   → Generate a per-tab id once: `crypto.randomUUID()` in a `useRef`/`useState` initialiser,
-  with a `Math.random` fallback for non-secure contexts.
+  with a `Math.random` fallback for non-secure contexts. **SSR trap:** that initialiser runs on
+  the server too — if you persist the id to `localStorage`, do the read/write in a `useEffect`,
+  never in the initialiser, or you hit [C-SSR-BROWSER-API]. This exact combination shipped the
+  500 above.
 
 - **[C-API-URL]** `NEXT_PUBLIC_API_URL` is the only backend-URL env the browser can read.
   → Fall back to `http://localhost:8001` for local dev; never hardcode a deployed URL.

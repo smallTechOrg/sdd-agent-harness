@@ -85,8 +85,22 @@ opinion:
 - **Tracker integrity:** every FR `## Progress Tracker` row matches reality — a row marked
   `gate-green` or `accepted` has a corresponding gate output in `logs/`/the session report, and
   no step in the plan is missing its tracker row. A claim with no evidence is drift.
+- **Plan shape (run once, before the executor starts):** read the FR `## Step Plan` DAG. If
+  every step's `Depends on` is the immediately preceding step — i.e. the "DAG" is a straight
+  line with no parallel groups — that is **a queue, not a DAG**, and a hard finding: route back
+  to the planner before any executor is dispatched. The canon ships the whole requirement in
+  **one iteration of parallel steps** ([build.md](../workflows/build.md)); a serial chain of
+  "iterations" is the exact anti-pattern the harness exists to prevent. Also flag any step whose
+  deliverable is **already provided by the chosen recipe** (no-op step) — the plan should cover
+  the recipe *delta*, not re-plan what the scaffold already ships.
 - **Behaviour:** the `evals/` golden set passes at threshold; trajectory signals (turn /
   tool-call / token counts) are within budget.
+- **Timing completeness (#12):** every stage/step section has start+end+dominant-cost, and the
+  **Latency ledger** has a dated row per step with the parallel-front and critical-path filled.
+  A section with no timing, or an empty/undated ledger, is **incomplete** — flag it on the handoff
+  it occurs, not at the end. This is non-optional: speed can't be diagnosed from a run that didn't
+  record where its wall-clock went (the baseline's undated iterations are exactly the gap this
+  closes).
 
 Concrete techniques: schema validation, contract tests, payload inspection, spec-diffs. See
 [observability.md](../../patterns/observability.md). The check's exit status is the verdict —

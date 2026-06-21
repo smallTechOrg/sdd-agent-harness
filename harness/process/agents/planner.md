@@ -58,6 +58,22 @@ test passes).
 
 ---
 
+## Recipe-capability inventory — plan the delta, not the whole
+
+**Before slicing, list what the chosen recipe already provides.** The recipes are not empty
+scaffolds — `python-fastapi-duckdb` already ships session persistence, an audit-log spine,
+token accounting, and rich-output plumbing. A real run planned audit, persistence, and token
+economy as separate "iterations" and then found each was **"No `src/` changes needed — already
+implemented"** — ~27% of the work-units were no-ops scheduled against features that existed
+before any code was written.
+
+Open the recipe, write a one-line inventory of the capabilities it already covers, and slice
+steps for the **delta only** — the capabilities the FR needs that the recipe does *not* yet
+provide, plus the wiring that makes the recipe's features satisfy *this* FR's EARS criteria. A
+step whose deliverable the recipe already ships is not a step; fold its *verification* into the
+reviewer gate instead. (The analyser flags any no-op step that slips through — see
+[analyser.md](analyser.md) Plan shape.)
+
 ## The step DAG — parallelism is the speed lever
 
 The whole requirement ships in **one iteration**; speed comes from running its independent steps
@@ -118,8 +134,18 @@ The slowest build's churn (a renderer scheduled *after* its data; frontend split
 persistence it depended on; dead code never sequenced for cleanup) traces to a plan no one
 reviewed. Before handoff, apply these and end with **Proceed / Revise**:
 
-- **Scope DOWN, not OUT.** The iteration ships *every* named capability minimally, end to end —
-  not the easiest subset. Shrink each capability; never drop one to a "later iteration."
+- **Scope DOWN, not OUT — with one sanctioned escape.** The default is unchanged: the iteration
+  ships *every* named capability minimally, end to end — shrink each capability, never silently
+  drop one to a "later iteration." **The one exception:** if even the minimal forms together would
+  over-build the first delivery — bloat it, blow the one-iteration budget, or delay the user's
+  first delightful test — flag a **scope-overflow** to the supervisor. The split must leave a
+  **core that independently delights** (a coherent, demoable, genuinely valuable end-to-end whole),
+  and move only the *excess* (secondary / advanced capabilities) to a follow-up **`proposed` FR**
+  the researcher authors and the user approves *after* testing the core. The planner only *flags*
+  the overflow with a proposed core/excess line; it does not author the FR (requirements are the
+  researcher's, human-gated by the supervisor). Aim for **Minimal Lovable, not Minimal** and not
+  bloated — enough to wow, no more. A vague deferral is still forbidden; only a numbered
+  `proposed` FR counts.
 - **A renderer ships in the same step-group as its data.** Never return a table/chart in one
   step and render it later (that caused the raw-`<pre>` carry-forward).
 - **Maximise the parallel front.** Every step you can make independent is wall-clock saved —

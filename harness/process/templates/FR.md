@@ -2,7 +2,14 @@
 
 **Date:** YYYY-MM-DD  
 **Author:** [human / researcher]  
-**Status:** draft | approved | in-progress | done
+**Status:** draft | proposed | approved | in-progress | done
+
+> **`proposed`** = scope deliberately split out of a core FR to keep the first delivery
+> *lovable, not bloated*. A `proposed` FR is fully drafted now but does **not** enter the build
+> pipeline; the user approves it (→ `approved`) **after** testing the core app, when its value is
+> concrete. This is the *only* sanctioned way to defer scope — a real numbered FR with EARS
+> criteria, human-approved later. It is not "drop it to a mythical later iteration" (still
+> forbidden — see [planner.md](../agents/planner.md)).
 
 > **Conventions for this file**
 > - **Success Criteria use EARS** (Easy Approach to Requirements Syntax) — see the legend
@@ -45,9 +52,11 @@
 
 ## Non-Goals
 
-> What is explicitly out of scope for this FR?
+> What is explicitly out of scope for this FR? Anything **split out to keep this delivery
+> lovable-not-bloated** is named here with its follow-up FR number and `(proposed)` status — a
+> traceable pointer, never a vague "later."
 
-- <!-- e.g. "Multi-file upload — separate FR" -->
+- <!-- Deferred scope → name the FR: "Multi-chart dashboards → FR-002 (proposed)" -->
 - <!-- e.g. "Authentication — not required for this milestone" -->
 
 ## Key Constraints
