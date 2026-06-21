@@ -253,8 +253,34 @@ Store Tool and Capability records in the application database. Do not hardcode t
 | **Data source** | `csv_query`, `sql_query`, `vector_search`, `graphql_query` | Agent reads or queries external data |
 | **External action** | `http_request`, `send_email`, `post_webhook`, `write_file` | Agent affects the outside world |
 | **Compute** | `python_eval`, `shell_exec` | Agent runs calculations or scripts (sandbox required) |
+| **Orchestration** | `sub_agent` | Master agent delegates to a child agent; receives a response |
 
-A single ReAct loop can call tools from multiple categories in the same session.
+Agents always have access to multiple tools. The assumption is that a session's tool list contains everything the agent needs — scoping is done at registration time, not at invocation time.
+
+### Sub-agents as tools
+
+A tool can itself be an AI agent. When a master agent needs to delegate a task — parallel research, specialist reasoning, a scoped sub-problem — it invokes a `sub_agent` tool exactly like any other tool: by naming it and passing a prompt as a parameter.
+
+```json
+{"tool": "market_analyst_agent", "capability": "analyze", "parameters": {"prompt": "What is the 30-day trend for AAPL?"}}
+```
+
+The sub-agent tool:
+- Receives the prompt (and optionally structured context from the parent's state)
+- Runs its own internal loop — which may itself call tools or spawn further sub-agents
+- Returns a response string to the parent agent
+- Is opaque to the parent: the parent sees a result, not the sub-agent's internal reasoning
+
+This enables hierarchical agent architectures:
+
+```
+Master agent
+  ├── invoke_tool("market_analyst_agent", prompt) → runs own loop → returns analysis
+  ├── invoke_tool("travel_agent", prompt)         → runs own loop → returns recommendation
+  └── FINAL ANSWER: <combined decision using both results>
+```
+
+Register sub-agents in the Tool Registry the same way as any other tool — with a capability name (`analyze`, `research`, `summarize`, etc.) and a parameter schema that includes at least a `prompt` field.
 
 ### Tool Registry pattern
 
@@ -279,52 +305,76 @@ Before the ReAct loop starts, all Tool + Capability records for the session are 
 tools: list[dict]  # [{"name", "type", "config", "capabilities": [{"name", "description", "parameter_schema"}]}]
 ```
 
-### LLM tool invocation format
+### LLM response modes
 
-Define exactly one invocation format in `07-agent-graph.md` before writing any node code. The recommended shape:
+The LLM can respond in two modes. Decide which mode(s) the agent supports in `07-agent-graph.md` before writing any code; the `plan_action` prompt must instruct the LLM accordingly.
+
+**Mode 1 — Single tool call**
+
+The LLM invokes one tool and waits for the result before deciding the next step. Use this mode when steps are sequential and each depends on the previous result.
 
 ```json
 {"tool": "weather_api", "capability": "get_forecast", "parameters": {"city": "London"}}
 ```
 
-When the session has only one tool, `tool` may be omitted for brevity — but include it whenever there are multiple tools so the LLM is explicit. The `plan_action` prompt must show the LLM the exact format to use, with an example.
+**Mode 2 — Execution plan**
+
+The LLM emits a structured workflow that the runtime executes — with parallel branches, conditional routing, sub-agent invocations, and join strategies. Use this mode when tasks can be parallelised or when the overall workflow has branching logic too complex to reason about linearly.
+
+```yaml
+id: market_and_travel_analyzer
+states:
+  fork_research:
+    type: parallel
+    branches:
+      - id: stock_branch
+        states:
+          fetch_stock:
+            type: tool_call
+            tool: get_stock_ticker
+            parameters: { ticker: "AAPL" }
+      - id: travel_branch
+        states:
+          fetch_flights:
+            type: tool_call
+            tool: get_flight_price
+            parameters: { destination: "SFO" }
+    join:
+      strategy: all        # wait for all branches; "race" = first-wins
+      next: evaluate
+
+  evaluate:
+    type: reasoning
+    instructions: "Review stock trend and flight price. Decide whether to book."
+    next: decide
+
+  decide:
+    type: switch
+    expression: "stock_trend == 'bullish' && flight_price < 400"
+    cases:
+      true:  complete
+      false: abort
+```
+
+Execution plan node types:
+
+| Type | Description |
+|---|---|
+| `tool_call` | Invoke a single tool capability with parameters |
+| `parallel` | Fork into concurrent branches; join by `all` (wait for all) or `race` (first wins) |
+| `reasoning` | Pass intermediate results back to the LLM for a reasoning step |
+| `switch` | Conditional branch based on an expression over accumulated context |
+| `end` | Terminal state — success or failure with an optional reason |
 
 ### Tool invocation (`invoke_tool`)
 
-`invoke_tool` is the executor for all tool calls. It dispatches by **tool type**, not by capability name — multiple tool types can expose a capability with the same name:
+`invoke_tool` resolves the named tool from the session's registry, then calls the appropriate capability method on that tool instance with the provided parameters. Each tool encapsulates its own internal implementation — the harness does not prescribe how a specific tool type queries a provider or manages connections. That is the tool's responsibility.
 
-```python
-def invoke_tool(state):
-    # 1. Parse LLM response — bad JSON is recoverable
-    try:
-        call = json.loads(state["llm_response"])
-    except json.JSONDecodeError as e:
-        return _loop_back(state, error=f"Response was not valid JSON: {e}. Respond with a JSON object only.")
+For **single tool calls** (Mode 1), `invoke_tool` calls the capability, captures the result or error, appends it to `tool_call_history`, and returns to `plan_action`.
 
-    capability_name = call.get("capability")
-    parameters = call.get("parameters", {})
+For **execution plans** (Mode 2), a plan executor interprets the plan graph: launching parallel branches as concurrent tasks, waiting at join points per the join strategy (`all` / `race`), routing through conditionals, and invoking sub-agents as opaque tool calls. The master agent receives only the final output of each branch — not the sub-agent's internal trace.
 
-    # 2. Find the tool that exposes this capability — unknown capability is recoverable
-    tool = _find_tool_for_capability(state["tools"], capability_name)
-    if tool is None:
-        valid = [cap["name"] for t in state["tools"] for cap in t["capabilities"]]
-        return _loop_back(state, error=f"Unknown capability '{capability_name}'. Valid: {valid}")
-
-    # 3. Dispatch by tool type — add a case for each registered tool type
-    match tool["type"]:
-        case "http_request":
-            result = _execute_http(tool["config"], parameters)
-        case "send_email":
-            result = _execute_email(tool["config"], parameters)
-        case "csv_query":
-            result = _execute_sql(state["run_id"], parameters.get("query", ""))
-        case _:
-            return _error(state, f"No executor for tool type '{tool['type']}'")
-
-    return _loop_back(state, capability=capability_name, parameters=parameters, result=result)
-```
-
-`_loop_back` appends the result (or error) to `tool_call_history`, increments `iteration_count`, checks the max-iterations guard, and returns the new state. It never raises.
+`invoke_tool` must never raise. Any failure is captured as a `tool_call_history` entry with `is_error: True` and returned to `plan_action` for self-correction, unless the failure is infrastructure-level (see Self-correction below).
 
 ### Self-correction on tool errors
 
@@ -357,30 +407,40 @@ The key principle: **if the LLM could correct the mistake given better informati
 
 ### Prompting the LLM about available tools
 
-The `plan_action` prompt must list every available tool and capability. Format each tool as a block:
+The `plan_action` prompt must list every available tool and capability, specify the response mode(s) the agent supports, and show the exact format for each mode.
+
+**Minimum required elements:**
+- Every tool: name, description, each capability with its parameter schema
+- Sub-agent tools listed the same way as regular tools (name, capability, prompt parameter)
+- The exact invocation format for the supported mode(s) — never leave format ambiguous
+- The FINAL ANSWER signal on the same page so the LLM sees all three options together
+- Real names for everything (actual tool names, actual API endpoints) — no generic placeholders
+
+**Example prompt block (Mode 1 + sub-agent):**
 
 ```
 Available tools:
 
-Tool: weather_api  — Get current conditions and forecasts from the weather service.
+Tool: weather_api  — Get conditions and forecasts from the weather service.
   Capability: get_forecast
-    Description: Retrieve a weather forecast for a city.
     Parameters:
-      city  (string, required)  — Name of the city.
-      days  (integer, optional) — Number of forecast days (default: 3).
+      city  (string, required)  — City name.
+      days  (integer, optional) — Forecast days (default: 3).
 
-To use a tool, respond with exactly this JSON (no prose, no markdown fences):
-{"tool": "weather_api", "capability": "get_forecast", "parameters": {"city": "..."}}
+Tool: market_analyst_agent  — Specialist agent for equity analysis.
+  Capability: analyze
+    Parameters:
+      prompt  (string, required)  — Analysis question to answer.
 
-When you have enough information to answer, respond with:
+To invoke a tool:
+{"tool": "<name>", "capability": "<capability>", "parameters": {...}}
+
+To emit an execution plan (use when tasks can run in parallel):
+{"type": "parallel", "branches": [...], "join": {"strategy": "all", "next": "<state>"}, ...}
+
+When you have enough information to answer:
 FINAL ANSWER: <your complete answer here>
 ```
-
-Rules for the tool prompt block:
-- List every tool, every capability, and every parameter with its schema
-- Show the **exact** invocation JSON — never leave the format ambiguous
-- Put the FINAL ANSWER signal on the same page so the LLM sees both options together
-- Use real names (actual API names, actual table names) — never generic placeholders
 
 ### Tool call history in AgentState
 
@@ -397,16 +457,6 @@ class AgentState(TypedDict, total=False):
 
 Persist `tool_call_history` to the database as JSON so it can be surfaced in the UI as an agent reasoning trace.
 
-### Multi-tool sessions
-
-When a session has multiple tools (a data source + an API, two APIs, etc.):
-- All tools and their capabilities are loaded into `state["tools"]` before the loop starts
-- The planning prompt lists all of them
-- The LLM may call any tool in any iteration and combine results across iterations
-- `invoke_tool` resolves the `tool` field from the LLM response against `state["tools"]`; if `tool` is absent, scan all tools for the named capability
-
-The agent can chain results across tools by accumulating intermediate outputs in `tool_call_history` and referencing them in later iterations.
-
 ### Security boundaries (non-negotiable)
 
 - **Data source tools:** Enforce read-only at the executor level. Any write attempt must be rejected as a recoverable error — never passed to the provider. Log every rejection.
@@ -417,13 +467,13 @@ The agent can chain results across tools by accumulating intermediate outputs in
 
 Before writing any node code, `07-agent-graph.md` must answer:
 
-1. What does the LLM produce when it wants to call a tool? (exact JSON invocation shape)
+1. **Which LLM response mode(s) does this agent support?** Single tool call, execution plan, or both — and what is the exact format for each.
 2. What is the exact FINAL ANSWER signal string?
 3. What constitutes a recoverable tool error vs a fatal error?
 4. What is the max iterations default?
 5. What fields does `AgentState` carry for tool call history and iteration count?
-6. **What tools does the agent have access to?** — name, type, capabilities, and parameter schemas for every tool.
-7. **What triggers tool registration?** — the user action (file upload, API key entry, etc.) that creates a Tool record.
+6. **What tools does the agent have access to?** — name, type, category, capabilities, and parameter schemas for every tool, including any sub-agent tools.
+7. **What triggers tool registration?** — the user action (file upload, API key entry, sub-agent configuration, etc.) that creates a Tool record.
 
 If any of these are missing from the spec, raise a blocker before Phase 2 starts.
 
