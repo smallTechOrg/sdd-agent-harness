@@ -236,10 +236,21 @@ The prompt for the next `plan_action` call shows the error inline:
     → This query failed. Please write a corrected SQL query.
 ```
 
-The LLM sees the error and writes a corrected action. Only fail the pipeline if:
-- The action is structurally invalid (e.g. a non-SELECT SQL when only reads are allowed)
-- Max iterations is reached
-- The LLM call itself fails (network error, 5xx)
+The LLM sees the error and writes a corrected action.
+
+**Recoverable — feed back and loop:**
+- SQL syntax or runtime errors (let the LLM rewrite the query)
+- Malformed or non-JSON LLM response (ask the LLM to reformat its output)
+- Unknown capability name (tell the LLM the valid capability list; see Section 11)
+- Non-SELECT SQL attempt on a read-only tool (remind the LLM the constraint; ask for SELECT)
+- Tool parameter validation failure (show the parameter schema; ask the LLM to retry)
+
+**Fatal — route to `handle_error` immediately:**
+- Max iterations reached
+- LLM call itself fails (network error, 5xx)
+- Infrastructure failure in tool executor (DB connection dropped, file missing, credentials revoked)
+
+The key principle: **if the LLM could correct the mistake given better information, feed back and loop. Only fail when the environment itself is broken.**
 
 ### In-memory data cache pattern
 
@@ -284,8 +295,160 @@ Before writing any node code, `07-agent-graph.md` must answer:
 4. What is the max iterations default?
 5. How is the in-session data store created and cleaned up?
 6. What fields does `AgentState` carry for history and iteration count?
+7. **What tools does the agent have access to?** — name, type, capabilities, and parameter schemas for every tool. (See Section 11 — Tool Registry.)
+8. **What is the exact LLM tool invocation format?** — the JSON shape the LLM must produce to call a tool.
+9. **What triggers tool registration?** — the user action (file upload, API key entry, etc.) that creates a Tool record in the DB.
 
 If any of these are missing from the spec, raise a blocker before Phase 2 starts.
+
+---
+
+## 11. Tool Registry and Capability Dispatch
+
+A **Tool** is a named, typed, executable unit that the LLM can invoke during the ReAct loop. Every external interaction the agent performs — querying a data source, calling an API, sending a message, reading a file — must be modelled as a Tool. This section defines the standard Tool abstraction and the patterns for registering, loading, and dispatching tools.
+
+### Tool anatomy
+
+Every tool has the same structure:
+
+```
+Tool
+  ├── id           — unique identifier (UUID)
+  ├── name         — snake_case label shown to the LLM (e.g. "csv_query", "weather_api")
+  ├── type         — implementation type that determines which executor runs it
+  ├── description  — one sentence shown to the LLM in the planning prompt
+  ├── config_json  — type-specific runtime config (table name, base URL, credentials ref, etc.)
+  └── capabilities — one or more named actions the tool exposes
+        └── Capability
+              ├── name              — the callable action (e.g. "run_query", "get", "send")
+              ├── description       — shown to the LLM
+              └── parameter_schema  — JSON Schema dict describing the parameters
+```
+
+Store Tool and Capability records in the application database. Do not hardcode them in the agent source.
+
+### Tool categories
+
+| Category | Example types | When to use |
+|---|---|---|
+| **Data source** | `csv_query`, `sql_query`, `vector_search`, `graphql_query` | Agent reads or queries external data |
+| **External action** | `http_request`, `send_email`, `post_webhook`, `write_file` | Agent affects the outside world |
+| **Compute** | `python_eval`, `shell_exec` | Agent runs calculations or scripts (sandbox required) |
+
+A single ReAct loop can call tools from multiple categories in the same session.
+
+### Tool Registry pattern
+
+Tools are created when a user connects a resource — not at agent startup. The registration flow is:
+
+```
+User connects a resource
+(uploads CSV, provides API endpoint, enters credentials, etc.)
+       ↓
+System creates a Tool record (name, type, description, config)
+       ↓
+System creates Capability records (one per action the tool exposes)
+       ↓
+Tool is available to any session that includes this resource
+```
+
+The `load_data` node loads all Tool + Capability records for the current session from the DB at run start. This lets the agent discover its available tools at runtime — no hardcoded tool list in agent code.
+
+`AgentState` must carry the loaded tools list:
+
+```python
+tools: list[dict]  # [{"name", "type", "config", "capabilities": [{"name", "description", "parameter_schema"}]}]
+```
+
+### LLM tool invocation format
+
+Define exactly one invocation format in `07-agent-graph.md` before writing any node code. The recommended shape:
+
+```json
+{"tool": "csv_query", "capability": "run_query", "parameters": {"query": "SELECT ..."}}
+```
+
+When the session has only one tool, `tool` may be omitted for brevity — but include it whenever there are multiple tools so the LLM is explicit. The `plan_action` prompt must show the LLM the exact format to use, with an example.
+
+### Capability dispatch in execute_action
+
+`execute_action` dispatches by **tool type**, not by capability name. Multiple tool types can expose a capability with the same name (e.g. both `csv_query` and `sql_query` can expose `run_query`):
+
+```python
+def execute_action(state):
+    # 1. Parse LLM response — bad JSON is recoverable
+    try:
+        call = json.loads(state["llm_response"])
+    except json.JSONDecodeError as e:
+        return _loop_back(state, error=f"Response was not valid JSON: {e}. Respond with a JSON object only.")
+
+    capability_name = call.get("capability")
+    parameters = call.get("parameters", {})
+
+    # 2. Find the tool that exposes this capability — unknown capability is recoverable
+    tool = _find_tool_for_capability(state["tools"], capability_name)
+    if tool is None:
+        valid = [cap["name"] for t in state["tools"] for cap in t["capabilities"]]
+        return _loop_back(state, error=f"Unknown capability '{capability_name}'. Valid options: {valid}")
+
+    # 3. Dispatch by tool type
+    match tool["type"]:
+        case "csv_query":
+            result = _execute_sql(state["run_id"], parameters.get("query", ""))
+        case "http_request":
+            result = _execute_http(tool["config"], parameters)
+        case "send_email":
+            result = _execute_email(tool["config"], parameters)
+        case _:
+            # Fatal — no executor registered for this type
+            return _error(state, f"No executor registered for tool type '{tool['type']}'")
+
+    return _loop_back(state, capability=capability_name, parameters=parameters, result=result)
+```
+
+`_loop_back` appends the result (or error) to `action_history`, increments `iteration_count`, checks the max-iterations guard, and returns the new state. It never raises — it always returns a valid state dict.
+
+### Prompting the LLM about available tools
+
+The `plan_action` prompt must list every available tool and capability clearly. Format each tool as a block the LLM can scan:
+
+```
+Available tools:
+
+Tool: csv_query  — Execute SQL SELECT queries against the uploaded dataset.
+  Capability: run_query
+    Description: Run a SQL SELECT against the data table.
+    Parameters:
+      query  (string, required)  — A valid SQL SELECT statement. Table name: 'sales_2024'.
+
+To use a tool, respond with exactly this JSON (no prose, no markdown fences):
+{"tool": "csv_query", "capability": "run_query", "parameters": {"query": "..."}}
+
+When you have enough information to answer the user's question, respond with:
+FINAL ANSWER: <your complete answer here>
+```
+
+Key rules for the tool prompt block:
+- List tool name, type description, and every capability with its parameter schema
+- Show the **exact** invocation JSON — do not leave the format ambiguous
+- Put the FINAL ANSWER signal on the same page so the LLM sees both together
+- For multi-source sessions, include the real table name (or endpoint) for each tool, not a generic placeholder
+
+### Multi-tool sessions
+
+When a session has multiple tools (two CSVs, a CSV + an external API, etc.):
+- The `load_data` node loads all tools and their capabilities into `state["tools"]`
+- The planning prompt lists all of them
+- The LLM may call tools in any order and combine results across iterations
+- `execute_action` resolves the `tool` field from the LLM response against the `state["tools"]` list; if `tool` is missing, scan all tools for the named capability
+
+The agent can JOIN results across tools by accumulating intermediate results in `action_history` and referencing them in later iterations.
+
+### Security boundaries (non-negotiable)
+
+- **Data source tools:** Enforce read-only at the executor level. Any non-SELECT SQL must be rejected as a recoverable error — never passed to the database. Log every rejection.
+- **External action tools** (`send_email`, `post_webhook`, `write_file`): Require explicit user opt-in in the UI before the session starts if the action is irreversible. Log every execution with its parameters.
+- **Compute tools** (`python_eval`, `shell_exec`): Require a sandboxed executor. Never enable by default. Explicitly excluded from v0.1 scope unless the spec requires them.
 
 ---
 
