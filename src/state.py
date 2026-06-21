@@ -14,4 +14,5 @@ class AgentState(TypedDict):
     iterations: int
     answer: str | None
     chart_spec: str | None
+    dashboard_specs: list[str]
     run_id: str

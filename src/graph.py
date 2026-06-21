@@ -62,12 +62,14 @@ def build_graph(model, checkpointer=None):
         last = state["messages"][-1]
         answer = None
         chart_spec = None
+        dashboard_specs = []
 
         # Happy path: last message has an explicit finish tool call
         for tc in getattr(last, "tool_calls", None) or []:
             if tc["name"] == FINISH:
                 answer = tc["args"].get("answer")
                 chart_spec = tc["args"].get("chart_spec") or None
+                dashboard_specs = tc["args"].get("dashboard_specs") or []
 
         # Force-finalize path (iteration cap hit): scan backwards for any finish call
         if answer is None:
@@ -76,6 +78,7 @@ def build_graph(model, checkpointer=None):
                     if tc["name"] == FINISH and tc["args"].get("answer"):
                         answer = tc["args"]["answer"]
                         chart_spec = tc["args"].get("chart_spec") or None
+                        dashboard_specs = tc["args"].get("dashboard_specs") or []
                         break
                 if answer is not None:
                     break
@@ -99,6 +102,7 @@ def build_graph(model, checkpointer=None):
         return {
             "answer": content_to_text(answer) or "(analysis incomplete — no data retrieved)",
             "chart_spec": chart_spec,
+            "dashboard_specs": dashboard_specs if isinstance(dashboard_specs, list) else [],
         }
 
     def route(state):

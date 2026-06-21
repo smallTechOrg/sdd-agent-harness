@@ -170,11 +170,14 @@ def write_todos(todos: list[str]) -> str:
 
 
 @tool
-def finish(answer: str, chart_spec: str = "") -> str:
+def finish(answer: str, chart_spec: str = "", dashboard_specs: list[str] = []) -> str:
     """Return the final answer to the user and end the run. Call exactly once when done.
 
     answer: the prose answer — lead with the direct result, cite the SQL if relevant.
-    chart_spec: optional — the JSON string from generate_chart_spec. Omit if no chart was generated.
+    chart_spec: optional — the JSON string from generate_chart_spec (single chart). Omit if no chart.
+    dashboard_specs: optional — list of Plotly JSON spec strings for a multi-chart dashboard.
+                     When provided, the UI renders each chart in a CSS grid. Use this instead of
+                     chart_spec when the analysis naturally produces multiple charts at once.
 
     IMPORTANT: if execute_sql returned a LARGE_FILE_WARNING, include the warning text in
     answer and ask the user to confirm before proceeding. Do NOT call execute_sql with

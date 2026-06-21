@@ -98,6 +98,7 @@ async def create_run(body: RunIn):
             graph=_graph,
         )
         return ok({k: r[k] for k in ("run_id", "thread_id", "answer", "chart_spec",
+                                      "dashboard_specs",
                                       "input_tokens", "output_tokens", "cost_usd",
                                       "iterations", "dataset_id", "status")})
     except Exception as e:
@@ -138,11 +139,12 @@ async def stream_run(body: RunIn):
             msgs = [SystemMessage(content=system_content), HumanMessage(content=body.goal)]
         state = {
             "messages": msgs,
-            "iterations": 0, "answer": None, "chart_spec": None, "run_id": run_id,
+            "iterations": 0, "answer": None, "chart_spec": None, "dashboard_specs": [], "run_id": run_id,
         }
         cfg = {"configurable": {"thread_id": thread_id}, "recursion_limit": 50}
         answer = ""
         chart_spec = None
+        dashboard_specs = []
         total_input_tokens = 0
         total_output_tokens = 0
         try:
@@ -164,7 +166,8 @@ async def stream_run(body: RunIn):
                     out = (ev.get("data", {}).get("output") or {})
                     answer = out.get("answer", "")
                     chart_spec = out.get("chart_spec") or None
-            yield f"data: {json.dumps({'done': True, 'answer': answer, 'chart_spec': chart_spec, 'run_id': run_id, 'thread_id': thread_id, 'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens})}\n\n"
+                    dashboard_specs = out.get("dashboard_specs") or []
+            yield f"data: {json.dumps({'done': True, 'answer': answer, 'chart_spec': chart_spec, 'dashboard_specs': dashboard_specs, 'run_id': run_id, 'thread_id': thread_id, 'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens})}\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'error': str(exc)})}\n\n"
 

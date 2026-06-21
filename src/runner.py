@@ -225,7 +225,7 @@ async def run_agent(
 
     state = {
         "messages": new_messages,
-        "iterations": 0, "answer": None, "chart_spec": None, "run_id": run_id,
+        "iterations": 0, "answer": None, "chart_spec": None, "dashboard_specs": [], "run_id": run_id,
     }
     invoke_cfg = {"configurable": {"thread_id": thread_id}, "recursion_limit": 50}
 
@@ -262,6 +262,7 @@ async def run_agent(
         "thread_id": thread_id,
         "answer": result["answer"],
         "chart_spec": result.get("chart_spec"),
+        "dashboard_specs": result.get("dashboard_specs") or [],
         "iterations": result["iterations"],
         "dataset_id": dataset_id,
         "status": "completed",

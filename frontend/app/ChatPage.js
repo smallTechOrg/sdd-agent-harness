@@ -145,6 +145,14 @@ function Message({ msg }) {
               </div>
             )}
             {msg.chartSpec && <PlotlyChart spec={msg.chartSpec} />}
+            {/* Dashboard grid — shown when agent returns multiple charts */}
+            {msg.dashboardSpecs && msg.dashboardSpecs.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                {msg.dashboardSpecs.map((spec, i) => (
+                  <PlotlyChart key={i} spec={spec} />
+                ))}
+              </div>
+            )}
             <div className="mt-2 flex gap-3 text-xs text-gray-400">
               {msg.runId && (
                 <a href={`http://localhost:8001/traces`} target="_blank" rel="noreferrer"
@@ -268,6 +276,7 @@ export default function Page() {
         id: genId(), role: "assistant",
         content: d.answer || null,
         chartSpec: d.chart_spec || null,
+        dashboardSpecs: d.dashboard_specs || [],
         runId: d.run_id,
         cost: d.cost_usd,
         inputTokens: d.input_tokens,
