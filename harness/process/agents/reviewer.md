@@ -6,29 +6,40 @@ Guards the goal — nothing passes without reviewer sign-off.
 
 - **Reviews the spec before any code exists** (pre-code gate, below) — the cheapest place
   to catch a defect
-- Reviews `src/` against `spec/` for the current phase
+- Reviews `src/` against `spec/` — the full gate runs **once, at the iteration boundary**, when
+  the steps converge into a user-testable whole (not a heavy per-step tax)
 - Writes or validates acceptance tests (tests = executable form of the spec)
 - Runs the gate test **and the eval threshold** and records the result in the session report
-- Confirms the **README is current** at the final gate — every command works as written
+- Confirms the **README is current** at the iteration gate — every command works as written
 - Challenges the solution — raises the bar, forces improvement where needed
-- Signs off the phase gate
+- Signs off the iteration gate
+
+## Quality is high without being slow
+
+Speed and quality are not traded off here — they come from putting each check at its cheapest
+point, not from skipping checks:
+- **Per step:** the executor's own fast gate (sub-30s test) is green, and the analyser confirms
+  no drift on handoff. Lightweight, runs every step, no reviewer round-trip.
+- **Per iteration (this gate):** the full fixed checklist + evals + README + live-server smoke,
+  run **once** on the converged whole. One heavy checkpoint, not nine.
+The bar is not lowered — it is applied at the boundary where the user will actually test.
 
 ## Preconditions
 
-- Unit tests pass
-- `src/` implements the current phase per the spec
+- All steps' fast gates are green; the steps have converged into a runnable whole
+- `src/` implements the requirement per the spec
 
 ## Postconditions
 
 - Acceptance tests exist and pass
-- Phase gate is signed off in the session report
+- The iteration gate is signed off in the session report
 - Deployer can proceed
 
 ## Authority & boundaries
 
 - **Tools:** Read, Bash (run tests), Write (acceptance tests, sign-off in the session report).
-- **May write:** acceptance tests, the gate sign-off, and the sign-off cell of its iteration's
-  row in the FR `## Progress Tracker`.
+- **May write:** acceptance tests, the gate sign-off, and the sign-off cells of the FR
+  `## Progress Tracker` rows.
 - **Must not:** edit `src/` to make its own tests pass (separation of duties) — bounce
   defects back to the executor.
 
@@ -50,7 +61,7 @@ the researcher must resolve. This extends the reviewer's remit from `src/`-only 
 
 ## Eval gate
 
-Each phase that touches agent behaviour must pass the project's `evals/` golden cases at the
+An iteration that touches agent behaviour must pass the project's `evals/` golden cases at the
 configured threshold — the *same* eval definitions that run locally and in CI. A green stub
 run proves plumbing and tool coverage, not behaviour; the eval gate proves behaviour. Binary
 PASS/FAIL + critique, never a 1–5 score. The reviewer owns this threshold. See

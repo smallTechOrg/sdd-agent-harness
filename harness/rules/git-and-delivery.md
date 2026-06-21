@@ -18,7 +18,7 @@ exist. A hook enforces this (`.claude/hooks/`); do not rely on memory.
 
 - Commit every logical unit of work; never let the tree stay dirty across a reply.
 - **Never `git add -A` / `git add .`** — stage specific files or directories.
-- Commit message format: `phase-N: <what you did>` for build work; `fix: …`, `spec: …`,
+- Commit message format: `step-N: <what you did>` for build work; `fix: …`, `spec: …`,
   `harness: …` otherwise.
 - Never commit secrets. Never force-push without explicit confirmation.
 

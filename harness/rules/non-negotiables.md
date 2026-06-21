@@ -29,20 +29,22 @@ override is a deliberate, recorded act, never a silent one.
    lives on a feature branch and reaches `main` only via a reviewed PR; open the PR
    before the first feature-branch commit. (See `git-and-delivery.md`.)
 
-6. **One phase at a time.** Never start phase N+1 while phase N is failing. Each phase
-   runs end-to-end and passes all four gate requirements before moving on:
-   - Tests pass and output is shown in the session report
-   - Reviewer has signed off
-   - Working tree is clean and pushed
-   - Session report is updated with what was done and what is next
+6. **Steps gate green; the iteration gates hard.** The whole requirement ships in **one
+   iteration**, built as parallel **steps** (see `workflows/build.md` → Vocabulary).
+   - A **step** is done when its fast gate (<30s) is green and the analyser sees no drift on
+     handoff. Never wire a dependent step on top of a red step.
+   - The **iteration** is done only when the full reviewer checklist passes, evals are green,
+     the tree is clean and pushed, and the session report is current. This heavy gate runs
+     **once**, on the converged whole — not per step.
 
 7. **The loop must close before you stop.** Before ending any unit of work: spec ↔ src ↔
    logs reconcile (the drift check is clean), tests and evals pass, the tree is clean, the
    branch is pushed, and the session report in `logs/sessions/` is up to date.
 
 8. **Done means the user says done.** Tests passing and reviewer sign-off are necessary
-   but not sufficient. A phase is complete only when the user has explicitly accepted it.
-   Never self-declare done.
+   but not sufficient. The **iteration** is complete only when the user has explicitly
+   accepted the delivered requirement — the one user-acceptance boundary. Never self-declare
+   done.
 
 9. **Never act irreversibly without confirmation.** Deploy, delete, send email, write to
    a production DB, force-push — any action that cannot be undone requires explicit

@@ -54,4 +54,5 @@ Defined as Claude Code sub-agents in [.claude/agents/](.claude/agents/).
 - Spec before code — never change `src/` without a backing change in `spec/`.
 - Outcome is evidence — never claim a test passed without running it.
 - Commit and push are one action; stage specific files; PR before the first commit.
-- One phase at a time; the loop must close before you stop.
+- One iteration delivers the whole requirement, built as parallel steps; steps gate green, the
+  iteration gates hard, and the loop must close before you stop.

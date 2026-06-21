@@ -2,45 +2,67 @@
 
 `researcher → planner → executor → reviewer → deployer → analyser ↺`
 
-Takes a user brief from zero to a working, reviewed, locally deployed agent.
-Runs as a sequence of **~15-minute iterations** — after each one the system is runnable.
-The pipeline is autonomous after the one human-touch approval gate.
+Takes a user brief from zero to a working, reviewed, **user-testable delivery** of the whole
+requirement — in **one iteration**, built as **parallel steps**. The pipeline is autonomous
+after the one human-touch approval gate.
+
+---
+
+## Vocabulary — iteration vs step (read this first)
+
+These two words used to be conflated; they are now distinct, and the distinction is the whole
+point of this workflow.
+
+- **Iteration** = one **end-to-end, user-testable delivery of the entire requirement**. This is
+  the unit the *user* accepts. A zero-shot build is normally **one iteration** — you start a
+  second only when the user, after testing, adds or changes a requirement. The old plans had
+  ~9 "iterations" before the user could test anything; that was the bug. There is **one** user
+  acceptance boundary, not nine.
+- **Step** = a green-gated ~10–15 min work-unit *inside* an iteration (scaffold, a model, an
+  endpoint, a node, a UI page, the wiring). Steps are the **parallel units** — independent steps
+  run at once as a swarm. A step is tested and green, but it is **not** a user-acceptance point;
+  only the iteration boundary is.
+
+So: the planner slices the one iteration into a step DAG; executors run independent steps in
+parallel; the reviewer's full gate + user acceptance happen **once**, when the steps converge
+into a testable whole.
 
 ---
 
 ## The pipeline is a swarm, not a queue
 
 The arrow order above is a *dependency order*. The supervisor **runs it as a swarm**: wherever
-work is independent it spawns parallel agents and gathers at the gate (see
+steps are independent it spawns parallel executors and gathers at the iteration gate (see
 [supervisor.md](../agents/supervisor.md) → Swarm orchestration). In particular:
 - intake research probes + `usage-specs/` reads run concurrently;
-- independent iterations/files run as **parallel executors**;
-- the **frontend is a first-class workstream** — built alongside its backend data in the same
+- independent **steps run as parallel executors** (separate worktrees / disjoint paths);
+- the **frontend is a first-class step** — built alongside its backend data within the same
   iteration, never bolted on at the end;
 - review runs **one reviewer per dimension** in parallel; findings merge at the gate.
 
-Gates are barriers — fan out, then reconcile before the gate closes. Parallel writers use
-separate worktrees or disjoint paths; one owner per file.
+The **iteration gate is the barrier** — fan steps out, then reconcile into a user-testable whole
+before the gate closes. Parallel writers use separate worktrees or disjoint paths; one owner per
+file.
 
 ## Blackboard — what each stage reads and writes
 
 | Stage      | Reads                            | Writes                                          |
 |------------|----------------------------------|-------------------------------------------------|
 | researcher | user's brief                     | `spec/features/FR-NNN.md`, `spec/rules/`        |
-| planner    | `spec/`                          | FR Iteration Plan + seeded tracker rows         |
-| executor   | `spec/`, iteration plan          | `src/`, `tests/`, recipe scaffold, FR tracker   |
+| planner    | `spec/`                          | FR Step Plan (DAG) + seeded tracker rows        |
+| executor   | `spec/`, step plan               | `src/`, `tests/`, recipe scaffold, FR tracker   |
 | reviewer   | `spec/`, `src/`, `tests/`        | acceptance tests, sign-off, FR tracker          |
 | deployer   | `src/`, config                   | local demo running, result, FR tracker          |
 | analyser   | `spec/`, `src/`, `logs/`         | `logs/analysis/`, spec amendment proposals      |
 
 Sub-agents share no memory. Coordination is through durable artefacts on disk.
 
-**The FR is the single trackable file.** The planner writes the `## Iteration Plan` and seeds
-the `## Progress Tracker` in `spec/features/FR-NNN.md`; every stage thereafter updates the
-tracker row it touches as control passes back to the supervisor (status + gate-output ref +
-sign-off). Reading the FR alone tells anyone where the build stands. The analyser cross-checks
-the tracker against `logs/` on each pass — a `gate-green` row with no matching gate output is
-drift.
+**The FR is the single trackable file.** The planner writes the `## Step Plan` and seeds the
+`## Progress Tracker` in `spec/features/FR-NNN.md`; every stage thereafter updates the tracker
+row (one per **step**) it touches as control passes back to the supervisor (status + gate-output
+ref + sign-off). Reading the FR alone tells anyone where the build stands. The analyser
+cross-checks the tracker against `logs/` on each pass — a `gate-green` row with no matching gate
+output is drift.
 
 ---
 
@@ -66,28 +88,35 @@ and any unresolved marker. Cheapest place to catch a defect. (See `reviewer.md`.
 **Gate (supervisor):** FR coherent, EARS criteria testable, stack approved, all keys identified,
 no open clarification markers. After sign-off the pipeline runs autonomously.
 
-### 2. planner — slice into 15-minute iterations
+### 2. planner — slice the iteration into a parallel step DAG
 
-Reads the spec and produces an iteration plan where each iteration:
+Reads the spec and slices the **one iteration** (the whole requirement) into **steps**, where
+each step:
 - Has one deliverable (describable in one sentence)
-- Has one gate command (runnable in under 30 seconds)
-- Takes ~15 minutes of executor work
+- Has one fast gate command (runnable in under 30 seconds)
+- Takes ~10–15 minutes of executor work
+
+The plan is a **DAG, not a queue**: mark which steps are **independent** (run in parallel) and
+draw the dependency edges for the rest. The goal is the *whole requirement* testable at the end
+of this one iteration — scope each capability DOWN to ship it minimally, never drop one to a
+"later iteration." The frontend step ships alongside its backend step, not after.
 
 **Always starts with:**
-- Iteration 0: scaffold — `/health` returns 200 (~8 min)
-- Iteration 1: first model + migration + unit test (~12 min)
+- Step 0: scaffold — `/health` returns 200 (~8 min)
+- Step 1: first model + unit test (~12 min)
 
-Writes the full iteration plan into the FR's `## Iteration Plan` section and seeds the
-`## Progress Tracker` rows (one per iteration, status `todo`); a snapshot also goes to the
-session report (see planner agent for format). The FR is the source of truth.
+Writes the full step DAG into the FR's `## Step Plan` section and seeds the `## Progress Tracker`
+rows (one per step, status `todo`); a snapshot also goes to the session report (see planner
+agent for format). The FR is the source of truth.
 
-### 3. executor — one iteration at a time
+### 3. executor — one step at a time, many in parallel
 
-Implements exactly one iteration per invocation. No more.
+Each executor implements **exactly one step** per invocation. Independent steps run as **parallel
+executors** at once (separate worktrees / disjoint paths; one owner per file).
 
-**Iteration 0 steps — stack-conditional** (the planner names the recipe; see the selection
-table in `planner.md`). Copying the *wrong* recipe is exactly how the slow build lost — the
-recipe must match the approved stack:
+**Step 0 — scaffold, stack-conditional** (the planner names the recipe; see the selection table
+in `planner.md`). Copying the *wrong* recipe is exactly how the slow build lost — the recipe must
+match the approved stack:
 
 1. Copy the **selected** recipe to the project root (the planner names it):
    - Relational / transactional → `harness/recipes/python-fastapi-sqlite/`
@@ -102,30 +131,34 @@ recipe must match the approved stack:
    recipes; no migration step, no Alembic). See [gotchas.md](../../rules/gotchas.md) C-DUCKDB-VIEW.
 5. Confirm `curl http://localhost:8001/health` returns 200 with `stub_mode: true`
 6. **Update `README.md`** — name, one-line description, prerequisites, exact `uv sync` +
-   run quickstart, `.env` setup. README is an Iteration-0 deliverable, never deferred
-   (C-README).
-7. Commit: `iter-0: scaffold — /health green`
+   run quickstart, `.env` setup. README is a Step-0 deliverable, never deferred (C-README).
+7. Commit: `step-0: scaffold — /health green`
 
-**Subsequent iterations:**
-- Write exactly what the iteration plan says — one model, one endpoint, one node, one tool
+**Subsequent steps:**
+- Write exactly what the step plan says — one model, one endpoint, one node, one tool, one page
 - Write the test first (or alongside) — never skip it
-- Run the gate command; show output in session report
-- Commit: `iter-N: [deliverable]`
+- Run the step's fast gate command; show output in session report
+- Commit: `step-N: [deliverable]`
+
+**Per-step gate is fast and green; it is not user acceptance.** A step is "done" when its
+sub-30s gate passes and the analyser confirms no drift on handoff. The heavy reviewer checklist
+and user acceptance happen once, at the iteration boundary (stage 4).
 
 **On blocker:** three attempts, then route to fix workflow — do not hack around it.
 
 **Python conventions:**
 - `src/` holds all application code; `tests/` at root
 - External calls sit behind a thin client in `src/integrations/`
-- Stubs in `src/integrations/stubs/` — Phase 2 (Iteration 2) runs fully offline
-- `APPNAME_LLM_PROVIDER=stub` must be the default until the LLM iteration
+- Stubs in `src/integrations/stubs/` — the build runs fully offline until the LLM step
+- `APPNAME_LLM_PROVIDER=stub` must be the default until the LLM step
 
-### 4. reviewer — guard the goal
+### 4. reviewer — guard the goal at the iteration boundary
 
-Reviews `src/` against the FR after each iteration.
+When the steps converge into a user-testable whole, the reviewer runs the full gate **once**
+against the FR — this is the single heavy checkpoint, not a per-step tax.
 
 **The fixed gate checklist** (the planner does not re-invent it; the reviewer runs it).
-Every line is pass/fail — an iteration that fails any applicable line is not done:
+Every line is pass/fail — the iteration is not deliverable if any applicable line fails:
 
 1. Gate command run, **output shown** in the session report (not "should pass").
 2. Tests green against the **production driver**; offline (`…=stub`, no key, no network).
@@ -133,15 +166,15 @@ Every line is pass/fail — an iteration that fails any applicable line is not d
 4. Live-server: `python -m src` up; `curl /health` + one real page → 200, **exit codes logged**.
 5. Stub mode is visibly **banner-labelled** in any UI (C-STUB-BANNER).
 6. **No carry-forward defect deferred a second time** — a flagged defect is fixed, not re-noted.
-7. Evals pass at threshold (agent-behaviour iterations); README current at the final gate.
+7. Evals pass at threshold (agent-behaviour requirements); README current.
 8. Working tree clean and pushed; session report updated.
 
 See [testing.md](../../rules/testing.md) for the full gate law and
 [gotchas.md](../../rules/gotchas.md) for the referenced IDs.
 
-### 5. deployer — ship after Iteration 2
+### 5. deployer — spin up the user-testable demo
 
-After Iteration 2 (stub agent loop), spin up the local demo:
+Once the iteration is green, spin up the local demo so the user can test the whole requirement:
 - `uv run python -m src`
 - Confirm `http://localhost:8001` serves a live response
 - Log curl output in session report
@@ -152,10 +185,12 @@ Confirm all irreversible actions with the user before proceeding.
 
 ### 6. analyser — close the loop
 
-The supervisor invokes the analyser **after every handoff back to it** — after each stage
-above returns, not only at the end of an iteration. Every pass writes a findings file to
-`logs/analysis/`; an early-stage pass confirms what is present and names what the next stage
-still owes, so a missing artefact surfaces one handoff later instead of at the gate.
+The supervisor invokes the analyser **after every handoff back to it** — after each step
+returns, not only at the iteration boundary. Every pass writes a findings file to
+`logs/analysis/`; an early-step pass confirms what is present and names what the next step
+still owes, so a missing artefact surfaces one handoff later instead of at the gate. The
+analyser **decides on the fly** (see analyser.md) — a one-line verdict when clean, a terminal
+route when drift is unambiguous.
 
 At each pass, check: does `src/` match the FR? Do logs match `src/`?
 
@@ -164,10 +199,10 @@ At each pass, check: does `src/` match the FR? Do logs match `src/`?
 | spec ≠ src | route back to executor |
 | src ≠ logs | route to fix workflow |
 | logs ≠ spec | fix src/ or propose spec amendment |
-| all agree | surface to user for acceptance |
+| all agree | continue; at the iteration boundary, surface to user for acceptance |
 
-**Done signal:** user explicitly accepts the iteration. Never self-declare done.
-Spec amendments go to supervisor + user for approval before any change is made.
+**Done signal:** the user explicitly accepts the **iteration** (the whole requirement, tested).
+Never self-declare done. Spec amendments go to supervisor + user for approval before any change.
 
 ---
 
@@ -176,4 +211,5 @@ Spec amendments go to supervisor + user for approval before any change is made.
 Each stage appends to `logs/sessions/YYYY-MM-DD-HHMMSS-<branch>.md`.
 Use the template at `harness/process/templates/SESSION.md`.
 
-Per-stage required fields: stage name + timestamp, decisions, gate output, blockers, what is next.
+Per-stage required fields: stage name + start/end timestamp, decisions, trace, harness friction,
+gate output, blockers, what is next.

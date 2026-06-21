@@ -9,9 +9,9 @@ exactly the tools and artefacts it owns.
 |-------|------|
 | [supervisor](agents/supervisor.md) | Primary session — coordinates the pipeline, owns the human channel |
 | [researcher](agents/researcher.md) | Elicits requirements, authors the spec |
-| [planner](agents/planner.md) | Slices work into value-ordered phases |
-| [executor](agents/executor.md) | Implements each phase in `src/` |
-| [reviewer](agents/reviewer.md) | Guards verification, signs off phase gates |
+| [planner](agents/planner.md) | Slices the iteration into a parallel step DAG |
+| [executor](agents/executor.md) | Implements one step in `src/` (many run in parallel) |
+| [reviewer](agents/reviewer.md) | Guards verification, signs off the iteration gate |
 | [deployer](agents/deployer.md) | Ships demos locally, manages deployment |
 | [analyser](agents/analyser.md) | Observes logs, detects drift, closes the loop |
 

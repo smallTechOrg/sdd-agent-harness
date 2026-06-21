@@ -13,8 +13,8 @@ pipeline, owns the human channel, and is the only agent that can ask the user a 
   job, not the analyser's. On a signal it routes to the analyser / fix workflow.
 - Checks pre/postconditions at every handoff — blocks a stage if its inputs aren't ready
 - Holds the session report open and ensures each stage appends to it
-- **Invokes the analyser after every handoff back to the supervisor** — not only at phase
-  gates. Every time a sub-agent returns control, the analyser runs before the next stage is
+- **Invokes the analyser after every handoff back to the supervisor** — not only at the
+  iteration gate. Every time a sub-agent returns control, the analyser runs before the next step is
   dispatched. This makes the analyser a forcing function: each stage must leave behind what
   the analyser needs to read (logs, artefacts, session-report fields), or the very next
   analyser pass flags it as drift. Catching a missing artefact one handoff later is cheap;
@@ -39,8 +39,8 @@ Sequential-only is the exception (a true data dependency), not the default.
 
 Fan out in parallel:
 - **Intake** — research probes and `usage-specs/` reads run concurrently while the FR is drafted.
-- **Build** — independent iterations/files run as parallel executors; the **frontend is a
-  first-class workstream**, built alongside its backend data (never deferred to the end).
+- **Build** — independent **steps** of the one iteration run as parallel executors; the
+  **frontend is a first-class step**, built alongside its backend data (never deferred to the end).
 - **Review** — one reviewer per dimension (correctness, security, gate-checklist, eval) in
   parallel; findings merge at the gate.
 - **Awareness** — the analyser's checks (tests, evals, coverage, drift) run concurrently.
@@ -51,9 +51,9 @@ Latency is dominated by model choice, so pick the cheapest tier that clears the 
 it in the session report's **Run telemetry** (so latency is comparable run-over-run):
 
 - **Default for build stages: Sonnet.** Opus is markedly slower — reserve it for genuinely hard
-  reasoning (thorny spec ambiguity, a stuck fix), not routine scaffolding/iteration.
-- **Effort scales to the stage:** `low` for mechanical work (recipe copy, appname replace,
-  boilerplate tests), `medium` for normal iteration and review, higher only for the hardest
+  reasoning (thorny spec ambiguity, a stuck fix), not routine scaffolding/step work.
+- **Effort scales to the step:** `low` for mechanical work (recipe copy, appname replace,
+  boilerplate tests), `medium` for normal step work and review, higher only for the hardest
   reasoning. Don't run every stage at `max`.
 - **Benchmark intent:** runs have been on Sonnet/max; the next benchmark drops to Sonnet at
   `low`/`medium` to measure the speedup. Capture model+effort+wall-clock every run so the

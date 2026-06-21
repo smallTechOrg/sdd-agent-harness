@@ -70,26 +70,28 @@
 
 - [ ] <!-- question + the resolved decision + who resolved it -->
 
-## Iteration Plan
+## Step Plan
 
-> The planner writes the value-ordered iterations here once the spec is signed off — this is
-> the authoritative plan, not a copy. Each iteration: one deliverable (one sentence), one gate
-> command (runs in <30s), ~15 min of executor work. Always starts with Iteration 0 (scaffold,
-> `/health` 200) and Iteration 1 (first model + migration + unit test).
+> This whole FR ships in **one iteration** — one end-to-end, user-testable delivery. The planner
+> slices that iteration into **steps** (the parallel work-units) here once the spec is signed
+> off — the authoritative plan, not a copy. Each step: one deliverable (one sentence), one fast
+> gate (<30s), ~10–15 min. Mark `Depends on` + `Parallel group` so independent steps run at
+> once. Always starts with Step 0 (scaffold, `/health` 200).
 
-| #   | Deliverable                          | Gate command                | Owner stage |
-|-----|--------------------------------------|-----------------------------|-------------|
-| 0   | <!-- scaffold — /health green -->    | <!-- curl …/health -->      | executor    |
-| 1   | <!-- first model + migration -->     | <!-- uv run pytest … -->    | executor    |
+| #   | Deliverable                       | Depends on | Parallel group | Gate command           |
+|-----|-----------------------------------|------------|----------------|------------------------|
+| 0   | <!-- scaffold — /health green --> | —          | —              | <!-- curl …/health --> |
+| 1   | <!-- first model + test -->       | 0          | A              | <!-- uv run pytest --> |
 
 ## Progress Tracker
 
-> **Everyone updates this** — this is the single file to read to know where the work stands.
-> Every stage (planner, executor, reviewer, deployer, analyser) updates the row it touches as
+> **Everyone updates this** — the single file to read to know where the work stands. Every stage
+> (planner, executor, reviewer, deployer, analyser) updates the **step** row it touches as
 > control passes back to the supervisor. Status: `todo | in-progress | gate-green | accepted`.
-> The analyser cross-checks this table against `logs/` on each pass — a row claiming
-> `gate-green` with no matching gate output in the session report is drift.
+> `accepted` is set only at the **iteration boundary**, when the user accepts the whole. The
+> analyser cross-checks this table against `logs/` on each pass — a row claiming `gate-green`
+> with no matching gate output in the session report is drift.
 
-| Iteration | Status      | Gate output (logs ref)        | Reviewer sign-off | Last updated |
-|-----------|-------------|-------------------------------|-------------------|--------------|
-| 0         | <!-- todo --> | <!-- logs/sessions/… --> | <!-- ✔ / — -->    | <!-- date --> |
+| Step | Status        | Gate output (logs ref)   | Reviewer sign-off | Last updated  |
+|------|---------------|--------------------------|-------------------|---------------|
+| 0    | <!-- todo --> | <!-- logs/sessions/… --> | <!-- ✔ / — -->    | <!-- date --> |

@@ -25,12 +25,12 @@ The analyser is a memoryless sub-agent: it cannot see the conversation, so it ca
 user frustration on its own. **That watch belongs to the supervisor** (the root session, the
 only agent that reads the user's prompts — see `supervisor.md`). The supervisor invokes the
 analyser:
-- At every phase gate (always), and
+- After every step handoff and at the iteration gate (always), and
 - Whenever the supervisor spots a material signal — in the **logs** (errors, flaky tests, slow
   runs) or in the **conversation** (frustration, repeated corrections, confusion).
 
-The analyser is invoked **after every handoff back to the supervisor** — not just at phase
-gates. Each time a sub-agent returns control, the analyser runs before the next stage is
+The analyser is invoked **after every handoff back to the supervisor** — not just at the
+iteration gate. Each time a sub-agent returns control, the analyser runs before the next step is
 dispatched. This keeps it a forcing function: every stage must leave behind what the analyser
 reads (logs, artefacts, session-report fields), and any gap is caught one handoff later
 rather than at the gate. Between handoffs it is still invoked-on-signal, not self-watching.
@@ -75,7 +75,7 @@ proposal is a decision, not a discussion. Consume the evidence, render the verdi
 ## Drift is checked, not just asserted
 
 Reconciliation with no executable check collapses SDD back into documentation-driven
-development. At every phase gate the analyser runs at least one mechanical check, not a prose
+development. On every pass the analyser runs at least one mechanical check, not a prose
 opinion:
 
 - **Coverage:** every EARS Success Criterion maps to ≥1 passing acceptance test; every `src/`
@@ -84,7 +84,7 @@ opinion:
   change left un-merged — the silent reconciliation break).
 - **Tracker integrity:** every FR `## Progress Tracker` row matches reality — a row marked
   `gate-green` or `accepted` has a corresponding gate output in `logs/`/the session report, and
-  no iteration in the plan is missing its tracker row. A claim with no evidence is drift.
+  no step in the plan is missing its tracker row. A claim with no evidence is drift.
 - **Behaviour:** the `evals/` golden set passes at threshold; trajectory signals (turn /
   tool-call / token counts) are within budget.
 

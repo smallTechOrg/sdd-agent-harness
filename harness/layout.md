@@ -71,6 +71,6 @@ These apply to all Python builds using this harness:
 3. Prompts and templates are data files loaded at runtime, not inlined in code.
 4. External services (LLM, DB, APIs) sit behind a thin client in `src/integrations/` —
    never called raw from business logic.
-5. The Phase 2 stub phase must run fully offline — no API keys, no network I/O.
+5. The stub steps must run fully offline — no API keys, no network I/O.
 6. `README.md` must always be accurate: every command works exactly as written from the
    directory stated.

@@ -3,7 +3,7 @@
 **Started:** YYYY-MM-DD HH:MM  
 **Branch:** feature/...  
 **FR/CR:** FR-NNN — [title]  
-**Current phase:** Phase N — [goal]
+**Iteration:** [the requirement being delivered]  •  **Current step:** Step N — [goal]
 
 > **This report is dogfood data.** Write it verbose enough that someone improving the *harness*
 > (not the product) can replay this run from it. Capture the path NOT taken: every retry, every
@@ -21,13 +21,16 @@
 
 ---
 
-## Phase Plan
+## Step Plan (one iteration → parallel steps)
 
-| Phase | Goal | Gate command | Status |
-|-------|------|-------------|--------|
-| 1 | Domain models + data layer | `uv run pytest tests/unit/` | pending |
-| 2 | Core loop (stubbed) | `uv run pytest && curl http://localhost:8001/health` | pending |
-| ... | | | |
+> The whole requirement ships in one iteration; these are its steps (the FR holds the DAG).
+
+| Step | Goal | Depends on | Gate command | Status |
+|------|------|-----------|-------------|--------|
+| 0 | Scaffold — /health green | — | `curl http://localhost:8001/health` | pending |
+| 1 | First model + data layer | 0 | `uv run pytest tests/unit/` | pending |
+| 2 | Core loop (stubbed) | 0 | `uv run pytest` | pending |
+| ... | | | | |
 
 ---
 

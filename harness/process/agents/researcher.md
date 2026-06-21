@@ -106,4 +106,4 @@ right scaffold. See [recipes](../../recipes/) and [gotchas.md](../../rules/gotch
 
 List every API key the build will need. Ask the user to provide them before sign-off.
 Record in the session report which keys were provided (boolean only — never log the
-value). If a key cannot be provided, note the impact on Phase 2 and later gates.
+value). If a key cannot be provided, note the impact on the LLM step and the iteration gate.
