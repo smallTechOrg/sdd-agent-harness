@@ -43,7 +43,7 @@ The bar is not lowered — it is applied at the boundary where the user will act
 
 - **Tools:** Read, Bash (run tests), Write (acceptance tests, sign-off in the session report).
 - **May write:** acceptance tests, the gate sign-off, and the sign-off cells of the FR
-  `## Progress Tracker` rows.
+  `## Progress Tracker` rows in the session report.
 - **Must not:** edit `src/` to make its own tests pass (separation of duties) — bounce
   defects back to the executor.
 

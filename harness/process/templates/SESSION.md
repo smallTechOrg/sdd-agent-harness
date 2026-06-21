@@ -23,14 +23,23 @@
 
 ## Step Plan (one iteration → parallel steps)
 
-> The whole requirement ships in one iteration; these are its steps (the FR holds the DAG).
+> **Authoritative execution plan.** The planner writes this; everyone reads it. The FR holds
+> requirements; this session report holds execution state.
 
-| Step | Goal | Depends on | Gate command | Status |
-|------|------|-----------|-------------|--------|
-| 0 | Scaffold — /health green | — | `curl http://localhost:8001/health` | pending |
-| 1 | First model + data layer | 0 | `uv run pytest tests/unit/` | pending |
-| 2 | Core loop (stubbed) | 0 | `uv run pytest` | pending |
-| ... | | | | |
+| # | Deliverable | Depends on | Parallel group | Gate command | Est. |
+|---|-------------|-----------|----------------|-------------|------|
+| 0 | scaffold — /health green | — | — | `curl :8001/health` | ~8m |
+| 1 | <!-- --> | 0 | A | `uv run pytest` | ~12m |
+
+---
+
+## Progress Tracker
+
+> **Everyone updates this row as they hand back to the supervisor.** Status: `todo | in-progress | gate-green | accepted`. `accepted` only at the iteration boundary when the user accepts the whole. The analyser cross-checks this against gate output in the Trace sections — a `gate-green` row with no matching output is drift.
+
+| Step | Status | Gate output (section ref) | Reviewer sign-off | Dominant cost |
+|------|--------|--------------------------|-------------------|---------------|
+| 0 | todo | — | — | — |
 
 ---
 

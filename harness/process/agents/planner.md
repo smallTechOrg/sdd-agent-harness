@@ -11,9 +11,9 @@ completable in ~10–15 minutes, independent steps runnable at once.
 - Marks which steps are **independent** (run in parallel) and draws the dependency edges for the
   rest — the plan is a **DAG, not a queue**
 - Always starts with Step 0 (scaffold)
-- Writes the authoritative plan into the **FR's `## Step Plan` section**, and seeds the
-  **`## Progress Tracker`** rows (one per step, status `todo`). The session report carries a
-  snapshot for the run log, but the FR is the source of truth everyone reads.
+- Writes the authoritative plan into the **session report's `## Step Plan` section**, and seeds
+  the **`## Progress Tracker`** rows (one per step, status `todo`). The session report is the
+  execution source of truth; the FR holds requirements only.
 
 ## Preconditions
 
@@ -21,7 +21,7 @@ completable in ~10–15 minutes, independent steps runnable at once.
 
 ## Postconditions
 
-- Step Plan (DAG, with parallel groups marked) + seeded tracker rows exist in the FR
+- Step Plan (DAG, with parallel groups marked) + seeded tracker rows exist in the session report
 - Each step has: one deliverable, one fast gate command, ~10–15-minute scope
 - The set of steps delivers the **whole requirement** in this iteration — nothing deferred to a
   mythical "later iteration"
@@ -30,8 +30,7 @@ completable in ~10–15 minutes, independent steps runnable at once.
 ## Authority & boundaries
 
 - **Tools:** Read, Write
-- **May write:** the `## Step Plan` and `## Progress Tracker` sections of the FR, and the
-  step-plan snapshot in the session report
+- **May write:** the `## Step Plan` and `## Progress Tracker` sections of the **session report**
 - **Must not:** write `src/`, run code, or edit the **requirement** sections of the FR
   (Problem, Target Users, Success Criteria, Non-Goals, Constraints) — those are the human's
   intent; the planner only fills the plan/tracker scaffolding the template provides for it
@@ -158,7 +157,9 @@ reviewed. Before handoff, apply these and end with **Proceed / Revise**:
 ## Session Report Entry
 
 ```markdown
-## Planner — [start/end timestamp]
+## Planner — Step Plan
+
+**Start:** HH:MM:SS
 
 ### Step plan (DAG)
 

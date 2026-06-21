@@ -79,28 +79,9 @@
 
 - [ ] <!-- question + the resolved decision + who resolved it -->
 
-## Step Plan
+## Execution
 
-> This whole FR ships in **one iteration** — one end-to-end, user-testable delivery. The planner
-> slices that iteration into **steps** (the parallel work-units) here once the spec is signed
-> off — the authoritative plan, not a copy. Each step: one deliverable (one sentence), one fast
-> gate (<30s), ~10–15 min. Mark `Depends on` + `Parallel group` so independent steps run at
-> once. Always starts with Step 0 (scaffold, `/health` 200).
-
-| #   | Deliverable                       | Depends on | Parallel group | Gate command           |
-|-----|-----------------------------------|------------|----------------|------------------------|
-| 0   | <!-- scaffold — /health green --> | —          | —              | <!-- curl …/health --> |
-| 1   | <!-- first model + test -->       | 0          | A              | <!-- uv run pytest --> |
-
-## Progress Tracker
-
-> **Everyone updates this** — the single file to read to know where the work stands. Every stage
-> (planner, executor, reviewer, deployer, analyser) updates the **step** row it touches as
-> control passes back to the supervisor. Status: `todo | in-progress | gate-green | accepted`.
-> `accepted` is set only at the **iteration boundary**, when the user accepts the whole. The
-> analyser cross-checks this table against `logs/` on each pass — a row claiming `gate-green`
-> with no matching gate output in the session report is drift.
-
-| Step | Status        | Gate output (logs ref)   | Reviewer sign-off | Last updated  |
-|------|---------------|--------------------------|-------------------|---------------|
-| 0    | <!-- todo --> | <!-- logs/sessions/… --> | <!-- ✔ / — -->    | <!-- date --> |
+> The step plan (DAG) and progress tracker live in the **session report** (`logs/sessions/`),
+> not here. The FR is the requirements record — what the system must do and why. Execution
+> state (what was built, gate results, who signed off) belongs in the log where it was produced.
+> See the session report's **Step Plan** and **Progress Tracker** sections.
