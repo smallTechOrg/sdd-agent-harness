@@ -12,6 +12,20 @@ in parallel, one per independent step.
 - Keeps the build running fully offline with stubs until the LLM step
 - Flags feasibility concerns back to the researcher/supervisor if discovered mid-build
 
+## Logging — write first, breadcrumb throughout
+
+**Before any other action**, append the step's `## Step N — Executor` header with `Start:`
+timestamp to the session file. This is the very first tool call — not after reading the spec,
+not after running a command. A step that hasn't written to the session file is invisible.
+
+During the step, **append a breadcrumb line every ~2 minutes**:
+```
+- HH:MM:SS — [what is happening: installing deps / writing src/model.py / running tests / retrying X]
+```
+Long operations that must breadcrumb: `uv sync`, `npm install`, writing multiple files, any
+test run that takes >30s. The user and supervisor must be able to see progress without waiting
+for the step to finish — a 10-minute black box is a harness failure.
+
 ## Preconditions
 
 - The step plan (DAG) exists in the FR; this step's dependencies are green

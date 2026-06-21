@@ -35,7 +35,9 @@
 ---
 
 <!-- Each agent appends a new section using the format below. -->
-<!-- Stamp start/end from the host clock: `date '+%Y-%m-%d %H:%M:%S'` (non-negotiable #12). -->
+<!-- NON-NEGOTIABLE #12: write the Start: line FIRST, before any other work. -->
+<!-- Then breadcrumb every ~2 minutes during long sub-tasks (see format below). -->
+<!-- Stamp start/end from the host clock: `date '+%Y-%m-%d %H:%M:%S'`. -->
 <!-- ────────────────────────────────────────────────────────── -->
 
 ## [Stage] — [Agent name]
@@ -51,6 +53,12 @@
 ### Decisions
 <!-- What was decided and why — AND the alternatives rejected. One bullet per decision. -->
 -
+
+### Progress breadcrumbs
+<!-- Append a line here every ~2 minutes during the stage — do not wait until the end.
+     Format: `HH:MM:SS — [what is happening right now]`
+     A stage with no breadcrumbs in a long operation is non-compliant (#12). -->
+- <!-- HH:MM:SS — started -->
 
 ### Trace — what actually happened
 <!-- The narrative a harness-improver replays: steps taken in order, retries and WHY each was

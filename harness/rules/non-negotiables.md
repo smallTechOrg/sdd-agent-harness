@@ -61,11 +61,17 @@ override is a deliberate, recorded act, never a silent one.
     do not continue in a degraded state without telling the user, and do not ask via inline
     text they may not notice.
 
-12. **Timestamp every action, and account for the wall-clock.** Each stage **and each step**
-    records a wall-clock **start and end time** in its session-report section (and gate commands
-    log their own timestamps), plus a one-word **dominant cost** (model-latency | tooling/network |
-    rework/retry | waiting-on-user | waiting-on-background). Every run fills the **Latency ledger**
-    (one row per step, in execution order) so the critical path and dominant cost are *computable*,
-    not guessed — this is the data we mine to make runs faster. A stage/step with no timing, or a
-    run with an empty ledger, is **incomplete** and the analyser flags it. Use the host clock
-    (`date '+%Y-%m-%d %H:%M:%S'`); never invent a time.
+12. **Timestamp every action, log continuously, and account for the wall-clock.**
+    - **Start immediately:** the very first thing a stage does is append its `## [Stage]` header
+      with `Start:` timestamp to the session file — before any code, any read, any tool call.
+      A stage that hasn't written to the session file is invisible.
+    - **Breadcrumb every ~2 minutes during long operations:** any sub-task that takes more than
+      ~2 minutes (installing deps, running tests, writing a large file) appends a one-line
+      breadcrumb to the session file — `HH:MM:SS — [what is happening right now]`. A 10-minute
+      executor step with zero log entries is a black box; the harness must never be a black box.
+    - **End with timing:** close each stage section with `End:`, `Duration:`, and a one-word
+      **dominant cost** (model-latency | tooling/network | rework/retry | waiting-on-user |
+      waiting-on-background). Fill the **Latency ledger** row on handoff.
+    - **Analyser flags missing timing and silent stages** (no breadcrumbs in a long step) as
+      non-compliant on the very next handoff.
+    Use the host clock (`date '+%Y-%m-%d %H:%M:%S'`); never invent a time.
