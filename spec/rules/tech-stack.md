@@ -9,59 +9,48 @@ Override any line — the researcher proposes, the user approves.
 
 **Python 3.12+** with `uv` as package manager.
 
-Override: <!-- e.g. TypeScript 5 + Bun, if different -->
-
 ## Agent Framework
 
-**LangGraph** — for any project with a reasoning loop or multi-step orchestration.  
-**None** — for simple pipelines or pure API projects.
-
-Override: <!-- e.g. CrewAI, custom -->
+**LangGraph** — analyst loop with tool nodes (query_data, summarise, plot).
 
 ## LLM Provider
 
-**Provider:** <!-- FILL IN: openai | anthropic | gemini -->  
-**Model:** <!-- FILL IN: see safe defaults table below -->  
-**Env var:** `APPNAME_LLM_MODEL` — always configurable, never hardcoded.
+**Provider:** google (Gemini)  
+**Model:** `gemini-2.5-flash`  
+**Env var:** `ANALYST_LLM_MODEL` (default: `gemini-2.5-flash`)  
+**API key env var:** `GEMINI_API_KEY`
 
-Safe defaults (2026):
-
-| Provider | Default model |
-|----------|--------------|
-| Anthropic | `claude-3-5-haiku-latest` |
-| OpenAI | `gpt-4o-mini` |
-| Google Gemini | `gemini-2.5-flash` |
+Stub mode: `ANALYST_LLM_PROVIDER=stub` — all tests run offline without a real key.
 
 ## Backend Framework
 
-**FastAPI** — async, typed, fast.
-
-Override: <!-- e.g. Django, Flask, none -->
+**FastAPI** — async, typed, port 8001.
 
 ## Database
 
-**PostgreSQL** (production + tests).  
-**SQLite / DuckDB** — local-only or analytics projects only.
+**DuckDB** (local file: `data/analyst.duckdb`).  
+No separate DB process. DuckDB reads CSV, Excel, JSON, Parquet natively.
 
-**ORM:** SQLAlchemy 2.0 (async) + Alembic for migrations.
-
-Override: <!-- e.g. MongoDB + Motor, if different -->
+Tables:
+- `datasets` — registered dataset metadata (name, path, schema)
+- `sessions` — conversation history keyed by session_id
+- `audit_log` — every SQL execution: timestamp, session_id, query_text, rows_affected, duration_ms
 
 ## Frontend
 
-<!-- FILL IN: Next.js 15 / Jinja2 templates / none -->
-
-Override if needed.
+**Next.js 15** (thin shell, port 3000) — renders Plotly charts, Markdown tables, plain text.
 
 ## Key Libraries
 
 | Library | Version | Purpose |
 |---------|---------|---------|
 | fastapi | latest | HTTP layer |
-| sqlalchemy | 2.x | ORM |
-| alembic | latest | migrations |
 | pydantic-settings | latest | config |
-| langgraph | latest | agent loop |
+| langgraph | latest | analyst agent loop |
+| duckdb | latest | data storage + query engine |
+| google-generativeai | latest | Gemini 2.5 Flash |
+| plotly | latest | chart spec generation |
+| openpyxl | latest | Excel file support |
 | pytest + pytest-asyncio | latest | tests |
 
 Add project-specific libraries here at intake.
