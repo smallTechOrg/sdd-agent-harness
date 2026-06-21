@@ -32,7 +32,7 @@ Runs the intake script (`harness/process/agents/researcher.md`):
 - Round 2: 4 detail questions — integrations, non-goals, data shape, first runnable milestone
 - Writes the FR with **EARS Success Criteria** and `[NEEDS CLARIFICATION]` markers wherever
   it would otherwise guess; resolves all markers in **one bounded clarify pass**
-- Proposes tech stack (DuckDB vs Postgres is first-class); user approves
+- Proposes tech stack (DuckDB vs SQLite is first-class, both local-first); user approves
 - Collects all API keys before sign-off; records which are present (boolean) in session report
 - Writes `spec/features/FR-NNN.md` from template; fills `spec/rules/tech-stack.md`
 

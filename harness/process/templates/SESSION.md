@@ -19,7 +19,7 @@
 
 | Phase | Goal | Gate command | Status |
 |-------|------|-------------|--------|
-| 1 | Domain models + data layer | `uv run alembic upgrade head && uv run pytest tests/unit/` | pending |
+| 1 | Domain models + data layer | `uv run pytest tests/unit/` | pending |
 | 2 | Core loop (stubbed) | `uv run pytest && curl http://localhost:8001/health` | pending |
 | ... | | | |
 

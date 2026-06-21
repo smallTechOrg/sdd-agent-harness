@@ -57,7 +57,7 @@
 | Constraint | Value | Reason |
 |-----------|-------|--------|
 | Stack | <!-- e.g. Python + FastAPI + LangGraph + DuckDB --> | <!-- why --> |
-| Database | <!-- e.g. DuckDB (analytics) / PostgreSQL (transactional) --> | <!-- why --> |
+| Database | <!-- e.g. DuckDB (analytics) / SQLite (relational) — local-first --> | <!-- why --> |
 | Deploy target | <!-- e.g. local demo, then Render on request --> | <!-- why --> |
 | API keys needed | <!-- list, e.g. GEMINI_API_KEY --> | <!-- when needed --> |
 | Timeline | <!-- if any --> | <!-- why --> |

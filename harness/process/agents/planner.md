@@ -105,10 +105,10 @@ Suggested ordering for an agent project:
 7  observability     → structured logs, session report accurate  (~10 min)
 ```
 
-UI comes at Iteration 3 — not last. Use the Jinja2 templates from
-`harness/recipes/python/src/api/templates/`. One form, one result area, stub
-banner already wired. No frontend build step. Gate: browser opens, form submits,
-stub result renders.
+UI comes at Iteration 3 — not last. For a no-build-step UI use the Jinja2 templates in the
+backend recipe (`…/src/api/templates/` — one form, one result area, stub banner wired); for a
+richer chat/markdown UI copy `harness/recipes/frontend-nextjs/`. Gate: browser opens, form
+submits, stub result renders.
 
 ---
 

@@ -34,7 +34,7 @@ re-invent these, it selects which apply:
 | Gate | Applies when | What it asserts |
 |------|--------------|-----------------|
 | Offline stub | always (from the skeleton iteration on) | full unit suite passes with `…_LLM_PROVIDER=stub`, no key, no network |
-| Production driver | any DB | tests run on the real engine (DuckDB/Postgres), never a SQLite stand-in |
+| Production driver | any DB | tests run on the store you ship (SQLite/DuckDB), not a substitute engine |
 | Golden-path smoke | any UI/HTTP surface | walks the primary user journey end-to-end, asserts response **content** |
 | Live-server | any server | `python -m src` starts; `/health` + one real page return 200 (curl, logged) |
 | Stub banner | any UI in stub mode | a visible banner marks stubbed output so no viewer mistakes it for real AI |
