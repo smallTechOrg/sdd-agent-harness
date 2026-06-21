@@ -29,23 +29,6 @@ sense of the truth and corrects course.
             observe drift, adjust intention or action
 
 
-## Process
-
-A `supervisor` (the primary agent) runs a co-ordinated pipeline with the help of specialist agents:
-- **researcher** → understands intent, frames as requirements.
-- **planner** → breaks down requirements into feasible plan.
-- **executor** → executes each step of plan, till delivery.
-- **reviewer** → raises the bar on delivery, challenges solution, forces improvement.
-- **deployer** → ships demos on local, or manages deployment based on phase of delivery.
-- **analyser** → observes logs, metrics, user prompts, performance of agents, co-ordinates with supervisor.
-
-The supervisor co-ordinates this team of specialists based on the goal, task and workflow.
-
-| Workflow | Pipeline (↺ loops on drift) |
-|----------|------------------------------|
-| `build`  | researcher → planner → executor → reviewer → deployer → analyser ↺ |
-| `fix`    | analyser → planner → executor → reviewer → deployer → analyser ↺ |
-| `deploy` | planner → executor → reviewer → deployer → analyser ↺ |
 
 
 ## Principles
@@ -55,14 +38,29 @@ The supervisor co-ordinates this team of specialists based on the goal, task and
 2. **Spec should always stay up to date.** Spec should be continuously updated to capture what the code & logs are saying.
 
 
-## What's in this folder
+## Navigation
 
-| Path          | Purpose                                                                 |
-|---------------|-------------------------------------------------------------------------|
-| `rules/`      | Non-negotiable rules — what the harness enforces                        |
-| `process/`    | How work flows — iteration driven, roles, workflows |
-| `patterns/`   | Hard-won gotchas, recipes, and framework-specific knowledge             |
+**[rules/](rules/)** — what the harness enforces
+- [non-negotiables.md](rules/non-negotiables.md) — the rules that must survive context compression
+- [spec-driven.md](rules/spec-driven.md) — spec-before-code discipline
+- [git-and-delivery.md](rules/git-and-delivery.md) — branching, commits, PRs
+- [testing.md](rules/testing.md) — gate tests, smoke tests, evidence
+- [secret-hygiene.md](rules/secret-hygiene.md) — env vars, keys, `.env`
+
+**[process/](process/)** — how work flows
+- [README.md](process/README.md) — agents, workflows, pipeline overview
+- [agents/](process/agents/) — supervisor, researcher, planner, executor, reviewer, deployer, analyser
+- [workflows/](process/workflows/) — build, fix, deploy
+- [handoffs.md](process/handoffs.md) — blackboard coordination, pre/postconditions
+
+**[reconcile.md](reconcile.md)** — drift detection and loop control
+
+**[layout.md](layout.md)** — repo skeleton, where things go
+
+**[patterns/](patterns/)** — hard-won knowledge
+- [gotchas.md](patterns/gotchas.md) — agentic AI gotchas
+
+---
 
 The `.claude/` folder at the repo root is a thin adapter binding this harness to Claude Code.
 `harness/` is the source of truth; `.claude/` should never diverge from it.
-If there is similar file in `spec/` folder as in `harness/`, feel free to give that more important.
