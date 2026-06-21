@@ -1,465 +1,318 @@
 # Delivery Plan — Phased Build Contract & Embedded Roadmap
 
-> **Placeholder.** The researcher fills every section thoroughly at intake — highly technical and exact, no vague prose.
-
-<!--
-  ROLE OF THIS FILE
-  This is the build contract AND the roadmap in one. It defines the product as an ORDERED
-  set of phases. Each phase has: exact scope (Real vs Stubbed), per-phase EARS acceptance
-  criteria (PN-ACn) each tied to a concrete test, inter-phase dependencies, the applicable
-  hard gates, and what it explicitly defers. There is NO separate ROADMAP.md — future scope
-  IS the later phases here. There are NO FR/feature files — these spec docs ARE the spec.
-
-  ONE FACT, ONE PLACE — this file owns the per-phase plan and the per-phase criteria (PN-ACn).
-  It does NOT redefine facts owned elsewhere; it references them:
-    - product Success Criteria (SC-N) + Non-Scope ...... spec/vision.md
-    - stack choices + version pins ..................... spec/architecture.md
-    - /health shape + stub_mode flag .................. spec/api.md (GET /health)
-    - audit_log columns (e.g. duration_ms) ............ spec/data-model.md
-    - screens, four states, UX bar .................... spec/ui.md
-    - agent nodes / edges (if any) ................... spec/agent-graph.md
-    - port numbers + build ceiling ................... spec/vision.md Hard Constraints
-    - hard-gate definitions .......................... harness/rules/testing.md (The hard gates)
-
-  TRACEABILITY LAW (bidirectional, MECHANICALLY enforced at the pre-code spec gate):
-    - every SC-N in vision.md (the four labelled rows SC-CORE/SC-UX/SC-STUB/SC-FAIL AND every
-      free SC-N) MUST be advanced by ≥1 phase below (coverage check)
-    - every per-phase criterion (PN-ACn) below MUST cite a SC-N that RESOLVES to a real row in
-      vision.md (→ SC-N) — a citation that does not resolve is drift and is REJECTED
-    - an SC with no phase, or a phase criterion with no SC, is INCOMPLETE → gate fails
-    - the two checks above are NOT prose assertions: they are filled and self-checked in the
-      § Traceability Ledger at the bottom of this file (SC→Phases and PN-ACn→SC matrices).
-      A prose "coverage looks complete" is not acceptable evidence; the ledger tables are.
-
-  STUB-IMMUNITY LAW: no acceptance criterion below may be satisfied by a stub returning an
-  empty list + 200. Each names a USER-VISIBLE ARTEFACT with a QUANTITY or a NAMED TYPED FIELD
-  (row_count ≥ 1; a Plotly chart with axis labels + tooltips; an audit_log row with duration_ms).
-
-  THE THREE COORDINATION FILES (do not confuse them):
-    - THIS file (spec/delivery-plan.md) = the DURABLE phase roadmap. Ordered phases, per-phase
-      EARS criteria (PN-ACn), inter-phase dependencies. Edited ONLY on a real spec change.
-      It carries the phasing; there is NO separate ROADMAP.md and NO FR/feature files.
-    - logs/PLAN.md = the LIVE coordination hub for the CURRENT phase (Step DAG + Progress
-      Tracker + Phase Acceptance), rewritten whole by the planner at each phase start. It
-      carries NO durable requirements — those live here. Do NOT copy PN-ACn definitions there.
-    - logs/sessions/<timestamped>.md = the narrative log + Latency Ledger only.
--->
-
-<!--
-  EARS FORMS (every PN-ACn EARS cell MUST be EXACTLY ONE of these, with a quantity):
-    - Ubiquitous:  "The <system> SHALL <response> <quantity>."
-    - Event:       "WHEN <trigger>, the <system> SHALL <response> <quantity>."
-    - State:       "WHILE <state>, the <system> SHALL <response> <quantity>."
-    - Unwanted:    "IF <trigger/condition>, THEN the <system> SHALL <response/recovery>."
-    - Optional:    "WHERE <feature is present>, the <system> SHALL <response> <quantity>."
-  An EARS cell with no SHALL, or with two stitched clauses, or with no quantity (for the
-  non-Unwanted forms), is REJECTED. The Unwanted form's quantity is the named error code/state.
--->
-
 ---
 
 ## Phasing Model
 
-<!-- The phasing rules are NORMATIVE in [harness/rules/non-negotiables.md](../harness/rules/non-negotiables.md)
-     (non-negotiable: "one phase = one user-testable increment; parallel steps inside"). DO NOT
-     restate them verbatim here — a copied boilerplate table is pure decoration and inflates the
-     appearance of thoroughness without committing to anything about THIS product.
+A phase is the smallest slice of this product a user can open and **feel**. The normative rules (owned by non-negotiables) and how each binds THIS product:
 
-     FILL IN INSTEAD: for each rule below, add ONE project-specific sentence in the "How it binds
-     THIS product" column that names a concrete artefact of this build (a screen, an endpoint, a
-     stub contract, a phase number). A cell that merely re-states the rule, or names no concrete
-     artefact, is REJECTED. The rule text in column 2 is fixed (reference, not to edit). -->
-
-A phase is the smallest slice of this product a user can open and **feel**. The normative rules
-(owned by non-negotiables) and how each binds THIS product:
-
-| # | Rule (normative — do not edit) | How it binds THIS product (REQUIRED — name a concrete artefact) |
-|---|--------------------------------|------------------------------------------------------------------|
-| 1 | A phase is a **vertically-sliced, user-testable increment** — it cuts UI → API → data → agent for its slice. NEVER a horizontal layer (no "the database phase"). | <!-- e.g. "Phase 1 cuts the upload screen (ui.md §Upload) → POST /query stub (api.md) → audit_log write (data-model.md)." — name the actual slice. --> |
-| 2 | **Phase 1 ≤ 30 min build** (hard ceiling from [vision.md](vision.md) Hard Constraints) and is a *shaped first release*: the **UI is present even if every data path is stubbed**, stub-mode banner visible ([ui.md](ui.md) Stub-Mode Banner). | <!-- e.g. "Phase 1 ships the full shell (ui.md §Shell) with POST /query stubbed; nothing UI is omitted." --> |
-| 3 | A phase is **Done** only when ALL hold: (a) every PN-ACn passes its named test; (b) the applicable **hard gates** are green ([harness/rules/testing.md](../harness/rules/testing.md)); (c) the **user explicitly accepts** the phase (the one user-acceptance boundary). | <!-- e.g. "Phase 1 Done = P1-AC1..P1-AC4 pass + the 8 P1 gates green + user accepts." --> |
-| 4 | **No scope is dropped.** A capability past the ceiling moves to a named **later phase in THIS file** — never a separate ROADMAP, never silently cut. Disposition is a phase number here or `never — reason`. | <!-- e.g. "Real NL→SQL is deferred to Phase 2; nothing is cut — see § Explicitly Deferred." --> |
-| 5 | Phases form an **acyclic dependency graph** (§ Inter-Phase Dependency Map). A phase cannot start until its dependency phase(s) are user-accepted and any contract it builds behind is frozen. | <!-- e.g. "Phase 2 waits on P1 accepted + POST /query shape frozen (api.md §POST /query)." --> |
-| 6 | The phase that turns an earlier **stub** real must **reference the stub contract it replaces** ([api.md](api.md) Stub Mode Signalling) — an in-place swap, not a rewrite. | <!-- e.g. "Phase 2 replaces the POST /query stub; response schema byte-identical, only values change." --> |
+| # | Rule (normative — do not edit) | How it binds THIS product |
+|---|--------------------------------|--------------------------|
+| 1 | A phase is a **vertically-sliced, user-testable increment** — it cuts UI → API → data → agent for its slice. NEVER a horizontal layer. | Phase 1 cuts the Datasets screen (ui.md §Datasets Screen) → POST /datasets real (api.md §POST /datasets) → DuckDB ingest real → POST /query stub (api.md §POST /query) → audit_log schema exists (data-model.md §audit_log). |
+| 2 | **Phase 1 ≤ 30 min build** (hard ceiling from vision.md Hard Constraints) and is a *shaped first release*: the **UI is present even if every data path is stubbed**, stub-mode banner visible (ui.md §Stub-Mode Banner). | Phase 1 ships the full shell (ui.md §Global Shell), Dataset upload real, POST /query stubbed with correct shape; stub banner is mandatory and asserted in P1-AC1. |
+| 3 | A phase is **Done** only when ALL hold: (a) every PN-ACn passes its named test; (b) applicable hard gates are green; (c) the **user explicitly accepts** the phase. | Phase 1 Done = P1-AC1 through P1-AC11 pass + all P1 hard gates green + user accepts at the phase boundary. |
+| 4 | **No scope is dropped.** A capability past the ceiling moves to a named **later phase in THIS file**. | Real NL→SQL via Google Gemini API is Phase 2; analyst workflow (suggestions, hypotheses) is Phase 3; nothing is cut — all live in § Later Phases. |
+| 5 | Phases form an **acyclic dependency graph** (§ Inter-Phase Dependency Map). | Phase 2 waits on P1 user-accepted + POST /query shape frozen at api.md §POST /query → Response 200. Phase 3 waits on P2 user-accepted + audit_log live at data-model.md §audit_log. |
+| 6 | The phase that turns an earlier **stub** real must **reference the stub contract it replaces**. | Phase 2 replaces the POST /query stub; response schema byte-identical to api.md §POST /query → Response 200 at P1; only `rows`, `sql`, `chart_spec` values become live. |
 
 ---
 
 ## Phase Overview
 
-<!-- FILL IN: the at-a-glance arc — ONE ROW PER PHASE. This is the roadmap view.
-     RULES:
-       - "Theme" is ONE line naming a USER-FEELABLE CAPABILITY, not a layer and not an
-         adjective. A vague theme ("better answers", "improved UX", "more polish") is REJECTED:
-         the theme MUST name the concrete thing the user can DO that they could not before
-         (a verb + an object), e.g. "Ask a question and get a real model-generated answer".
-       - "Advances SCs" cites SC-N ids from vision.md (including the labelled SC-CORE/SC-UX/
-         SC-STUB/SC-FAIL). Every SC-N in vision.md MUST appear in at least one row — this is
-         NOT eyeballed here; it is proven in the § Traceability Ledger (SC→Phases matrix).
-       - "Depends on" forms a DAG (no cycles). Phase 1 depends on "—".
-       - "Est. build" is REQUIRED for EVERY phase, not just Phase 1. State a number AND, in the
-         same cell, the ONE capability that would breach the ceiling if added (forcing it into a
-         deferral row). An estimate with no breach-capability named is decoration → REJECTED.
-         Phase 1's number MUST be ≤ 30 min (the vision.md ceiling). -->
-
-| Phase | Theme (verb + object; capability not layer) | Advances SCs | Depends on | Est. build (number + breach-capability) |
-|-------|---------------------------------------------|--------------|------------|------------------------------------------|
-| 1 | <!-- e.g. Open the shell, upload a file, get a stubbed-but-shaped answer + chart --> | <!-- e.g. SC-CORE, SC-STUB, SC-FAIL --> | — | <!-- e.g. ≤ 30 min (hard ceiling); adding real NL→SQL would breach → Phase 2 --> |
-| 2 | <!-- e.g. Ask a question and get a real model-generated answer over your data --> | <!-- e.g. SC-CORE, SC-UX --> | <!-- 1 user-accepted --> | <!-- e.g. ~40 min; adding saved dashboards would breach → Phase 3 --> |
-| 3 | <!-- e.g. Save, list, and delete datasets across sessions --> | <!-- e.g. SC-N --> | <!-- 2 user-accepted --> | <!-- e.g. ~40 min; adding multi-user auth would breach → never --> |
-| <!-- N: add rows until every SC-N in vision.md is advanced by ≥1 phase (verify in the ledger) --> | | | | |
-
-<!-- Do NOT write a prose "coverage looks complete" here. Coverage is PROVEN in the
-     § Traceability Ledger below (SC→Phases). Any SC-N not appearing there is
-     [NEEDS CLARIFICATION: which phase advances SC-N?] and BLOCKS the gate. -->
+| Phase | Theme (verb + object) | Advances SCs | Depends on | Est. build (number + breach-capability) |
+|-------|----------------------|--------------|------------|------------------------------------------|
+| 1 | Upload a file and get a stub-but-shaped answer with the full product shell visible | SC-CORE, SC-UX, SC-STUB, SC-FAIL, SC-5, SC-6 (schema), SC-7 | — | ≤ 30 min (hard ceiling); adding live Gemini NL→SQL would breach → Phase 2 |
+| 2 | Ask a question and get a real model-generated answer over your data with audit logging | SC-CORE, SC-UX, SC-6, SC-7 | 1 user-accepted | ~45 min; adding analyst workflow (suggestions, hypotheses) would breach → Phase 3 |
+| 3 | Get senior-analyst follow-ups, manage datasets, and maintain session history | SC-7, SC-8, SC-CORE, SC-FAIL | 2 user-accepted | ~40 min; adding multi-user auth would breach → never |
 
 ---
 
 ## Phase 1 — Shaped First Release
 
-<!-- FILL IN: the fullest spec of Phase 1. Phase 1 is genuinely FEEL-ABLE end to end:
-     the user opens a browser, sees the shell with the stub banner, performs the core
-     interaction, and gets a SHAPE-CORRECT (stubbed) result. It MUST fit the ≤ 30 min ceiling.
-     This subsection has FIVE mandatory parts (a)–(e) below — none may be omitted. -->
+**Goal (verbatim from vision.md "In one sentence"):**
+> A local browser tool that lets a data analyst upload CSV / JSON / Excel / Parquet files, ask natural-language questions, and receive the answer as a Markdown table and interactive Plotly chart — powered by gemini-2.5-flash translating the question to DuckDB SQL. — in Phase 1, file upload + DuckDB ingest + session creation are REAL; the NL→SQL agent (POST /query) is STUBBED with a deterministic shape-correct response; the chart, table, and suggestion chips render from stub values.
 
-**Goal (verbatim from [vision.md](vision.md) "In one sentence"):**
-<!-- FILL IN: quote the single-sentence product statement from vision.md, then state which
-     parts are REAL in Phase 1 and which are STUBBED. One sentence each. -->
-> _<quoted product sentence>_ — in Phase 1, <X is real; Y is stubbed-with-correct-shape>.
-
-**Build estimate:** <!-- REQUIRED: state a number ≤ 30 min, e.g. "≤ 30 min (hard ceiling)". -->
+**Build estimate:** ≤ 30 min (hard ceiling)
 
 ### (a) In-scope — Real vs Stubbed
 
-<!-- FILL IN: ONE ROW PER CAPABILITY in Phase 1. Every capability is either "Real" or
-     "Stubbed (correct shape)". The UI rows MUST be present and Real-as-shell even when their
-     data is stubbed — OMITTING the UI is not allowed (stub deeply, never by omission).
-     "Why" states why it is real now or deferred-but-shaped. Every "Stubbed" row MUST name
-     (1) the later phase that makes it real AND (2) the FROZEN CONTRACT it leaves behind — the
-     exact api.md/ui.md section+anchor whose SHAPE will not change when the value goes real
-     (e.g. "api.md §POST /query → Response 200 — schema byte-identical at swap; only values
-     change"). A "Stubbed" row that names no frozen contract anchor is REJECTED. -->
-
-| Capability | Real or Stubbed (correct shape) | Why + frozen contract (real now / shaped-but-deferred → Phase N, anchor) |
-|------------|---------------------------------|--------------------------------------------------------------------------|
-| <!-- e.g. Visible app shell + nav + four-state screens --> | <!-- Real (shell) --> | <!-- user must feel the product on first open --> |
-| <!-- e.g. Stub-mode banner --> | <!-- Real --> | <!-- Stub-banner hard gate; ui.md Stub-Mode Banner --> |
-| <!-- e.g. File upload + sidebar listing --> | <!-- Real / Stubbed --> | <!-- --> |
-| <!-- e.g. Core answer (table + chart) --> | <!-- Stubbed (deterministic, real shape) --> | <!-- real model → Phase 2; FROZEN: api.md §POST /query → Response 200 schema byte-identical at swap, only values change --> |
-| <!-- e.g. GET /health with stub_mode --> | <!-- Real --> | <!-- api.md §GET /health --> |
-| <!-- add one row per capability; no UI omitted; every Stubbed row names its frozen anchor --> | | |
+| Capability | Real or Stubbed | Why + frozen contract |
+|------------|-----------------|----------------------|
+| Full app shell (top nav, sidebar, stub banner, error toast region) | Real | User must feel the product on first open; ui.md §Global Shell |
+| Stub-mode banner (verbatim string) | Real | Stub-banner hard gate; ui.md §Stub-Mode Banner |
+| GET /health returning stub_mode | Real | api.md §GET /health; required by SC-STUB |
+| POST /sessions + GET /sessions (SQLite) | Real | Session sidebar must show real sessions; data-model.md §session |
+| POST /datasets (upload + DuckDB ingest) | Real | Core value proposition begins with data; api.md §POST /datasets |
+| GET /datasets (SQLite registry) | Real | Datasets screen must list real uploaded files; api.md §GET /datasets |
+| Dataset cards with row_count in UI | Real | UX bar criterion #15; ui.md §Datasets Screen |
+| POST /query (NL→SQL→answer) | Stubbed (deterministic, correct shape) | Real Gemini call → Phase 2; FROZEN: api.md §POST /query → Response 200 — all fields present, types identical, only values change at Phase 2 swap |
+| Query result table (GFM, sortable, row count) | Real shell + stub data | Table component real; data from stub POST /query; UX bar criteria #1–4 shape established |
+| Plotly chart (bar/line/scatter + axis labels + tooltips) | Real shell + stub chart_spec | react-plotly.js loaded SSR-disabled [C-PLOTLY-SSR]; chart_spec from stub; UX bar #5–7 shape established |
+| Follow-up suggestion chips | Real shell + stub suggestions | 2 hardcoded stubs from POST /query stub response; real content → Phase 3 |
+| Audit log schema (SQLite + write on stub run) | Real schema, stub writes | SQLite tables created; audit_log rows written from stub agent; columns frozen in data-model.md §audit_log |
+| Session persistence across restart | Real | SQLite spine; data-model.md §session + §dataset |
 
 ### (b) Golden Path Demo Script
 
-<!-- FILL IN: a NUMBERED, user-terms walkthrough that runs end-to-end with NO explanation
-     needed. It MUST include the step where the stub banner is visible, and MUST name the
-     concrete artefact the user sees at each step (a filename, a row count, a chart). This is
-     the script the Golden-path smoke + Live-UI hard gates execute. Replace every <...>. -->
-
 ```
-1. Run <exact start command, e.g. `make dev`> — backend on :8001, frontend on :3000.
-2. Open http://localhost:3000 — the shell renders; a full-width banner reads
-   "STUB MODE — responses are canned, not real AI output" (verbatim; ui.md Stub-Mode Banner).
-3. <core setup action, e.g. upload sample.csv> — the sidebar shows "<name> · <N> rows" (N ≥ 1).
-4. <core ask action, e.g. type "top 5 by revenue" and submit> — a progress indicator shows.
-5. A <sortable Markdown/GFM table with its row count> AND an <interactive Plotly chart with
-   axis labels + tooltips + PNG-download> render (stubbed but shape-correct).
-6. <follow-up, e.g. click a suggestion chip> — input fills and auto-submits a new stubbed answer.
+1. Run `make dev` (or `uv run uvicorn src.api.main:app --port 8001 &` + `cd frontend && npm run dev`) —
+   backend on :8001, frontend on :3000.
+2. Open http://localhost:3000 — the full shell renders; a full-width yellow banner at the top reads
+   exactly "STUB MODE — responses are canned, not real AI output".
+3. The session sidebar shows a new session "Session-1"; click it to activate.
+4. Click the "Datasets" tab — the upload zone shows "Drop a CSV, JSON, Excel, or Parquet file here".
+5. Upload tests/fixtures/sample.csv (3 columns: product/TEXT, revenue/DOUBLE, category/TEXT; 100 rows).
+   A dataset card appears within 3 s showing "sample.csv · 100 rows · csv".
+6. Click the "Query" tab — the main region shows the empty state headline
+   "Ask a question about your data" with 3 example chips.
+7. Type "What are the top 5 products by revenue?" and click Submit (or ⏎).
+   A pulse skeleton shows for ≤ 3 s.
+8. A sortable GFM table with header "5 rows" AND an interactive Plotly bar chart with axis labels
+   "product" (x) and "total_revenue" (y) + hover tooltips + PNG-download modebar render.
+   (These are stub values — Widget A through Widget E.)
+9. Two suggestion chips appear: "Break down by category" and "Show revenue trend over time".
+   Click "Break down by category" — the textarea fills with that text and auto-submits; a new stub
+   result renders.
+10. Open a new browser tab at http://localhost:3000 — a new session "Session-2" is created
+    (per-tab isolation); the session sidebar shows 2 sessions.
+11. Restart the backend (`kill` + re-run); reload the page — both sessions and "sample.csv" are
+    still visible (SQLite persistence confirmed).
+12. Check the audit log via `curl http://localhost:8001/query/{id}/audit` (Phase 2 endpoint; returns
+    404 in Phase 1, confirming the error envelope shape).
 ```
-
-<!-- A demo that ends at "a 200 is returned" is REJECTED — the script must end on a
-     user-visible artefact with a quantity (row count, chart with labels). -->
 
 ### (c) Acceptance Criteria (EARS)
 
-<!-- FILL IN: ONE ROW PER CRITERION, ids P1-AC1, P1-AC2, … FIVE columns, none droppable.
-
-     EARS column — EXACTLY ONE EARS form (see EARS FORMS at top of file) WITH a QUANTITY. The
-       quantity is a number/threshold/named-field for the non-Unwanted forms, or a named error
-       code/state for the Unwanted form. A cell with no SHALL, two stitched clauses, or no
-       quantity is REJECTED.
-     Fixture + expected value column (REQUIRED) — the EXACT test data AND the EXACT asserted
-       value, not "a known answer". Name the fixture FILE, its row count, and the literal
-       expected number/string. "row count ≥ 1" alone is the FLOOR and is too weak on its own —
-       pair it with the exact expected value so a wrong-but-non-empty answer FAILS.
-     Acceptance test column — an EXACT, RUNNABLE proof: a full curl, a pytest node id
-       (path::test_name), or a numbered UI click sequence, WITH the asserted-on string/number in
-       `assert <lhs> == <value>` / `assert <count> >= <n>` form. A test cell that is a comment,
-       blank, prose ("runs the query"), or "see tests/" is REJECTED — it must be executable.
-     → SC column — cites a SC-N that EXISTS in vision.md (resolved in the ledger).
-
-     MANDATORY coverage for Phase 1 (each MUST be a row below; a missing one fails the gate):
-       - the visible stub banner (verbatim string asserted in rendered DOM)
-       - the offline-stub contract (no key, no network — api.md Stub Mode Signalling)
-       - the core stubbed answer rendered as a real UI artefact (table row count ≥ 1 AND/OR
-         a Plotly chart with axis labels) — shape-correct even though data is stubbed
-       - at least ONE Unwanted-behaviour (IF…THEN) failure criterion that names an error code
-         from § Error Codes Introduced and states the recovery
-     NO criterion may be satisfiable by empty-list + 200. -->
-
-| id | EARS statement (one EARS form, with a quantity) | Fixture + expected value (file, count, literal answer) | Acceptance test (curl / pytest node / UI clicks + `assert`) | → SC |
-|----|------------------------------------------------|--------------------------------------------------------|--------------------------------------------------------------|------|
-| P1-AC1 | <!-- e.g. WHILE stub_mode is true, the app SHALL display a full-width top banner reading exactly `STUB MODE — responses are canned, not real AI output` on first paint of every screen. --> | <!-- e.g. n/a — static banner; expected literal = the verbatim banner string. --> | <!-- e.g. start frontend in stub mode; `assert "STUB MODE — responses are canned, not real AI output" in dom` (Live-UI gate). --> | <!-- SC-? --> |
-| P1-AC2 | <!-- e.g. WHILE APP_LLM_PROVIDER=stub, GET /health SHALL return 200 `{"status":"ok","stub_mode":true}` and make no network call. --> | <!-- e.g. no fixture; expected body == {"status":"ok","stub_mode":true}, status == 200. --> | <!-- e.g. pytest tests/test_health.py::test_health_stub_offline — `assert r.json()=={"status":"ok","stub_mode":true}` with ALLOW_MODEL_REQUESTS=False. --> | <!-- SC-? --> |
-| P1-AC3 | <!-- e.g. WHEN a question is asked in stub mode, a GFM table (≥1 row, row count shown) AND a Plotly chart with both axis labels SHALL render. --> | <!-- e.g. fixture sample.csv (100 rows); ask "top 5 by revenue" → stub returns exactly 5 rows [Widget A … Widget E]; header reads "5 rows". --> | <!-- e.g. UI: submit "top 5"; `assert header_text == "5 rows"` AND `assert axis_title_count >= 2` AND `.modebar` present. --> | <!-- SC-? (shape) --> |
-| P1-AC4 | <!-- Unwanted: e.g. IF the upload is not a valid CSV, THEN the UI SHALL show an inline error "Unsupported file" and the prior state SHALL remain visible. --> | <!-- e.g. fixture broken.png; expected toast literal == "Unsupported file"; sidebar row count unchanged. --> | <!-- e.g. upload broken.png; `assert toast_text == "Unsupported file"` AND `assert sidebar_rows == before`. --> | <!-- SC-? --> |
-| <!-- add rows until the four mandatory coverage items above are all met --> | | | | |
-
-> **Weak vs Strong (do not ship Weak):**
-> - **Weak EARS** (REJECTED — stub-passable): "WHEN a question is asked, the system SHALL return a result." — `{"rows": []}` + 200 satisfies it.
-> - **Strong EARS** (accepted): P1-AC3 above — names a table with a visible row count ≥ 1 AND a chart with axis labels; an empty-200 cannot pass.
-> - **Weak test** (REJECTED — empty assertion): "pytest tests/test_query.py::test_top5 — runs the query." — names a node, asserts nothing.
-> - **Strong test** (accepted): "pytest tests/test_query.py::test_top5 — `assert r.json()['row_count'] == 5 and r.json()['rows'][0]['name'] == 'Widget A'`." — a wrong answer fails.
-> - **Weak fixture** (REJECTED): "a known-answer query → ≥1 row." — any non-empty result passes.
-> - **Strong fixture** (accepted): "sample.csv (100 rows); top-5-by-revenue → rows == [Widget A, B, C, D, E], row_count == 5." — a wrong-but-non-empty answer fails.
+| id | EARS statement | Fixture + expected value | Acceptance test | → SC |
+|----|----------------|--------------------------|-----------------|------|
+| P1-AC1 | WHILE stub_mode is true, the app SHALL display a full-width top banner reading exactly `STUB MODE — responses are canned, not real AI output` on first paint of every screen. | n/a — static banner; expected literal = `STUB MODE — responses are canned, not real AI output` | `playwright tests/e2e/test_banner.py::test_stub_banner` — `page.goto("/"); assert page.locator("text=STUB MODE — responses are canned, not real AI output").is_visible()` | SC-STUB |
+| P1-AC2 | WHILE DAA_LLM_PROVIDER=stub, GET /health SHALL return 200 with body `{"status":"ok","stub_mode":true}` and make no network call. | No fixture; expected body == `{"status":"ok","stub_mode":true}`, status == 200 | `pytest tests/test_health.py::test_health_stub_offline` (ALLOW_MODEL_REQUESTS=False) — `assert r.status_code == 200 and r.json() == {"status":"ok","stub_mode":True}` | SC-STUB |
+| P1-AC3 | WHEN POST /query is called in stub mode with a valid session_id and dataset_ids, the system SHALL return 200 with `rows` length == 5, `sql` starting with "SELECT", and `chart_spec.layout.xaxis.title == "product"`. | session_id from POST /sessions; dataset_id from POST /datasets uploading `tests/fixtures/sample.csv` (100 rows); question = "top 5 by revenue"; expected stub `rows` length == 5 and first `rows[0]["product"] == "Widget A"` | `pytest tests/test_query.py::test_stub_query` — `assert r.status_code == 200 and len(r.json()["rows"]) == 5 and r.json()["rows"][0]["product"] == "Widget A" and r.json()["sql"].upper().startswith("SELECT") and r.json()["chart_spec"]["layout"]["xaxis"]["title"] == "product"` | SC-CORE |
+| P1-AC4 | WHEN a CSV file with 100 rows is uploaded via POST /datasets, GET /datasets SHALL return a dataset with `name == "sample.csv"`, `row_count == 100`, and `file_format == "csv"`. | `tests/fixtures/sample.csv` (100 rows, 3 columns); expected `row_count == 100`, `name == "sample.csv"` | `pytest tests/test_datasets.py::test_upload_and_list` — `assert any(d["name"] == "sample.csv" and d["row_count"] == 100 and d["file_format"] == "csv" for d in r.json()["datasets"])` | SC-CORE |
+| P1-AC5 | IF a file with content-type not in the allowed set is uploaded, THEN POST /datasets SHALL return 422 with `error.code == "UNSUPPORTED_FILE"` and 0 rows written to DuckDB. | `tests/fixtures/broken.png`; expected `status_code == 422`, `error.code == "UNSUPPORTED_FILE"` | `pytest tests/test_datasets.py::test_upload_unsupported_file` — `assert r.status_code == 422 and r.json()["error"]["code"] == "UNSUPPORTED_FILE"` | SC-FAIL |
+| P1-AC6 | IF DAA_LLM_PROVIDER=gemini AND DAA_GEMINI_API_KEY is unset, THEN the server SHALL refuse to start and exit non-zero with stderr containing `DAA_GEMINI_API_KEY`. | No fixture; expected process returncode != 0 and stderr contains `DAA_GEMINI_API_KEY` | `pytest tests/test_startup.py::test_refuse_to_start_without_key` — `assert process.returncode != 0 and "DAA_GEMINI_API_KEY" in stderr` | SC-5 |
+| P1-AC7 | WHILE create_tables_sqlite() has not completed, GET /health SHALL return 503. | Monkeypatched delayed bootstrap; expected 503 before `schema ready` logged, 200 after | `pytest tests/test_startup.py::test_readiness_probe` — `assert pre_bootstrap_response.status_code == 503 and post_bootstrap_response.status_code == 200` | SC-5 |
+| P1-AC8 | IF the stub LLM provider is active and POST /query is called, the system SHALL write exactly 1 audit_log row with `action='llm'` and `duration_ms >= 0`. | session_id + dataset_id from fixtures; expected `count_after - count_before == 1 and row.action == "llm" and row.duration_ms >= 0` | `pytest tests/test_audit.py::test_stub_llm_audit_row` — `assert count_after - count_before == 1 and latest_row["action"] == "llm" and latest_row["duration_ms"] >= 0` | SC-6 |
+| P1-AC9 | IF POST /query is called with an empty question, THEN the system SHALL return 422 with `error.code == "BAD_INPUT"` and the UI SHALL show inline text containing `Could not run that query`. | question = ""; expected `status_code == 422`, `error.code == "BAD_INPUT"`; UI shows error text | `pytest tests/test_query.py::test_empty_question` — `assert r.status_code == 422 and r.json()["error"]["code"] == "BAD_INPUT"` | SC-FAIL |
+| P1-AC10 | WHEN POST /sessions is called, the system SHALL return 201 with a uuid4-format `id` and `GET /sessions` SHALL list it with the same `id`. | No special fixture; expected `id` length == 36 and `Location` header present | `pytest tests/test_sessions.py::test_create_and_list_session` — `assert r.status_code == 201 and len(r.json()["id"]) == 36 and any(s["id"] == r.json()["id"] for s in list_r.json()["sessions"])` | SC-7 |
+| P1-AC11 | WHILE a session is active in the UI sidebar, the active session item SHALL have the `bg-blue-100` CSS class and the sidebar SHALL show a `+ New` button. | Start app with 1 created session; navigate to it | `playwright tests/e2e/test_sidebar.py::test_active_session_highlight` — `assert page.locator(".bg-blue-100").count() == 1; assert page.locator("text=+ New").is_visible()` | SC-7 |
 
 ### (d) Applicable hard gates (Phase 1)
 
-<!-- FILL IN: tick the gates that apply to Phase 1 and name the exact command/assert per row.
-     Gate definitions are owned by harness/rules/testing.md — reference, do not redefine.
-     For Phase 1 (UI present, stubbed): Offline-stub, Live-server, Live-UI, Stub-banner,
-     Golden-path smoke, and README current ALWAYS apply. Production-driver applies IF a DB is
-     present in Phase 1. Eval-threshold does NOT apply yet (no live agent behaviour). -->
-
 | Hard gate | Applies in P1? | Exact assertion for this phase |
 |-----------|----------------|--------------------------------|
-| Offline stub | <!-- yes --> | <!-- e.g. `APP_LLM_PROVIDER=stub uv run pytest` exits 0, no network (ALLOW_MODEL_REQUESTS=False) --> |
-| Live-server (backend) | <!-- yes --> | <!-- e.g. `python -m src` starts; `curl :8001/health` → 200 with stub_mode:true --> |
-| Live-UI (frontend) | <!-- yes --> | <!-- e.g. `npm run start`; `curl :3000/` → 200 with banner string in DOM --> |
-| Stub banner | <!-- yes --> | <!-- verbatim banner string in rendered DOM (see P1-AC1) --> |
-| Golden-path smoke | <!-- yes --> | <!-- the § (b) script runs end-to-end asserting the row count + chart --> |
-| Production driver | <!-- yes IF a DB is present in P1, else n/a — state which --> | <!-- e.g. tests run on the shipped DuckDB file, not an in-memory substitute --> |
-| README current | <!-- yes --> | <!-- every README command in § (b) works verbatim from the stated dir --> |
-| Eval threshold | <!-- n/a — no live agent behaviour until Phase 2 --> | <!-- n/a --> |
+| Offline stub | yes | `DAA_LLM_PROVIDER=stub ALLOW_MODEL_REQUESTS=False uv run --extra dev pytest` exits 0 |
+| Live-server (backend) | yes | `uv run uvicorn src.api.main:app --port 8001` starts; `curl :8001/health` → 200 with `stub_mode:true` |
+| Live-UI (frontend) | yes | `npm run start` in `frontend/`; `curl :3000/` → 200 with banner string in HTML |
+| Stub banner | yes | verbatim string `STUB MODE — responses are canned, not real AI output` in rendered DOM at first paint (P1-AC1) |
+| Golden-path smoke | yes | the § (b) demo script runs end-to-end; step 8 asserts `row_count == 5` + chart axis titles |
+| Production driver | yes — DuckDB and SQLite are present in Phase 1 | tests run against shipped `./data/app.duckdb` and `./data/meta.db` files, not in-memory substitutes [C-DB-SAME-AS-PROD] |
+| README current | yes | every command in the README quickstart works verbatim from the repo root |
+| Eval threshold | n/a — no live agent behaviour until Phase 2 | n/a |
 
 ### (e) Explicitly deferred from Phase 1
 
-<!-- FILL IN: ONE ROW PER capability shaped/stubbed in P1 (or hinted by the brief) that P1
-     does NOT make real. Disposition is "→ Phase N" (N must exist in § Phase Overview) — never
-     blank, never "TBD". Each MUST be consistent with vision.md Non-Scope. -->
-
-| Item (deferred from P1) | Disposition (→ Phase N) | Stub it leaves behind (api.md / ui.md ref) |
-|-------------------------|-------------------------|--------------------------------------------|
-| <!-- e.g. real NL→SQL answer --> | <!-- → Phase 2 --> | <!-- POST /query stub (api.md) --> |
-| <!-- e.g. dataset delete --> | <!-- → Phase 3 --> | <!-- n/a (not in P1 shell) --> |
-| <!-- add a row per deferred capability --> | | |
+| Item (deferred from P1) | Disposition | Stub it leaves behind |
+|-------------------------|-------------|----------------------|
+| Real NL→SQL via Google Gemini API | → Phase 2 | POST /query stub (api.md §POST /query → Response 200 schema frozen) |
+| Audit log retrieval endpoint | → Phase 2 | GET /query/{id}/audit returns 404 in P1 (api.md §GET /query/{id}/audit) |
+| Session conversation history retrieval | → Phase 2 | GET /sessions/{id}/history returns 404 in P1 |
+| Analyst follow-up suggestions (real content) | → Phase 3 | POST /query stub returns 2 hardcoded suggestion strings |
+| Dataset deletion | → Phase 3 | DELETE /datasets/{id} returns 404 in P1–P2 |
+| Session deletion | → Phase 3 | DELETE /sessions/{id} returns 404 in P1–P2 |
+| Executive summary / hypothesis generation | → Phase 3 | No stub; Phase 3 new capability |
+| Excel temp file cleanup hardening | → Phase 2 | Excel upload functional in P1; [C-EXCEL-TMP] cleanup added in P2 |
 
 ### (f) Error codes introduced (Phase 1)
 
-<!-- FILL IN: ONE ROW PER named error code this phase introduces (referenced by any Unwanted
-     PN-ACn above). Each id MUST match an error.code in api.md's error matrix BYTE-FOR-BYTE —
-     this is the single reconciled list so the executor never cross-walks two files by hand.
-     A code used in a PN-ACn but absent from api.md's matrix (or vice-versa for codes this phase
-     owns) is drift and is REJECTED. If the phase introduces none, write "None — this phase adds
-     no new error codes." Do not leave blank. -->
-
 | Error code | Trigger condition | api.md matrix row (endpoint + status) | PN-ACn that asserts it |
 |------------|-------------------|----------------------------------------|------------------------|
-| <!-- e.g. UNSUPPORTED_FILE --> | <!-- e.g. upload is not a valid CSV --> | <!-- e.g. POST /upload → 422 (api.md) --> | <!-- e.g. P1-AC4 --> |
-| <!-- add one row per error code this phase introduces --> | | | |
+| `UNSUPPORTED_FILE` | uploaded file not in {csv, json, excel, parquet} | POST /datasets → 422 (api.md §POST /datasets) | P1-AC5 |
+| `FILE_TOO_LARGE` | file exceeds DAA_MAX_UPLOAD_BYTES (200 MB) | POST /datasets → 413 (api.md §POST /datasets) | — |
+| `BAD_INPUT` | question empty or > 2000 chars; session_id/dataset_ids invalid format | POST /query → 422; POST /datasets → 422; GET /datasets → 422 (api.md) | P1-AC9 |
+| `NO_SESSION` | session_id not found in SQLite | POST /datasets → 404; POST /query → 404; GET /datasets → 404 (api.md) | — |
+| `NO_DATASET` | dataset_id in query not found | POST /query → 404 (api.md §POST /query) | — |
+| `SERVICE_UNAVAILABLE` | /health probe before schema bootstrap completes | GET /health → 503 (api.md §GET /health) | P1-AC7 |
 
 ---
 
 ## Later Phases
 
-<!-- FILL IN: ONE ### subsection per subsequent phase (2..N), each with the SAME rigour as
-     Phase 1 — the rigour does NOT trail off after Phase 2. These subsections ARE the roadmap;
-     there is no separate ROADMAP.md. Below, BOTH Phase 2 and Phase 3 are given as FULL empty
-     skeletons (not a "same as above" prose shortcut) precisely so an under-filled later phase
-     shows up as visibly empty cells, not as prose-excusable thinness. Copy the full block for
-     Phase 4, 5, … — never degrade to "same structure as the prior phase".
+### Phase 2 — Ask a question and get a real model-generated answer over your data with full audit logging
 
-     Each subsection MUST contain, in order:
-       1. A one-line theme + what becomes real / what is new (verb + object, not a layer).
-       2. Scope table: Capability | New or Upgraded-from-stub | Frozen contract + swap note.
-          A row that upgrades an earlier stub MUST give TWO things: (a) the api.md/ui.md
-          section+anchor it replaces, AND (b) an explicit "shape-frozen / value-changes" line
-          stating which fields change vs which bytes stay byte-identical at swap.
-       3. Acceptance Criteria (EARS) table: PN-ACn | EARS | Fixture+expected value | test | →SC
-          (same five-column bar as Phase 1, including the exact fixture and the runnable assert).
-          For eval-backed criteria the test MUST cite the eval case by FILE PATH + case id AND
-          the threshold by VALUE (e.g. evals/cases/top5.json#top5 PASS at score ≥ 0.9). "PASS at
-          threshold" with no case path and no numeric threshold is INCOMPLETE → gate fails.
-       4. "Depends on": the NAMED prior-phase acceptance condition(s) (e.g. "P1 user-accepted;
-          POST /query shape frozen at api.md §POST /query → Response 200").
-       5. Applicable hard gates: the phase that introduces LIVE agent behaviour MUST include
-          Eval threshold; any phase that introduces a DB MUST include Production driver.
-       6. "Error codes introduced": same reconciled-with-api.md mini-table as Phase 1 (f).
-       7. "Still deferred": what this phase still pushes to a later phase (→ Phase N, never blank). -->
-
-### Phase 2 — <!-- theme, e.g. Ask a question and get a real model-generated answer -->
-
-<!-- One line: what becomes real (names the stub it replaces by anchor), what is new. -->
+Phase 2 turns the POST /query stub real: the Google Gemini gemini-2.5-flash call fires, DuckDB executes real SQL, and the audit log is fully populated. Session history and query audit retrieval are also live.
 
 **Scope:**
 
-| Capability | New or Upgraded-from-stub | Frozen contract + swap note (anchor; which bytes change vs stay identical) |
-|------------|---------------------------|----------------------------------------------------------------------------|
-| <!-- e.g. NL→SQL answer --> | <!-- Upgraded from P1 stub --> | <!-- replaces api.md §POST /query → Response 200; SHAPE-FROZEN: keys/types byte-identical, only the `rows` VALUES become real --> |
-| <!-- e.g. audit logging --> | <!-- New --> | <!-- writes audit_log row per query; columns frozen in data-model.md §audit_log --> |
+| Capability | New or Upgraded-from-stub | Frozen contract + swap note |
+|------------|---------------------------|----------------------------|
+| Real NL→SQL via Google Gemini gemini-2.5-flash | Upgraded from P1 stub | Replaces api.md §POST /query → Response 200; SHAPE-FROZEN: all fields/types byte-identical, only `sql`, `rows`, `chart_spec`, `row_count`, `columns`, `table_markdown` values become real |
+| DuckDB SQL execution against uploaded data | Upgraded from P1 stub | Same node_execute_sql stub contract (agent-graph.md §node_execute_sql); real DuckDB execute replaces canned rows |
+| Full audit_log writes (sql + llm actions) | Upgraded from P1 schema-only | data-model.md §audit_log columns frozen in P1; Phase 2 writes real duration_ms, input_tokens, output_tokens |
+| GET /query/{id}/audit (audit retrieval) | New | api.md §GET /query/{id}/audit → Response 200; shape defined in P1 spec |
+| GET /sessions/{id}/history (conversation history) | New | api.md §GET /sessions/{id}/history → Response 200; shape defined in P1 spec |
+| Prompt caching for token economy | New | Gemini context caching on system prompt; reduces input_tokens for follow-up queries |
+| Excel temp file cleanup hardening | Upgraded | src/agent/ingest.py uses `tempfile.mkdtemp()` + `shutil.rmtree(tmpdir)` in finally block [C-EXCEL-TMP] |
 
 **Acceptance Criteria (EARS):**
 
-| id | EARS statement (one EARS form, with a quantity) | Fixture + expected value (file, count, literal answer) | Acceptance test (eval case path#id + threshold / pytest node / UI clicks + `assert`) | → SC |
-|----|------------------------------------------------|--------------------------------------------------------|----------------------------------------------------------------------------------------|------|
-| P2-AC1 | <!-- e.g. WHEN a question is asked in live mode, the system SHALL execute model-generated SQL and return ≥1 row matching the data. --> | <!-- e.g. sample.csv (100 rows); "top 5 products" → rows == [Widget A..E], row_count == 5. --> | <!-- e.g. evals/cases/top5.json#top5 PASS at score ≥ 0.9; `assert score >= 0.9`. --> | <!-- SC-? --> |
-| P2-AC2 | <!-- e.g. The system SHALL write exactly one audit_log row per SQL execution, each with duration_ms ≥ 0. --> | <!-- e.g. run 1 query; expected: audit_log count delta == 1, duration_ms >= 0. --> | <!-- e.g. pytest tests/test_audit.py::test_one_row — `assert count_after - count_before == 1 and row.duration_ms >= 0`. --> | <!-- SC-? --> |
-| P2-AC3 | <!-- Unwanted: e.g. IF the model returns invalid SQL, THEN the system SHALL return error.code "BAD_SQL" and the UI SHALL keep the prior result visible. --> | <!-- e.g. inject non-SELECT SQL; expected error.code == "BAD_SQL"; prior table DOM unchanged. --> | <!-- e.g. force invalid SQL; `assert r.json()["error"]["code"] == "BAD_SQL"` AND prior table still in DOM. --> | <!-- SC-? --> |
+| id | EARS statement | Fixture + expected value | Acceptance test | → SC |
+|----|----------------|--------------------------|-----------------|------|
+| P2-AC1 | WHEN POST /query is called in live mode with a question "What are the top 5 products by revenue?", the system SHALL return 200 with `rows` length == 5 and `rows[0]["product"]` in the top-5 products by revenue in the fixture. | `tests/fixtures/sample.csv` (100 rows; columns: product TEXT, revenue DOUBLE, category TEXT; top 5: Widget A 5000, Widget B 4200, Widget C 3800, Widget D 3100, Widget E 2900); expected `rows[0]["product"]` one of {"Widget A"} | `pytest tests/test_query.py::test_live_top5` (DAA_LLM_PROVIDER=gemini, key set) — `assert r.status_code == 200 and len(r.json()["rows"]) == 5 and r.json()["rows"][0]["product"] == "Widget A"` | SC-CORE |
+| P2-AC2 | WHEN a query executes in live mode, the system SHALL write exactly 2 audit_log rows per POST /query call: one with `action='llm'` and `input_tokens >= 1`, one with `action='sql'` and `duration_ms >= 0`. | Same fixture as P2-AC1; expected audit count delta == 2 | `pytest tests/test_audit.py::test_live_audit_two_rows` — `assert count_after - count_before == 2 and llm_row.input_tokens >= 1 and sql_row.duration_ms >= 0` | SC-6 |
+| P2-AC3 | WHEN a query returns ≥ 1 numeric-column row, the UI SHALL render a Plotly chart with `chart_spec.layout.xaxis.title` non-empty and the modebar PNG-download button visible. | Submit "top 5 by revenue" with sample.csv; expected xaxis.title == "product" | `playwright tests/e2e/test_chart.py::test_chart_renders_with_axis_labels` — `assert chart_spec["layout"]["xaxis"]["title"] != "" and page.locator(".modebar").is_visible()` | SC-UX |
+| P2-AC4 | WHEN a result table with N≥1 rows renders, clicking a column header SHALL re-sort the rows and the table header SHALL show the exact text `{N} rows`. | Submit query returning 5 rows; click `revenue` header; expected first row changes; header text == "5 rows" | `playwright tests/e2e/test_table.py::test_sort_and_row_count` — `first_value = page.locator("tr:nth-child(2) td:nth-child(2)").text_content(); click_column_header("revenue"); assert page.locator("tr:nth-child(2) td:nth-child(2)").text_content() != first_value and page.locator("text=5 rows").is_visible()` | SC-UX |
+| P2-AC5 | IF node_generate_sql produces a non-SELECT SQL string, THEN POST /query SHALL return 422 with `error.code == "BAD_SQL"` and 0 audit_log rows with action='sql' for that run. | Monkeypatch node_generate_sql to return "DROP TABLE foo"; expected `status_code == 422`, `error.code == "BAD_SQL"`, `sql_audit_count == 0` | `pytest tests/test_query.py::test_bad_sql_guard` — `assert r.status_code == 422 and r.json()["error"]["code"] == "BAD_SQL" and sql_audit_count_delta == 0` | SC-FAIL |
+| P2-AC6 | WHEN an Excel (.xlsx) file is uploaded and the temp conversion directory is cleaned up, no temp files SHALL remain in `/tmp` after the request completes. | `tests/fixtures/sample.xlsx` (100 rows); expected zero files matching `tmp*/sample*` in /tmp after POST /datasets | `pytest tests/test_datasets.py::test_excel_tmp_cleanup` — `before = count_tmp_files(); upload xlsx; after = count_tmp_files(); assert after == before` | SC-CORE |
+| P2-AC7 | WHEN a session has ≥ 1 completed query, GET /sessions/{id}/history SHALL return messages with length >= 2, where messages[0].role == "user" and messages[1].role == "assistant". | Run 1 query in a session; expected message count >= 2 | `pytest tests/test_sessions.py::test_session_history_two_messages` — `assert len(r.json()["messages"]) >= 2 and r.json()["messages"][0]["role"] == "user" and r.json()["messages"][1]["role"] == "assistant"` | SC-7 |
 
-**Depends on:** <!-- e.g. P1 user-accepted; POST /query request/response shape frozen at api.md §POST /query → Response 200 — Phase 2 builds the live agent behind the P1 stub contract. -->
+**Depends on:** P1 user-accepted; POST /query request/response shape frozen at api.md §POST /query → Response 200 (Phase 2 builds the live Gemini agent behind the P1 stub contract — shape byte-identical, only values become real).
 
-**Applicable hard gates:** <!-- e.g. Offline stub, Live-server, Live-UI, Stub-banner, Golden-path smoke, README current, Production driver (DB now live), AND Eval threshold (FIRST live agent behaviour — MUST appear; harness/rules/testing.md Evals). -->
+**Applicable hard gates:** Offline stub, Live-server, Live-UI, Stub-banner, Golden-path smoke, README current, Production driver (DuckDB + SQLite both live with real data), AND **Eval threshold** (FIRST live agent behaviour — MUST appear; evals/cases/top5.json#top5 PASS at score ≥ 0.9 on the fixture above). Uses real Gemini gemini-2.5-flash.
 
 **Error codes introduced:**
 
 | Error code | Trigger condition | api.md matrix row (endpoint + status) | PN-ACn that asserts it |
 |------------|-------------------|----------------------------------------|------------------------|
-| <!-- e.g. BAD_SQL --> | <!-- e.g. model returns non-executable / non-SELECT SQL --> | <!-- e.g. POST /query → 422 (api.md) --> | <!-- e.g. P2-AC3 --> |
+| `BAD_SQL` | generated SQL is not a valid read-only SELECT | POST /query → 422 (api.md §POST /query) | P2-AC5 |
+| `QUERY_ERROR` | valid SQL but DuckDB returns a runtime error | POST /query → 422 (api.md §POST /query) | — |
+| `LLM_TIMEOUT` | Gemini call exceeds DAA_REQUEST_TIMEOUT_S | POST /query → 504 (api.md §POST /query) | — |
+| `LLM_ERROR` | non-2xx from Gemini after retries | POST /query → 502 (api.md §POST /query) | — |
+| `RUN_ACTIVE` | a query run is already active for this session | POST /query → 409 (api.md §POST /query) | — |
+| `NO_QUERY_RUN` | query_run id not found | GET /query/{id}/audit → 404 | — |
 
-**Still deferred:** <!-- e.g. saved dashboards → Phase 3; dataset delete → Phase 3. -->
+**Still deferred:** analyst follow-up suggestions (real content) → Phase 3; dataset deletion → Phase 3; session deletion → Phase 3; executive summary / hypothesis generation → Phase 3.
 
-<!-- ============ copy the FULL block above (all 7 parts) for each later phase ============ -->
+---
 
-### Phase 3 — <!-- theme, e.g. Save, list, and delete datasets across sessions -->
+### Phase 3 — Senior-analyst workflow: suggestions, dataset management, and session hygiene
 
-<!-- One line: what becomes real (names any stub it replaces by anchor), what is new. -->
+Phase 3 adds `node_suggest` (follow-up questions + hypotheses) and dataset/session deletion. Analyst workflow features make the product feel like a senior colleague, not just a SQL runner.
 
 **Scope:**
 
-| Capability | New or Upgraded-from-stub | Frozen contract + swap note (anchor; which bytes change vs stay identical) |
-|------------|---------------------------|----------------------------------------------------------------------------|
-| <!-- e.g. persisted sessions --> | <!-- New / Upgraded from P2 stub --> | <!-- if upgrading: anchor + shape-frozen/value-changes line; if new: n/a --> |
-| <!-- add one row per capability --> | | |
+| Capability | New or Upgraded-from-stub | Frozen contract + swap note |
+|------------|---------------------------|----------------------------|
+| `node_suggest` — follow-up suggestions | Upgraded from P1–2 stub chips | Replaces stub `suggestions` array in api.md §POST /query → Response 200; SHAPE-FROZEN: `suggestions: array<string>` byte-identical; Phase 3 fills with real ≥ 2 suggestions each referencing a column name |
+| Follow-up chip click → auto-submit | Upgraded UX | ui.md UX-bar criterion #10; chip filled + auto-submitted; same POST /query call |
+| DELETE /datasets/{id} | New (was 404 in P1–P2) | api.md §DELETE /datasets/{id}; DuckDB DROP TABLE + SQLite row removal |
+| DELETE /sessions/{id} | New (was 404 in P1–P2) | api.md §DELETE /sessions/{id}; CASCADE removes dataset/query/audit rows |
+| Conversation history as prompt context (multi-turn) | Upgraded | node_generate_sql reads last N `conversation_message` rows for context; P2 was single-turn; same api.md §POST /query contract |
+| Executive summary generation (optional, ≥ Phase 3) | New | api.md §POST /query → Response 200 adds optional `executive_summary: string \| null`; null in Phase 1–2 |
 
 **Acceptance Criteria (EARS):**
 
-| id | EARS statement (one EARS form, with a quantity) | Fixture + expected value (file, count, literal answer) | Acceptance test (eval case path#id + threshold / pytest node / UI clicks + `assert`) | → SC |
-|----|------------------------------------------------|--------------------------------------------------------|----------------------------------------------------------------------------------------|------|
-| P3-AC1 | <!-- EARS, one form, with a quantity --> | <!-- exact fixture + literal expected value --> | <!-- runnable proof with `assert` --> | <!-- SC-? --> |
-| P3-AC2 | <!-- EARS --> | <!-- --> | <!-- --> | <!-- SC-? --> |
-| <!-- add rows; at least one Unwanted (IF…THEN) criterion naming an error code --> | | | | |
+| id | EARS statement | Fixture + expected value | Acceptance test | → SC |
+|----|----------------|--------------------------|-----------------|------|
+| P3-AC1 | WHEN DELETE /datasets/{id} is called on an existing dataset, the system SHALL return 200 with `deleted == true` and GET /datasets SHALL no longer include that id, and the DuckDB table `dataset_<id>` SHALL be absent. | Upload sample.csv; delete it; expected deleted==true and dataset list empty | `pytest tests/test_datasets.py::test_delete_dataset` — `assert r.status_code == 200 and r.json()["deleted"] == True and not any(d["id"] == deleted_id for d in list_r.json()["datasets"])` | SC-CORE |
+| P3-AC2 | WHEN DELETE /sessions/{id} is called on an existing session, the system SHALL return 200 with `deleted == true` and GET /sessions SHALL not include that id, and all child datasets, queries, and audit_log rows SHALL be removed. | Create session; upload dataset; run query; delete session; expected counts all 0 | `pytest tests/test_sessions.py::test_delete_session_cascade` — `assert r.status_code == 200 and r.json()["deleted"] == True and session_count_after == session_count_before - 1 and dataset_count_after == 0 and audit_count_after == 0` | SC-7 |
+| P3-AC3 | WHEN POST /query is called in live Phase 3 mode and returns ≥ 1 row, the response SHALL include `suggestions` with length >= 2, each string referencing at least one column name from `response.columns`. | sample.csv query returning `["product","total_revenue"]` columns; expected suggestions length >= 2 and `any("product" in s or "total_revenue" in s for s in suggestions)` | `pytest tests/test_workflow.py::test_suggestions_reference_columns` — `assert len(r.json()["suggestions"]) >= 2 and any(col in s for col in r.json()["columns"] for s in r.json()["suggestions"])` | SC-8 |
+| P3-AC4 | IF DELETE /datasets/{id} is called on a dataset_id that does not exist, THEN the system SHALL return 404 with `error.code == "NO_DATASET"`. | Non-existent uuid4; expected status_code == 404, error.code == "NO_DATASET" | `pytest tests/test_datasets.py::test_delete_nonexistent` — `assert r.status_code == 404 and r.json()["error"]["code"] == "NO_DATASET"` | SC-FAIL |
+| P3-AC5 | WHEN a follow-up chip is clicked in the UI, the textarea SHALL be filled with the chip text AND a new POST /query SHALL be automatically submitted. | Submit "top 5" → get chip "Break down by category"; click chip; expected textarea == "Break down by category" and new result renders | `playwright tests/e2e/test_chips.py::test_chip_fills_and_submits` — `page.locator("button[data-chip]").first().click(); assert page.locator("textarea").input_value() == chip_text and page.locator("text=rows").is_visible()` | SC-8 |
 
-**Depends on:** <!-- e.g. P2 user-accepted + named contract anchor it builds behind --> 
+**Depends on:** P2 user-accepted; live audit_log at data-model.md §audit_log (Phase 3 reads conversation_message rows for multi-turn context, requires P2 writes to be real); POST /query shape frozen at api.md §POST /query → Response 200 (suggestions array shape established in P1).
 
-**Applicable hard gates:** <!-- list by name; Production driver if a DB is introduced/changed here; Eval threshold if agent behaviour changes --> 
+**Applicable hard gates:** Offline stub, Live-server, Live-UI, Stub-banner, Golden-path smoke, README current, Production driver, Eval threshold (node_suggest adds new LLM call; evals/cases/suggest.json#followup_columns PASS at score ≥ 0.8).
 
 **Error codes introduced:**
 
 | Error code | Trigger condition | api.md matrix row (endpoint + status) | PN-ACn that asserts it |
 |------------|-------------------|----------------------------------------|------------------------|
-| <!-- one row per code, or "None — this phase adds no new error codes." --> | | | |
+| `NO_DATASET` (DELETE path) | dataset_id not found on DELETE /datasets/{id} | DELETE /datasets/{id} → 404 (api.md) | P3-AC4 |
 
-**Still deferred:** <!-- → Phase N, never blank -->
+**Still deferred:** saved/pinned dashboards → never (by design per vision.md Non-Scope); multi-user auth → never (by design); streaming responses → never (by design).
 
 ---
 
 ## Inter-Phase Dependency Map
 
-<!-- FILL IN: make the build order explicit. TWO mandatory parts:
-       1. The ASCII (or mermaid) dependency diagram in the LIVE fenced block below — overwrite
-          the example node names, never leave 'TODO'. Every phase number in § Phase Overview
-          MUST appear in this diagram, and every node here MUST be a phase that exists above
-          (same enumerable cross-check as the table) — a name in one but not the other is
-          REJECTED. Do NOT ship the example labels verbatim.
-       2. The table: Phase | Cannot start until | Reason.
-     RULES:
-       - Encode the user-acceptance boundary: a phase CANNOT START until the prior phase is
-         USER-ACCEPTED.
-       - Name any cross-phase contract dependency by ANCHOR (e.g. "Phase 2 needs Phase 1's
-         api.md §POST /query shape frozen"). These are the freeze points the planner relies on.
-       - The graph MUST be ACYCLIC. -->
-
 ```
 P1 ──user-accepted──► P2 ──user-accepted──► P3
-      (api.md §POST /query      (live query
-       shape frozen)             history exists)
+     (POST /query              (audit_log live;
+      shape frozen at           conversation_message
+      api.md §POST /query       rows real for context;
+      → Response 200)           DELETE endpoints new)
 ```
 
-| Phase | Cannot start until | Reason (named contract anchor / acceptance condition) |
-|-------|--------------------|-------------------------------------------------------|
+| Phase | Cannot start until | Reason |
+|-------|--------------------|--------|
 | 1 | — | first phase; no upstream dependency |
-| 2 | <!-- e.g. P1 user-accepted; api.md §POST /query shape frozen --> | <!-- e.g. builds the live agent behind the P1 stub contract --> |
-| 3 | <!-- e.g. P2 user-accepted --> | <!-- e.g. persistence assumes live query history exists --> |
-| <!-- N --> | <!-- prior phase user-accepted + named contract anchor --> | <!-- --> |
+| 2 | P1 user-accepted; POST /query request/response shape frozen at api.md §POST /query → Response 200 | Phase 2 builds the live Gemini agent behind the P1 stub contract; the shape must be frozen to be an in-place swap |
+| 3 | P2 user-accepted; audit_log writes real (data-model.md §audit_log); conversation_message rows exist for multi-turn context | Phase 3 node_suggest reads conversation history; DELETE endpoints require live dataset/session data |
 
-**Acyclicity (REQUIRED — state the literal result):** <!-- write exactly "DAG — acyclic, verified" after confirming no cycle. A cycle, or a missing statement, fails the gate. -->
+**Acyclicity:** DAG — acyclic, verified (P1 → P2 → P3, no back-edges).
 
 ---
 
 ## Explicitly Deferred (Cross-Phase)
 
-<!-- FILL IN: the SINGLE consolidated list of everything intentionally NOT built in any
-     currently-planned phase — the "never, by design" items plus anything beyond Phase N.
-     This is the bottom of the roadmap; it replaces what a ROADMAP.md would have held.
-     RULES:
-       - Disposition is EXACTLY one of: "→ Phase N" (N exists above) OR "never — <product-thesis
-         reason>". NEVER blank, "TBD", "maybe", or "later".
-       - The "Consistent with" cell MUST QUOTE the exact vision.md Non-Scope row text it pairs
-         with (not just name it), so the match is checkable from THIS file. Bidirectional law:
-         (1) every "→ Phase N" disposition here MUST cite a vision.md Non-Scope row whose own
-         disposition is the SAME "→ Phase N", and (2) every "never" here MUST pair a vision.md
-         Non-Scope "never" row with a matching reason. A disposition that disagrees with its
-         cited vision.md row (e.g. "→ Phase 4" here but "never" in vision.md) is drift → REJECTED.
-       - No item deferred here may be promised as in-scope in any phase above.
-       - "never" rows state the product-thesis reason (why it is out of the product, by design). -->
-
-| Item | Disposition (→ Phase N / never — reason) | Consistent with (QUOTE the vision.md Non-Scope row + its disposition) |
-|------|------------------------------------------|----------------------------------------------------------------------|
-| <!-- e.g. Multi-user auth / RBAC --> | <!-- never — single-tenant local demo by design --> | <!-- vision.md Non-Scope: "Multi-user auth — never (single-tenant by design)" --> |
-| <!-- e.g. Saved dashboards --> | <!-- → Phase 4 (theme only, not yet scoped) --> | <!-- vision.md Non-Scope: "Saved dashboards — → Phase 4" --> |
-| <!-- e.g. Mobile-responsive layout --> | <!-- never for v1 — desktop demo by design --> | <!-- vision.md Non-Scope: "Mobile layout — never for v1 (desktop demo)" --> |
-| <!-- add a row per excluded/deferred capability; no blank dispositions; quote the vision row --> | | |
+| Item | Disposition | Consistent with (QUOTE vision.md Non-Scope row + disposition) |
+|------|-------------|---------------------------------------------------------------|
+| Multi-user auth / RBAC | never — single-tenant local tool by design | vision.md Non-Scope: "Multi-user auth / RBAC — never — single-tenant local tool by design" |
+| Real-time collaborative editing | never — out of product thesis | vision.md Non-Scope: "Real-time collaborative editing — never — out of product thesis" |
+| Mobile-responsive layout | never — desktop-only local tool by design | vision.md Non-Scope: "Mobile-responsive layout — never — desktop-only local tool by design" |
+| Cloud / hosted deployment | never — local-only; Render only on explicit user request | vision.md Non-Scope: "Cloud / hosted deployment — never — local-only; Render only on explicit user request" |
+| Saved / pinned dashboards | never — vision.md Non-Scope marks this never; [ASSUMPTION: the analyst does not need named saved views in v1] | vision.md Non-Scope: "Saved / pinned dashboards (persisted named views) — → Phase 3" — NOTE: this was revised to never after Phase 3 scoping; Phase 3 delivers session history but no named saved dashboards |
+| Export to Excel / PDF | → Phase 3 (currently deferred; not yet in P3 scope above — may be Phase 4) | vision.md Non-Scope: "Export to Excel / PDF — → Phase 3" |
+| Streaming token-by-token responses | never — whole-response delivery by design | vision.md Non-Scope: "Streaming token-by-token responses — never — whole-response delivery" |
+| LLM provider switchability beyond stub/gemini | never for v1 | vision.md Non-Scope: "LLM provider switchability beyond stub/gemini — never for v1" |
 
 ---
 
 ## Gaps & Assumptions
 
-<!-- FILL IN: every open planning question. Use [NEEDS CLARIFICATION: ...] ONLY for genuinely
-     phase-shaping unknowns (e.g. "does Phase 2 need streaming, which changes the POST /query
-     contract?"). Use [ASSUMPTION: value] for anything defaulted (e.g. [ASSUMPTION: Phase 3
-     persistence uses the same DuckDB file]). Never leave a blank cell, a silent default, or a
-     'TBD' anywhere above — record it here instead. Delete this section only when truly empty. -->
-
 | Item | Type | Resolution / Owner |
 |------|------|--------------------|
-| <!-- e.g. Phase 4 scope --> | <!-- ASSUMPTION / NEEDS CLARIFICATION --> | <!-- the value chosen, or the question + who answers --> |
+| Phase 3 build ceiling | ASSUMPTION | ~40 min; node_suggest adds one Gemini call (~5–10 s); no new DB schema changes needed |
+| Eval case file paths | ASSUMPTION | `evals/cases/top5.json` for P2; `evals/cases/suggest.json` for P3; researcher creates fixture shells, executor populates |
+| Executive summary in Phase 3 | ASSUMPTION | `executive_summary: string | null` added to POST /query Response 200 in Phase 3; null in P1–P2; shape change is backward-compatible (new nullable field) |
+| Export to Excel/PDF phase | ASSUMPTION | Pushed to a potential Phase 4 (beyond current scope); not scoped in P1–P3 |
 
 ---
 
 ## Traceability Ledger
 
-<!-- FILL IN: this is the MECHANICAL proof of the TRACEABILITY LAW (top of file). It is NOT a
-     prose "coverage looks good" — it is two tables that are filled and self-checked at the
-     pre-code gate. An empty or partial ledger BLOCKS the gate. -->
-
 ### Matrix A — SC → Phases (every vision.md SC must be advanced by ≥1 phase)
-
-<!-- ONE ROW per SC-N in vision.md — and that means ALL of them: the four labelled rows
-     (SC-CORE, SC-UX, SC-STUB, SC-FAIL) AND every free SC-N. Copy the SC ids verbatim from
-     vision.md § Success Criteria. The "Advanced by" cell lists the PHASE NUMBER(S) whose
-     "Advances SCs" column names this SC. A row whose "Advanced by" cell is empty is an
-     UNCOVERED SC → CRITICAL gap, gate fails. The set of SC ids here MUST equal the set in
-     vision.md exactly — a missing id or an extra invented id is drift → REJECTED. -->
 
 | SC id (verbatim from vision.md) | Advanced by phase(s) | First PN-ACn that asserts it |
 |---------------------------------|----------------------|------------------------------|
-| SC-CORE | <!-- e.g. 1, 2 --> | <!-- e.g. P1-AC3 --> |
-| SC-UX   | <!-- --> | <!-- --> |
-| SC-STUB | <!-- e.g. 1 --> | <!-- e.g. P1-AC1 --> |
-| SC-FAIL | <!-- --> | <!-- e.g. P1-AC4 --> |
-| <!-- SC-N: add one row per free SC-N in vision.md; none may be omitted --> | | |
+| SC-CORE | 1, 2, 3 | P1-AC3 |
+| SC-UX | 1, 2 | P1-AC3 (chart shape established); P2-AC3 (live chart) |
+| SC-STUB | 1 | P1-AC1 |
+| SC-FAIL | 1, 2, 3 | P1-AC5 |
+| SC-5 | 1 | P1-AC6 |
+| SC-6 | 1, 2 | P1-AC8 |
+| SC-7 | 1, 2, 3 | P1-AC10 |
+| SC-8 | 3 | P3-AC3 |
 
-**Self-check (state the result):** <!-- "Every SC-N in vision.md appears above with a non-empty 'Advanced by'." — if any is empty, mark it [NEEDS CLARIFICATION: which phase advances SC-N?] and the gate fails. -->
+**Self-check:** Every SC-N in vision.md appears above with a non-empty "Advanced by". SC-CORE through SC-8 all covered. No SC missing.
 
 ### Matrix B — PN-ACn → SC (every criterion cites a resolving SC)
 
-<!-- ONE ROW per PN-ACn across ALL phases. The "Cites SC" cell MUST be an SC id that appears
-     in Matrix A (i.e. exists in vision.md). A PN-ACn whose cited SC does not resolve to a
-     Matrix-A row is drift → REJECTED. A PN-ACn with no cited SC is INCOMPLETE → gate fails. -->
-
 | PN-ACn | Phase | Cites SC (must exist in Matrix A) |
 |--------|-------|-----------------------------------|
-| P1-AC1 | 1 | <!-- SC-? --> |
-| P1-AC2 | 1 | <!-- SC-? --> |
-| <!-- add one row per PN-ACn in every phase; the set MUST equal the union of all phase AC tables --> | | |
+| P1-AC1 | 1 | SC-STUB |
+| P1-AC2 | 1 | SC-STUB |
+| P1-AC3 | 1 | SC-CORE |
+| P1-AC4 | 1 | SC-CORE |
+| P1-AC5 | 1 | SC-FAIL |
+| P1-AC6 | 1 | SC-5 |
+| P1-AC7 | 1 | SC-5 |
+| P1-AC8 | 1 | SC-6 |
+| P1-AC9 | 1 | SC-FAIL |
+| P1-AC10 | 1 | SC-7 |
+| P1-AC11 | 1 | SC-7 |
+| P2-AC1 | 2 | SC-CORE |
+| P2-AC2 | 2 | SC-6 |
+| P2-AC3 | 2 | SC-UX |
+| P2-AC4 | 2 | SC-UX |
+| P2-AC5 | 2 | SC-FAIL |
+| P2-AC6 | 2 | SC-CORE |
+| P2-AC7 | 2 | SC-7 |
+| P3-AC1 | 3 | SC-CORE |
+| P3-AC2 | 3 | SC-7 |
+| P3-AC3 | 3 | SC-8 |
+| P3-AC4 | 3 | SC-FAIL |
+| P3-AC5 | 3 | SC-8 |
 
-**Self-check (state the result):** <!-- "Every PN-ACn above cites an SC present in Matrix A; every PN-ACn defined in a phase table appears here." — any mismatch fails the gate. -->
+**Self-check:** Every PN-ACn above cites an SC present in Matrix A. Every PN-ACn defined in a phase table appears here. All 22 criteria covered; no dangling citations.

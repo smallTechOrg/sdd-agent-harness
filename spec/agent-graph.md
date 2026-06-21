@@ -1,416 +1,306 @@
 # Agent Graph
 
-> **Placeholder.** The researcher fills every section thoroughly at intake — highly technical and exact, no vague prose.
-
-<!--
-SCOPE OF THIS FILE — read before filling.
-This is the EXACT agent topology contract for any LLM/agent surface in the product:
-the typed state object, every node (its state reads/writes + per-external-call failure policy),
-the full edge topology including every conditional route, the error/finalize terminal nodes,
-the compiled graph assembly, and the concurrency/checkpointing model.
-
-OPTIONAL DOCUMENT: this file is REQUIRED whenever an agent framework or LLM call-graph is in
-use (LangGraph, CrewAI, a hand-rolled node loop, even a single-node stub agent). The reviewer
-treats a missing/empty agent-graph.md as a CRITICAL BLOCKER while an agent loop exists. DELETE
-THIS FILE ENTIRELY only if the product has no agent loop and no LLM call-graph at all. A
-single-node stub agent in Phase 1 is still an agent loop — keep and fill this file.
-
-This is a WHAT-the-contract-is doc, not a HOW doc. State the typed contract, the node I/O
-surface, the routing predicates, and the assembly shape. Line-by-line node bodies live in src/.
-
-CROSS-REFERENCES (one fact, one place — link, never duplicate). Every link below MUST resolve
-to a real, non-placeholder anchor; the reviewer rejects a dangling cross-reference:
-  - State field meanings that mirror API payloads        → spec/api.md
-  - audit_log columns (run_id, action, payload, duration_ms, …) → spec/data-model.md  (THE home)
-  - stub_mode flag / offline-no-key behaviour            → spec/api.md (/health) + spec/architecture.md
-  - LLM provider, model id, agent-framework version pin   → spec/architecture.md (Stack table)
-  - Per-phase acceptance criteria PN-ACn                  → spec/delivery-plan.md
-  - Product Success Criteria SC-N                         → spec/vision.md
-  - Framework API gotchas (reducer trap, async savers)    → harness/patterns/langgraph.md  (CANONICAL — keep this path; it is a harness method-asset, NOT a spec/ doc)
-
-The full product-spec set is exactly: spec/{vision,architecture,data-model,api,ui,agent-graph,delivery-plan}.md.
-There is NO spec/features/, NO FR/CR file, NO spec/ROADMAP.md — deferred scope lives as LATER PHASES
-in spec/delivery-plan.md. Do not cite any of those removed paths.
-
-GAP MARKERS: use [NEEDS CLARIFICATION: q] ONLY for genuinely topology-changing unknowns
-(e.g. "is there a human-in-the-loop interrupt?"). Use [ASSUMPTION: value] for everything
-defaulted. NEVER leave a blank cell, a silent default, or a "TBD".
--->
+Cross-references (one fact, one place):
+- State fields that mirror API payloads → spec/api.md §POST /query
+- `audit_log` columns (run_id, action, payload, duration_ms, …) → spec/data-model.md §audit_log (THE home)
+- `stub_mode` flag / offline-no-key behaviour → spec/api.md §GET /health + spec/architecture.md
+- LLM provider, model id → spec/architecture.md Stack table
+- Per-phase acceptance criteria PN-ACn → spec/delivery-plan.md
+- Product Success Criteria SC-N → spec/vision.md
 
 ---
 
 ## Open topology questions
 
-<!--
-FILL IN (MANDATORY — a blank is rejected): list every topology-changing unknown as a
-[NEEDS CLARIFICATION: q] row below — e.g. "is there a human-in-the-loop interrupt?",
-"does the planner loop until a budget, or run once?", "does any node fan out N parallel sub-calls?".
-These are the questions whose answers would CHANGE the diagram or the node set.
-If there are none, you MUST affirmatively write the single line: `No open topology questions.`
-An empty section (neither a marker nor that exact line) is REJECTED at the pre-code gate.
--->
-
-<!-- e.g. [NEEDS CLARIFICATION: does node_plan retry on empty result, or fall through to finalize?] -->
-<!-- or the literal line: No open topology questions. -->
+No open topology questions. The graph is a linear three-node pipeline (generate → execute → finalize) with a single shared handle_error terminal. No human-in-the-loop interrupts, no parallel fan-out, no loop back to generate.
 
 ---
 
 ## State
 
-<!--
-FILL IN: the COMPLETE typed state object as a real TypedDict (or the chosen framework's state
-class), grouped into four commented sections IN THIS ORDER:
-  # Identity  — run/session/correlation ids, immutable for the run
-  # Input     — what the caller supplied; matches the request body in spec/api.md
-  # Pipeline  — fields populated PROGRESSIVELY by nodes; each starts None, a node fills it
-  # Control   — error (MANDATORY) + any routing/iteration counters
-
-HARD BAR:
-  - Every field annotated `name: concrete-type` using REAL Python types: str, int, float, bool,
-    list[Row], dict[str, X]. Optional is written `X | None`. A field that is empty until a node
-    fills it MUST be `T | None` (not bare T).
-  - `error: str | None` is MANDATORY and lives in # Control. Any node sets it on fatal failure.
-  - NO field typed bare `Any`. If a field is genuinely dynamic, type it `dict[str, Any]` AND add a
-    one-line `# why Any:` justification on that line. A field with no justification is rejected.
-  - Each Pipeline field MUST be referenced by some node's Reads/Writes below. An orphan field
-    (declared here, used by no node) is rejected. Conversely, no node may read/write a field that
-    is not declared here.
-  - If using LangGraph, DO NOT annotate a messages list with `Annotated[list, add_messages]` —
-    see harness/patterns/langgraph.md (double-append trap). Type it `list[BaseMessage]` plain.
-
-WEAK vs STRONG:
-  weak  : `data: Any` / `result: dict` / `messages: list`   (no element type, no justification)
-  strong: `rows: list[dict[str, str | int | float | None]] | None  # query result, None until executed`
--->
-
 ```python
-from typing import TypedDict, Any   # Any only if a field is justified-dynamic below
-# from langchain_core.messages import BaseMessage   # if a message transcript is carried
+from typing import TypedDict
 
 class AgentState(TypedDict):
     # Identity
-    run_id: str               # <!-- UUIDv4, correlation id; mirrors audit_log.run_id (data-model.md) -->
-    session_id: str           # <!-- caller session; one run per session at a time (see Concurrency) -->
-    # <!-- add identity fields; all immutable for the run -->
+    run_id: str           # UUIDv4 correlation id; mirrors audit_log.run_id (data-model.md §audit_log)
+    session_id: str       # caller session id; one run per session at a time (see Concurrency)
 
     # Input
-    # <!-- field: concrete-type — meaning; MUST match request body in spec/api.md -->
+    question: str         # NL prompt from POST /query request; ≤ 2000 chars
+    dataset_ids: list[str]  # uuid4 ids of datasets to query; each maps to a DuckDB table
+    column_schemas: list[dict[str, str | bool | None]]  # column_schema rows from dataset registry; for prompt context
 
-    # Pipeline (populated progressively; each None until its producing node writes it)
-    # <!-- field: concrete-type | None — meaning; referenced by a node Writes below -->
+    # Pipeline (populated progressively; None until producing node writes it)
+    sql: str | None       # the generated SELECT SQL; None until node_generate_sql writes it
+    rows: list[dict[str, str | int | float | bool | None]] | None  # query result rows; None until node_execute_sql writes it
+    row_count: int | None  # len(rows); None until node_execute_sql writes it
+    columns: list[str] | None  # column names in result order; None until node_execute_sql writes it
+    chart_spec: dict[str, object] | None  # Plotly spec dict; None if no chartable columns or not yet generated
+    table_markdown: str | None  # GFM table of first min(row_count,50) rows; None until node_finalize writes it
+    suggestions: list[str]  # follow-up suggestion strings; empty list until Phase 3 node writes it
 
     # Control
-    error: str | None         # set by ANY node on fatal failure; routes to handle_error
-    # <!-- iteration: int — loop counter, if a multi-step loop exists -->
-    # <!-- next: str | None — routing hint, if a router node sets the next node name -->
+    error: str | None     # set by ANY node on fatal failure; routes to node_handle_error
 ```
-
-<!-- FILL IN: one-row-per-field table mirroring the code above, so the contract is enumerable. -->
 
 | Field | Group | Type | None until | Set by node | Read by node(s) |
 |-------|-------|------|-----------|-------------|-----------------|
-| `run_id` | Identity | `str` | n/a (set at init) | (entry init) | all |
-| `error` | Control | `str \| None` | n/a (init `None`) | any node on fatal | `node_handle_error` |
-| `<!-- field -->` | <!-- Input/Pipeline --> | `<!-- type -->` | <!-- node / n/a --> | `<!-- node -->` | `<!-- node(s) -->` |
+| `run_id` | Identity | `str` | n/a (set at graph entry) | (entry init) | all |
+| `session_id` | Identity | `str` | n/a (set at graph entry) | (entry init) | all |
+| `question` | Input | `str` | n/a (from request) | (entry init) | `node_generate_sql` |
+| `dataset_ids` | Input | `list[str]` | n/a (from request) | (entry init) | `node_generate_sql`, `node_execute_sql` |
+| `column_schemas` | Input | `list[dict[str, str \| bool \| None]]` | n/a (loaded at entry from SQLite) | (entry init) | `node_generate_sql` |
+| `sql` | Pipeline | `str \| None` | `node_generate_sql` writes it | `node_generate_sql` | `node_execute_sql`, `node_finalize`, `node_handle_error` |
+| `rows` | Pipeline | `list[dict[str, str \| int \| float \| bool \| None]] \| None` | `node_execute_sql` writes it | `node_execute_sql` | `node_finalize` |
+| `row_count` | Pipeline | `int \| None` | `node_execute_sql` writes it | `node_execute_sql` | `node_finalize` |
+| `columns` | Pipeline | `list[str] \| None` | `node_execute_sql` writes it | `node_execute_sql` | `node_finalize` |
+| `chart_spec` | Pipeline | `dict[str, object] \| None` | `node_finalize` writes it | `node_finalize` | (response assembly) |
+| `table_markdown` | Pipeline | `str \| None` | `node_finalize` writes it | `node_finalize` | (response assembly) |
+| `suggestions` | Pipeline | `list[str]` | init `[]` | `node_finalize` (Phase 3: `node_suggest`) | (response assembly) |
+| `error` | Control | `str \| None` | init `None` | any node on fatal failure | `node_handle_error` |
 
 ---
 
 ## Nodes
 
-<!--
-FILL IN: ONE `###` subsection per node, in execution order. Node names are `node_<verb_noun>`
-(snake_case). Every field a node names in Reads/Writes MUST exist in the State table above.
-
-PER NODE, EXACTLY:
-  - Reads:  comma-separated State field names this node reads.
-  - Writes: comma-separated State field names this node writes (include `error` for any node
-            that can fail fatally).
-  - Serves: cite the SC-N (vision.md) AND the PN-ACn (delivery-plan.md) this node advances.
-    "internal" is NOT a free pass: a node with no user-visible output MUST instead state
-    `internal: serves <named downstream node> by producing <state field>` — naming the consumer
-    and the field. A bare "internal" with no consumer+field is REJECTED.
-  - I/O & Guard table (REQUIRED — replaces free-prose behaviour; the most load-bearing cell, so
-    it is structured, not narrative). EXACTLY these four rows:
-      | Prompt / data inputs | the State fields fed in (for an LLM node: which fields enter the
-                               prompt; for a tool/DB node: which fields parameterise the call) |
-      | Output field written | the SINGLE State field this node populates on success (must appear
-                               in Writes and in the State table) |
-      | Guard (predicate)    | a CHECKABLE boolean expression over state/output that MUST hold
-                               for the write to be accepted — e.g. `sql.strip().upper().startswith("SELECT")`
-                               or `len(rows) >= 0 and all(isinstance(r, dict) for r in rows)`.
-                               PROSE IS REJECTED: the cell must read as a Python boolean expression
-                               (mirror the State section's "no bare Any" rigor). |
-      | On guard fail        | EXACTLY ONE of: `fatal: set state.error` / `partial: write <named
-                               fallback value>` — naming the concrete fallback, not "continue". |
-  - External-calls table (REQUIRED for any node that calls an LLM, DB, HTTP API, or tool):
-      | System | Operation | Timeout | Retries (count, base_ms, cap_ms, jitter) | Idempotent? | Stub fallback | On failure |
-    Column rules:
-      - Operation: form `<verb> <object> (<model id / table / endpoint>)`, e.g.
-        `NL→SQL completion (gemini-2.x, see architecture.md Stack)`. A bare "API call" / "LLM call"
-        is REJECTED — name the verb, the object, AND the concrete model/table/endpoint.
-      - Timeout: a concrete number with units (e.g. `30s`) or `[ASSUMPTION: 30s]`. Never blank.
-      - Retries: `(count, base_ms, cap_ms, jitter y/n)` or the literal `no retry`. Never "TBD".
-      - Idempotent?: `yes` / `no` (drives whether a retry is even safe).
-      - Stub fallback: the EXACT deterministic value this node writes WHILE stub_mode is true /
-        no key is set (e.g. `sql="SELECT 1 AS stub"`, `rows=[{"stub": true}]`). This is what
-        AG-AC3 asserts. `none` is only valid for a node that makes no external call.
-      - On failure: EXACTLY ONE of:
-          fatal: set state.error    (run aborts → handle_error)
-          partial: log + continue   (degrade; node still writes the named fallback value above)
-    A node that touches an external system with NO external-calls row is REJECTED.
-    A pure in-memory node (e.g. a router) states "External calls: none".
-  - Behaviour: ONE sentence — the transformation SUMMARY only (inputs → output). The guard and
-    I/O contract live in the table above, NOT in prose. No implementation line-by-line (src/).
-
-WEAK vs STRONG (I/O & Guard table):
-  weak  : Behaviour = "Calls the model and returns the answer." (no guard predicate, no named field)
-  strong: Prompt inputs = `schema, question`; Output field = `sql`;
-          Guard = `sql.strip().upper().startswith("SELECT") and ";" not in sql.rstrip(";")`;
-          On guard fail = `fatal: set state.error`.
-
-CLOSING RULE (gate-checkable, enumerable like the State cross-check):
-  Every SC-N declared in vision.md MUST be served by at least one node's Serves cell. An SC-N
-  with no serving node is a CRITICAL gap and is REJECTED. Conversely every Serves cite must
-  resolve to a real SC-N (vision.md) / PN-ACn (delivery-plan.md) row — a dangling id is drift.
--->
-
-### `node_<name>`
+### `node_generate_sql`
 
 | Aspect | Value |
 |--------|-------|
-| Reads | <!-- State field names --> |
-| Writes | <!-- State field names (include `error` if it can fail fatally) --> |
-| Serves | <!-- SC-N (vision.md) · PN-ACn (delivery-plan.md)  /  internal: serves `node_<x>` by producing `<field>` --> |
+| Reads | `question`, `dataset_ids`, `column_schemas`, `run_id`, `session_id` |
+| Writes | `sql`, `error` |
+| Serves | SC-CORE "WHEN a NL question is submitted, API SHALL return rows length >= 1 and non-empty sql" · P2-AC1 |
 
 **I/O & Guard**
 
 | Aspect | Value |
 |--------|-------|
-| Prompt / data inputs | <!-- State fields fed in (LLM: prompt fields; DB/tool: call params) --> |
-| Output field written | <!-- the single State field populated on success (must be in Writes) --> |
-| Guard (predicate) | <!-- a Python boolean expression over state/output, e.g. `sql.strip().upper().startswith("SELECT")` — PROSE REJECTED --> |
-| On guard fail | <!-- fatal: set state.error  /  partial: write `<named fallback value>` --> |
+| Prompt / data inputs | `question` (the NL prompt), `column_schemas` (column names + dtypes from each dataset), `dataset_ids` (mapped to DuckDB table names `dataset_<id>`) |
+| Output field written | `sql` |
+| Guard (predicate) | `sql is not None and sql.strip().upper().startswith("SELECT") and ";" not in sql.rstrip(";") and len(sql.strip()) > 6` |
+| On guard fail | fatal: set `state.error = "BAD_SQL: generated SQL is not a valid read-only SELECT"` |
 
 **External calls**
 
 | System | Operation | Timeout | Retries (count, base_ms, cap_ms, jitter) | Idempotent? | Stub fallback | On failure |
-|--------|-----------|---------|------------------------------------------|-------------|---------------|-----------|
-| <!-- Gemini / DuckDB / none --> | <!-- e.g. NL→SQL completion (gemini-2.x, see architecture.md) --> | <!-- e.g. 30s --> | <!-- e.g. (0, –, –, n) or `no retry` --> | <!-- yes/no --> | <!-- exact value written in stub_mode, e.g. `sql="SELECT 1 AS stub"` --> | <!-- fatal: set state.error / partial: log + continue --> |
+|--------|-----------|---------|------------------------------------------|-------------|---------------|------------|
+| Google Gemini API | NL→SQL completion (gemini-2.5-flash; context caching on system prompt; see architecture.md Stack) | 30s | (2, 250, 4000, yes) | yes (same prompt → same SQL) | `sql="SELECT product, SUM(revenue) AS total_revenue FROM dataset_stub GROUP BY product ORDER BY total_revenue DESC LIMIT 5"` | fatal: set state.error = "LLM_ERROR: <exc message>" |
 
-**Behaviour:** <!-- ONE sentence: inputs → transformation → output. Guard + I/O contract live in the tables above, not here. -->
-
----
-
-<!-- Repeat the block above for EVERY functional node. Do NOT include handle_error/finalize here
-     — those are specified in the next section. -->
+**Behaviour:** Sends the question and column schemas to gemini-2.5-flash as a structured prompt requesting a single read-only SELECT SQL statement, then validates the guard predicate and writes `sql` to state.
 
 ---
 
-## Edge Topology
-
-<!--
-FILL IN: a CONCRETE ASCII diagram of the compiled graph. NOT optional, NOT a placeholder comment.
-The skeleton below is a LIVE fenced block, NOT a comment — you MUST overwrite it in place.
-REQUIREMENTS:
-  - START and END both appear.
-  - Every node from the Nodes section appears, plus handle_error and finalize.
-  - Every CONDITIONAL edge is drawn WITH its predicate inline, e.g.  ─(error)─►handle_error
-    and  ─(ok)─►next_node . Show the branch labels, not a bare arrow.
-  - The error route from EVERY fatal-capable node to handle_error is visible (a fan-in to
-    handle_error is fine; show at least the representative edges).
-  - finalize is the single success terminus before END.
-
-HARD BAR (enumerable cross-check, same rigor as the State-field check):
-  - Every node name in this diagram MUST appear VERBATIM in the Nodes section, and every
-    Nodes-section node MUST appear here. A name present in one and not the other is REJECTED.
-  - DO NOT ship the placeholder node names `node_first` / `node_second` / `node_route` /
-    `node_tool`. A diagram still containing any of these literal names is REJECTED — they are
-    scaffolding, not your graph.
-
-Then a CONDITIONAL-EDGE TABLE enumerating each branch precisely.
--->
-
-```
-REPLACE THIS BLOCK with the real compiled graph. Example shape to overwrite (delete the
-placeholder names — they MUST NOT survive into a filled spec):
-
-START
-  │
-  ▼
-node_first ──(state.error is not None)──► handle_error ──► END
-  │ state.error is None
-  ▼
-node_second ──(state.error is not None)──► handle_error
-  │ state.error is None
-  ▼
-node_route ──(state.next == "tool")──► node_tool ──► node_route   (loop)
-  │ state.next == "done"
-  ▼
-finalize ──► END
-```
-
-<!-- FILL IN: every conditional edge as a row. Unconditional edges may be listed in prose under
-     the diagram or as rows with Condition = "always". -->
-
-| After node | Condition (predicate over state) | Goes to |
-|------------|----------------------------------|---------|
-| `node_<name>` | `state.error is not None` | `handle_error` |
-| `node_<name>` | `state.error is None` | `<!-- next node -->` |
-| `<!-- router node -->` | `<!-- e.g. state.next == "tool" -->` | `<!-- node -->` |
-| `<!-- last functional node -->` | always | `finalize` |
-
----
-
-## Error & Finalize Nodes
-
-<!--
-FILL IN: the two terminal-housekeeping nodes. Both MUST reference REAL audit_log columns from
-spec/data-model.md (run_id, action, payload, duration_ms — whatever the actual schema names are;
-do not invent columns). Cross-ref, do not redefine the audit_log schema here.
--->
-
-### `node_handle_error`
+### `node_execute_sql`
 
 | Aspect | Value |
 |--------|-------|
-| Reads | `error`, `run_id`, `session_id` <!-- + any context fields --> |
-| Writes | <!-- run status / nothing in state; side-effect = audit row --> |
-| Audit write | <!-- audit_log row: action=`<!-- e.g. 'error' -->`, payload=`<error text>`, duration_ms=<!-- elapsed --> (columns per data-model.md) --> |
-| Terminates | routes unconditionally to `END` |
+| Reads | `sql`, `dataset_ids`, `run_id`, `session_id` |
+| Writes | `rows`, `row_count`, `columns`, `error` |
+| Serves | SC-CORE · SC-6 "WHEN SQL executes, audit_log row written with duration_ms >= 0" · P2-AC2 |
 
-**Behaviour:** <!-- Records the failure with run_id context to audit_log, sets the run's terminal
-status, and routes to END. MUST NEVER raise (it is the last line of defence). State exactly what
-it persists and what the API surfaces to the caller (cross-ref the error response in spec/api.md). -->
+**I/O & Guard**
+
+| Aspect | Value |
+|--------|-------|
+| Prompt / data inputs | `sql` (the SELECT to execute), `dataset_ids` (to confirm tables exist in DuckDB) |
+| Output field written | `rows` (and also `row_count`, `columns` as co-outputs of the same operation) |
+| Guard (predicate) | `rows is not None and isinstance(rows, list) and all(isinstance(r, dict) for r in rows) and row_count == len(rows)` |
+| On guard fail | fatal: set `state.error = "QUERY_ERROR: result shape invalid"` |
+
+**External calls**
+
+| System | Operation | Timeout | Retries (count, base_ms, cap_ms, jitter) | Idempotent? | Stub fallback | On failure |
+|--------|-----------|---------|------------------------------------------|-------------|---------------|------------|
+| DuckDB `./data/app.duckdb` | Execute SELECT query (`duckdb.connect().execute(sql).fetchall()`) | 5s | (3, 100, 2000, no) | yes (read-only SELECT) | `rows=[{"product": "Widget A", "total_revenue": 5000.0}, {"product": "Widget B", "total_revenue": 4200.0}, {"product": "Widget C", "total_revenue": 3800.0}, {"product": "Widget D", "total_revenue": 3100.0}, {"product": "Widget E", "total_revenue": 2900.0}], row_count=5, columns=["product","total_revenue"]` | fatal: set state.error = "QUERY_ERROR: <duckdb exc message>" |
+
+**Behaviour:** Executes the guard-validated SELECT SQL against DuckDB, caps results at `DAA_MAX_RESULT_ROWS`, writes rows/row_count/columns to state, and appends an `audit_log` row with `action='sql'`, the SQL as payload, and measured `duration_ms`.
+
+---
 
 ### `node_finalize`
 
 | Aspect | Value |
 |--------|-------|
-| Reads | <!-- the pipeline output fields that form the response --> |
-| Writes | <!-- run status = success; assembles the response object --> |
-| Audit write | <!-- audit_log row(s): action=`<!-- e.g. 'run' -->`, payload=`<!-- summary -->`, duration_ms=<!-- total run elapsed --> (columns per data-model.md) --> |
-| Terminates | routes unconditionally to `END` |
+| Reads | `sql`, `rows`, `row_count`, `columns`, `suggestions`, `run_id`, `session_id` |
+| Writes | `chart_spec`, `table_markdown` (and assembles the final response) |
+| Serves | SC-CORE · SC-UX · SC-6 · P1-AC3 · P2-AC1 |
 
-**Response shape** (REQUIRED — `field: type` per line; MUST equal the success response body in
-spec/api.md. A bare cross-ref with no field list here is REJECTED so a loose api.md cannot leave
-the shape uninvented):
+**I/O & Guard**
+
+| Aspect | Value |
+|--------|-------|
+| Prompt / data inputs | `rows`, `columns` (to generate chart_spec), `rows` sliced to 50 (for table_markdown) |
+| Output field written | `chart_spec` |
+| Guard (predicate) | `table_markdown is not None and isinstance(table_markdown, str) and (chart_spec is None or (isinstance(chart_spec, dict) and "data" in chart_spec and "layout" in chart_spec))` |
+| On guard fail | partial: write `chart_spec=None` (chart rendering is optional; table is sufficient) |
+
+**External calls**
+
+| System | Operation | Timeout | Retries (count, base_ms, cap_ms, jitter) | Idempotent? | Stub fallback | On failure |
+|--------|-----------|---------|------------------------------------------|-------------|---------------|------------|
+| none | in-process chart type selection and GFM table generation | n/a | no retry | yes | `chart_spec={"data":[{"type":"bar","x":["Widget A","Widget B","Widget C","Widget D","Widget E"],"y":[5000.0,4200.0,3800.0,3100.0,2900.0]}],"layout":{"title":"Results","xaxis":{"title":"product"},"yaxis":{"title":"total_revenue"}}}` | partial: write chart_spec=None |
+
+**Behaviour:** Selects chart type by data shape (line for datetime column, bar for categorical+numeric, scatter for two numeric columns), builds a Plotly spec dict, serialises the first 50 rows as a GFM Markdown table, writes an `audit_log` row with `action='llm'` (for the upstream LLM call duration), appends conversation_message rows (user + assistant), and updates query_run.status to 'done'.
+
+---
+
+### `node_suggest` (→ Phase 3)
+
+| Aspect | Value |
+|--------|-------|
+| Reads | `question`, `columns`, `rows`, `sql`, `run_id`, `session_id` |
+| Writes | `suggestions`, `error` |
+| Serves | SC-8 "WHERE Phase 3 analyst-workflow features are active, response SHALL include ≥ 2 follow-up suggestions" · P3-AC3 |
+
+**I/O & Guard**
+
+| Aspect | Value |
+|--------|-------|
+| Prompt / data inputs | `question`, `columns`, `sql`, sample from `rows` (first 5 rows) |
+| Output field written | `suggestions` |
+| Guard (predicate) | `isinstance(suggestions, list) and len(suggestions) >= 2 and all(isinstance(s, str) and len(s) > 0 for s in suggestions)` |
+| On guard fail | partial: write `suggestions=["Explore further", "Compare across groups"]` (generic fallbacks, not fatal) |
+
+**External calls**
+
+| System | Operation | Timeout | Retries (count, base_ms, cap_ms, jitter) | Idempotent? | Stub fallback | On failure |
+|--------|-----------|---------|------------------------------------------|-------------|---------------|------------|
+| Google Gemini API | Follow-up suggestion generation (gemini-2.5-flash; see architecture.md Stack) | 15s | (1, 250, 2000, yes) | yes | `suggestions=["Break down by category", "Show revenue trend over time"]` | partial: write suggestions=["Explore further", "Compare across groups"] |
+
+**Behaviour:** Sends the question, column names, SQL, and 5-row sample to gemini-2.5-flash requesting ≥ 2 follow-up question suggestions that each reference a column name from the result; validates guard; writes suggestions to state.
+
+---
+
+## Edge Topology
 
 ```
-<!-- FILL IN, one field per line, e.g.:
-sql: str            # the executed read-only SQL
-rows: list[dict]    # query result, >= 0 rows
-chart: dict | None  # plotly spec, None if not chartable
-run_id: str         # mirrors audit_log.run_id
--->
+START
+  │
+  ▼
+node_generate_sql ──(state["error"] is not None)──► node_handle_error ──► END
+  │ state["error"] is None
+  ▼
+node_execute_sql ──(state["error"] is not None)──► node_handle_error
+  │ state["error"] is None
+  ▼
+[Phase 3 only: node_suggest] ──(state["error"] is not None)──► node_handle_error
+  │ state["error"] is None (or Phase 1–2: direct)
+  ▼
+node_finalize ──► END
 ```
 
-**Behaviour:** <!-- ONE sentence: closes a successful run — writes the audit_log row(s) with
-duration_ms, assembles the final response (shape above) from the pipeline outputs, routes to END. -->
+| After node | Condition (predicate over state) | Goes to |
+|------------|----------------------------------|---------|
+| `node_generate_sql` | `state.get("error") is not None` | `node_handle_error` |
+| `node_generate_sql` | `state.get("error") is None` | `node_execute_sql` |
+| `node_execute_sql` | `state.get("error") is not None` | `node_handle_error` |
+| `node_execute_sql` | `state.get("error") is None` | `node_suggest` (Phase 3) or `node_finalize` (Phase 1–2) |
+| `node_suggest` | `state.get("error") is not None` | `node_handle_error` |
+| `node_suggest` | `state.get("error") is None` | `node_finalize` |
+| `node_finalize` | always | END |
+| `node_handle_error` | always | END |
 
-### Acceptance criteria (EARS — finalize/error are observable via the audit log)
+---
 
-<!--
-FILL IN: each criterion is ONE EARS sentence paired with an EXACT acceptance test. NOT
-stub-passable: every criterion names a user-visible artefact with a quantity or named field
-(an audit_log row WITH a non-null duration_ms; an error response WITH a message field), never a
-bare 200 + empty body. Cite the SC each advances.
+## Error & Finalize Nodes
 
-WEAK vs STRONG:
-  weak  : "WHEN a run finishes, the system SHALL log it."  (stub-passable; no quantity, no field)
-  strong: "WHEN a run completes successfully, node_finalize SHALL write exactly 1 audit_log row
-           with action='run' and duration_ms >= 0."
--->
+### `node_handle_error`
+
+| Aspect | Value |
+|--------|-------|
+| Reads | `error`, `run_id`, `session_id`, `sql` (may be None) |
+| Writes | nothing in state (terminal side-effect only) |
+| Audit write | `audit_log` row: `action='error'`, `payload=state["error"]` (≤ 32768 chars), `duration_ms=<elapsed monotonic ms since run start>`, `model=None`, `input_tokens=None`, `output_tokens=None` (columns per data-model.md §audit_log) |
+| Terminates | routes unconditionally to END |
+
+**Behaviour:** Records the failure with `run_id` as `audit_log.run_id`, sets `query_run.status='error'` and `query_run.error_code` from the first word of `state["error"]` (e.g. "BAD_SQL"), routes to END; MUST NEVER raise (last line of defence). The API layer reads `state["error"]` and maps it to the canonical error envelope (api.md §POST /query Error matrix).
+
+### `node_finalize`
+
+| Aspect | Value |
+|--------|-------|
+| Reads | `sql`, `rows`, `row_count`, `columns`, `chart_spec`, `table_markdown`, `suggestions`, `run_id`, `session_id` |
+| Writes | `chart_spec`, `table_markdown`; side-effects: audit_log, conversation_message, query_run update |
+| Audit write | `audit_log` row: `action='llm'`, `payload=<NL question>`, `duration_ms=<total run elapsed ms>`, `model=DAA_LLM_MODEL`, `input_tokens=<from Gemini response>`, `output_tokens=<from Gemini response>` (columns per data-model.md §audit_log) |
+| Terminates | routes unconditionally to END |
+
+**Response shape:**
+
+```
+query_run_id: str            # the query_run.id for this run
+sql: str                     # the executed read-only SQL; non-empty on success
+columns: list[str]           # column names in result order
+rows: list[dict]             # query result rows; >= 0 items
+row_count: int               # len(rows)
+chart_spec: dict | None      # Plotly spec dict; None if no chartable columns
+suggestions: list[str]       # follow-up suggestions; [] in Phase 1–2
+table_markdown: str          # GFM table of first min(row_count,50) rows
+stub_mode: bool              # mirrors DAA_LLM_PROVIDER==stub
+```
+
+**Behaviour:** Closes a successful run — writes the `audit_log` row for the LLM call with `duration_ms`, appends two `conversation_message` rows (role='user' for question, role='assistant' for table_markdown), sets `query_run.status='done'`, assembles the final response object from pipeline state fields, routes to END.
+
+### Acceptance criteria (EARS — finalize/error are observable via audit log)
 
 | # | EARS statement | Acceptance test (command / pytest node / assertion) | Serves |
 |---|---------------|------------------------------------------------------|--------|
-| AG-AC1 | `WHEN a run completes successfully, node_finalize SHALL write exactly 1 audit_log row with duration_ms >= 0 AND return a response containing every field named in the Response-shape block above.` | `<!-- e.g. pytest tests/test_graph.py::test_finalize_writes_audit -q  →  asserts 1 row, duration_ms is not None, AND set(response.keys()) == {declared response fields} -->` | SC-<!--N--> |
-| AG-AC2 | `IF any node sets state.error, THEN node_handle_error SHALL write 1 audit_log row with action='error' and a non-empty payload, and the graph SHALL route to END without raising.` | `<!-- e.g. pytest tests/test_graph.py::test_error_path -q  →  asserts row action=='error', no exception escapes ainvoke -->` | SC-<!--N--> |
-| AG-AC3 | `WHILE stub_mode is true (no API key), the agent SHALL complete a run end-to-end, each stubbed node SHALL write the EXACT deterministic Stub-fallback value declared in its external-calls row, and node_finalize SHALL still write its audit_log row.` | `<!-- e.g. APP_LLM_PROVIDER=stub pytest tests/test_graph.py::test_stub_run -q  →  asserts the named stub field equals its declared value (e.g. state["sql"] == "SELECT 1 AS stub"), response is populated, exactly 1 audit row -->` | SC-<!--N--> |
+| AG-AC1 | `WHEN a run completes successfully, node_finalize SHALL write exactly 1 audit_log row with action='llm' and duration_ms >= 0 AND return a response containing every field in the Response-shape block above.` | `pytest tests/test_graph.py::test_finalize_writes_audit` — `assert audit_count_delta == 1 and row.action == "llm" and row.duration_ms >= 0 and set(response.keys()) == {"query_run_id","sql","columns","rows","row_count","chart_spec","suggestions","table_markdown","stub_mode"}` | SC-6 |
+| AG-AC2 | `IF any node sets state.error, THEN node_handle_error SHALL write 1 audit_log row with action='error' and a non-empty payload, and the graph SHALL route to END without raising.` | `pytest tests/test_graph.py::test_error_path` — inject a guard failure; `assert audit_rows_with_action_error == 1 and row.payload != "" and no exception escapes run()` | SC-FAIL |
+| AG-AC3 | `WHILE stub_mode is true (no API key), the agent SHALL complete a run end-to-end, node_generate_sql SHALL write sql equal to the declared stub value, and node_finalize SHALL write its audit_log row.` | `DAA_LLM_PROVIDER=stub pytest tests/test_graph.py::test_stub_run` — `assert state["sql"].startswith("SELECT") and len(state["rows"]) >= 1 and audit_llm_row_count == 1` | SC-STUB |
+| AG-AC4 | `IF a run is already active for a session, THEN POST /query SHALL return HTTP 409 with error.code == "RUN_ACTIVE", not start a second run.` | `pytest tests/test_graph.py::test_concurrent_run_rejected` — fire two concurrent POST /query requests for the same session; `assert second_response.status_code == 409 and second_response.json()["error"]["code"] == "RUN_ACTIVE"` | SC-FAIL |
+| AG-AC5 | `WHERE checkpointing is enabled, WHEN a run resumes from a checkpoint, the graph SHALL read the prior step's state and not re-execute completed nodes.` | N/A this phase — no checkpointer in Phase 1–2; Phase 3 revisit if multi-step plans introduced | SC-CORE |
 
 ---
 
 ## Graph Assembly
 
-<!--
-FILL IN: Python pseudocode wiring nodes and edges EXACTLY as the real graph.py will. Use the
-chosen framework's REAL API. For LangGraph: StateGraph / add_node / set_entry_point (or
-add_edge(START, ...)) / add_conditional_edges / add_edge / compile. Cross-ref
-harness/patterns/langgraph.md for the exact import paths and the no-reducer rule.
-
-HARD BAR:
-  - EVERY node and EVERY edge from the diagram appears here (including handle_error + finalize).
-  - Conditional edges use a REAL predicate lambda referencing `state["error"]` (or state.error),
-    e.g. lambda s: "handle_error" if s.get("error") else "next".
-  - The real file MUST be ≤ 60 lines — keep this assembly tight; no node bodies inline.
--->
-
 ```python
-# NOTE: the real src graph file MUST be <= 60 lines (assembly only; node bodies live elsewhere).
-from langgraph.graph import START, END, StateGraph
-# from <app>.agent.nodes import node_..., node_handle_error, node_finalize
+# NOTE: the real src/agent/graph.py MUST be <= 60 lines (assembly only; node bodies in src/agent/nodes/).
+from typing import Literal
 
-g = StateGraph(AgentState)
-# g.add_node("<name>", node_<name>)            # repeat for every functional node
-# g.add_node("finalize", node_finalize)
-# g.add_node("handle_error", node_handle_error)
+class AgentRunner:
+    """Hand-rolled linear node runner (no LangGraph dependency)."""
 
-# g.add_edge(START, "<entry node>")            # or g.set_entry_point("<entry node>")
-# g.add_conditional_edges(
-#     "<node>",
-#     lambda s: "handle_error" if s.get("error") else "<next>",
-#     {"handle_error": "handle_error", "<next>": "<next>"},
-# )
-# g.add_edge("<last functional node>", "finalize")
-# g.add_edge("finalize", END)
-# g.add_edge("handle_error", END)
+    async def run(self, initial_state: AgentState) -> AgentState:
+        state = initial_state
 
-# app = g.compile()                            # add checkpointer= only per the section below
+        # Phase 1-2: generate → execute → finalize
+        # Phase 3: generate → execute → suggest → finalize
+        nodes_phase_1_2 = [node_generate_sql, node_execute_sql, node_finalize]
+        nodes_phase_3   = [node_generate_sql, node_execute_sql, node_suggest, node_finalize]
+
+        import os
+        nodes = nodes_phase_3 if os.getenv("DAA_PHASE", "2") == "3" else nodes_phase_1_2
+
+        for node_fn in nodes:
+            state = await node_fn(state)
+            if state.get("error"):
+                state = await node_handle_error(state)
+                return state
+
+        return state
 ```
 
 ---
 
 ## Concurrency & Checkpointing
 
-<!--
-FILL IN: pick EXACTLY ONE concurrency model and EXACTLY ONE checkpointing posture, each per
-phase. No hedging — state the concrete decision and the condition that would change it.
-
-CONCURRENCY — choose one and justify:
-  (a) one run per session at a time — POST <run endpoint> returns 409 while a run is active
-      (cite the 409 case in spec/api.md), OR
-  (b) parallel nodes X and Y within a run because <they have no data dependency>.
-
-CHECKPOINTING — choose one and state the trigger condition:
-  none / AsyncSqliteSaver (langgraph-checkpoint-sqlite) / AsyncPostgresSaver. A Phase-1 stub or
-  sub-second single-pass agent may legitimately be "no checkpointing" — but STATE IT EXPLICITLY,
-  including which later phase introduces a saver and why (e.g. multi-step plans / HITL interrupt).
-  Use the ASYNC saver if the stack is async (harness/patterns/langgraph.md).
-
-DEGRADE PATHS: any node whose On-failure is `partial: log + continue` MUST name the EXACT usable
-value it writes on degrade in its external-calls "On failure" / "On guard fail" cell (e.g.
-`partial: write rows=[]`). "log + continue" with no named fallback value is REJECTED — degraded
-behaviour must be specified, not left to the executor.
--->
-
 | Aspect | Decision | Trigger to revisit |
 |--------|----------|--------------------|
-| Concurrency | <!-- one run per session (409 while active, see api.md) / parallel nodes X,Y because … --> | <!-- e.g. when run latency > N s --> |
-| Checkpointing | <!-- none (sub-second single pass) / AsyncSqliteSaver / AsyncPostgresSaver --> | <!-- e.g. when multi-step plans or HITL interrupt land in Phase N --> |
-| State persistence between steps | <!-- in-memory only / saver-backed (where) --> | <!-- --> |
-
-<!-- FILL IN: per-phase posture so the upgrade is an in-place swap, not a rewrite. -->
+| Concurrency | One run per session at a time; POST /query returns 409 with `error.code="RUN_ACTIVE"` while a run is active (see api.md §POST /query Error matrix) | If run latency consistently > 30 s or if a batch-mode feature is added |
+| Checkpointing | None (sub-second single pass in stub mode; ≤ 30 s in live mode; no multi-step plan, no HITL interrupt in Phase 1–3) | When multi-step planning or human-in-the-loop interrupt lands in a future phase |
+| State persistence between steps | In-memory only (the `AgentState` dict lives for the duration of one HTTP request) | When checkpointing is introduced |
 
 | Phase | Concurrency model | Checkpointing | Notes |
 |-------|-------------------|---------------|-------|
-| Phase 1 | <!-- e.g. one run per session --> | <!-- e.g. none (stub agent, sub-second) --> | <!-- stub_mode banner visible; agent is single-node stub --> |
-| Phase <!--N--> | <!-- --> | <!-- e.g. AsyncSqliteSaver --> | <!-- swaps in saver when multi-step loop introduced --> |
+| Phase 1 | One run per session (409 while active) | None (stub agent, sub-second) | stub_mode banner visible; all nodes return deterministic canned values |
+| Phase 2 | One run per session (409 while active) | None (linear single-pass ≤ 30 s) | live Gemini call; node_generate_sql + node_execute_sql real |
+| Phase 3 | One run per session (409 while active) | None (linear 4-node pass ≤ 45 s) | adds node_suggest; revisit checkpointing if latency climbs |
 
 ### Acceptance criteria (EARS)
 
-<!-- FILL IN: EARS criteria for the concurrency/checkpointing contract, each with an exact test.
-     NOT stub-passable — assert the 409 status / a resumed run reading prior state. -->
-
 | # | EARS statement | Acceptance test | Serves |
 |---|---------------|-----------------|--------|
-| AG-AC4 | `IF a run is already active for a session, THEN POST <run endpoint> SHALL return HTTP 409 with an error body, not start a second run.` | `<!-- e.g. curl two concurrent POSTs → second returns 409 (cross-ref api.md error table) -->` | SC-<!--N--> |
-| AG-AC5 | `WHERE checkpointing is enabled, WHEN a run resumes from a checkpoint, the graph SHALL read the prior step's state and not re-execute completed nodes.` | `<!-- e.g. pytest test_resume → asserts node_X ran once; or "N/A this phase — no checkpointer" -->` | SC-<!--N--> |
+| AG-AC4 | `IF a run is already active for a session, THEN POST /query SHALL return HTTP 409 with error.code == "RUN_ACTIVE", not start a second run.` | `pytest tests/test_graph.py::test_concurrent_run_rejected` — fire two concurrent POSTs for same session; `assert second.status_code == 409 and second.json()["error"]["code"] == "RUN_ACTIVE"` | SC-FAIL |
+| AG-AC5 | `WHERE checkpointing is enabled, WHEN a run resumes from a checkpoint, the graph SHALL read the prior step's state and not re-execute completed nodes.` | N/A Phase 1–3 — no checkpointer; note "N/A this phase — no checkpointer" | SC-CORE |
