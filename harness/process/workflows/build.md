@@ -2,25 +2,24 @@
 
 `researcher → planner → executor → reviewer → deployer → analyser ↺`
 
-Takes a user brief from zero to a working, reviewed, locally deployed slice.
-The pipeline runs autonomously after the one human-touch gate; the analyser closes the
-loop back to the head on drift.
+Takes a user brief from zero to a working, reviewed, locally deployed agent.
+Runs as a sequence of **~15-minute iterations** — after each one the system is runnable.
+The pipeline is autonomous after the one human-touch approval gate.
 
 ---
 
 ## Blackboard — what each stage reads and writes
 
-| Stage      | Reads                       | Writes                                        |
-|------------|-----------------------------|-----------------------------------------------|
-| researcher | user's brief                | `spec/features/FR-NNN.md`, `spec/rules/`      |
-| planner    | `spec/`                     | phase plan (session report)                   |
-| executor   | `spec/`, phase plan         | `src/`, `tests/`, unit tests                  |
-| reviewer   | `spec/`, `src/`, `tests/`   | acceptance tests, sign-off (session report)   |
-| deployer   | `src/`, config              | local demo running, deploy result (session report) |
-| analyser   | `spec/`, `src/`, `logs/`    | `logs/analysis/`, spec amendment proposals    |
+| Stage      | Reads                            | Writes                                          |
+|------------|----------------------------------|-------------------------------------------------|
+| researcher | user's brief                     | `spec/features/FR-NNN.md`, `spec/rules/`        |
+| planner    | `spec/`                          | iteration plan (session report)                 |
+| executor   | `spec/`, iteration plan          | `src/`, `tests/`, recipe scaffold               |
+| reviewer   | `spec/`, `src/`, `tests/`        | acceptance tests, sign-off (session report)     |
+| deployer   | `src/`, config                   | local demo running, result (session report)     |
+| analyser   | `spec/`, `src/`, `logs/`         | `logs/analysis/`, spec amendment proposals      |
 
-Sub-agents share no memory between invocations. Coordination is through durable
-artefacts on disk — not conversation.
+Sub-agents share no memory. Coordination is through durable artefacts on disk.
 
 ---
 
@@ -28,95 +27,98 @@ artefacts on disk — not conversation.
 
 ### 1. researcher — get the goal right
 
-Runs the intake script (see `harness/process/agents/researcher.md`):
-- **Round 1:** 4 core questions — problem, users, success criteria, constraints
-- **Round 2:** 4 detail questions — integrations, non-goals, data shape, Phase 2 golden path
-- **Round N:** adaptive until FR is complete or user explicitly accepts the risk of gaps
-- Proposes tech stack; user approves or overrides
+Runs the intake script (`harness/process/agents/researcher.md`):
+- Round 1: 4 core questions — problem, users, success criteria, constraints
+- Round 2: 4 detail questions — integrations, non-goals, data shape, first runnable milestone
+- Round N: adaptive until FR is complete or user accepts the risk of gaps
+- Proposes tech stack; user approves
 - Collects all API keys before sign-off; records which are present (boolean) in session report
-- Writes `spec/features/FR-NNN.md` using the template in `harness/process/templates/FR.md`
+- Writes `spec/features/FR-NNN.md` from template (`harness/process/templates/FR.md`)
 - Fills `spec/rules/tech-stack.md` with the approved stack
 
-**Gate (supervisor):** FR is complete and coherent, stack is approved, all keys identified.
-After sign-off the pipeline runs autonomously, gated only by tests and user acceptance.
+**Gate (supervisor):** FR coherent, stack approved, all keys identified.
+After sign-off the pipeline runs autonomously, gated by tests and user acceptance.
 
-### 2. planner — slice by value
+### 2. planner — slice into 15-minute iterations
 
-Slices the work into phases by end-user value — smallest end-to-end slice first.
-No fixed phase list; phases are derived from the spec.
+Reads the spec and produces an iteration plan where each iteration:
+- Has one deliverable (describable in one sentence)
+- Has one gate command (runnable in under 30 seconds)
+- Takes ~15 minutes of executor work
 
-Records in the session report:
-- Phase list with a one-line goal per phase
-- Gate test for each phase (the specific command to run)
-- Which phase is Phase 2 (the stub/offline phase — always present)
+**Always starts with:**
+- Iteration 0: scaffold — `/health` returns 200 (~8 min)
+- Iteration 1: first model + migration + unit test (~12 min)
 
-**Phase 2 requirement:** every build must have a Phase 2 that runs fully offline (no API
-keys, no network, stubs only) and ends with a running local demo at `http://localhost:8001`.
+Records the full iteration plan in the session report (see planner agent for format).
 
-### 3. executor — make the action
+### 3. executor — one iteration at a time
 
-Implements the current phase in `src/` — exactly what the slice calls for, no more.
+Implements exactly one iteration per invocation. No more.
 
-**Python project conventions:**
-- `src/` holds all application code; `tests/` at the repo root holds all tests
-- External calls (LLM, DB, API) sit behind a thin abstraction in `src/integrations/`
-- Phase 2 stubs live in `src/integrations/stubs/`; stub mode is labelled on every UI page
-- The Phase 2 gate must pass with no API key set — `uv run pytest` must be green offline
-- `uv` is the package manager; dependencies in `pyproject.toml`
+**Iteration 0 steps (always):**
+1. Copy `harness/recipes/python/` to the project root
+2. Replace all `appname` / `APPNAME` occurrences with the project name
+3. `uv sync`
+4. `uv run alembic revision --autogenerate -m "init"`
+5. `uv run alembic upgrade head`
+6. Confirm `curl http://localhost:8001/health` returns 200
+7. Commit: `iter-0: scaffold — /health green`
 
-**On blocker:** if the executor cannot resolve a problem in three attempts, stop and
-route to the fix workflow — do not hack around it.
+**Subsequent iterations:**
+- Write exactly what the iteration plan says — one model, one endpoint, one node, one tool
+- Write the test first (or alongside) — never skip it
+- Run the gate command; show output in session report
+- Commit: `iter-N: [deliverable]`
+
+**On blocker:** three attempts, then route to fix workflow — do not hack around it.
+
+**Python conventions:**
+- `src/` holds all application code; `tests/` at root
+- External calls sit behind a thin client in `src/integrations/`
+- Stubs in `src/integrations/stubs/` — Phase 2 (Iteration 2) runs fully offline
+- `APPNAME_LLM_PROVIDER=stub` must be the default until the LLM iteration
 
 ### 4. reviewer — guard the goal
 
-Reviews `src/` against the spec. Signs off the phase gate.
+Reviews `src/` against the FR after each iteration.
 
-**Gate (all four required):**
-1. Tests pass — output shown in session report, not assumed
+**Gate (all four required before next iteration starts):**
+1. Tests pass — output shown in session report
 2. Working tree clean and pushed
-3. Reviewer has signed off explicitly
-4. Session report updated with what was done and what is next
+3. Reviewer signed off
+4. Session report updated
 
-Nothing passes without all four. If any fails, the phase stays open.
+### 5. deployer — ship after Iteration 2
 
-### 5. deployer — ship it
+After Iteration 2 (stub agent loop), spin up the local demo:
+- `uv run python -m src`
+- Confirm `http://localhost:8001` serves a live response
+- Log curl output in session report
 
-**Phase 2 deploy (always):** spin up the local demo server; confirm `http://localhost:8001`
-returns a live response. Log the curl output in the session report.
-
-**Later phases:** deploy to Render or other targets only when the user explicitly requests
-it. Never deploy to production automatically.
-
-**Irreversible actions** (external deploys, DB migrations in production, any action that
-cannot be undone): always confirm with the user via the supervisor before proceeding.
+Deploy to Render or other targets only when the user explicitly requests it.
+Never deploy to production automatically.
+Confirm all irreversible actions with the user before proceeding.
 
 ### 6. analyser — close the loop
 
-Reads `logs/`, test results, and gate results. Compares outcome against the FR.
+After each iteration, check: does `src/` match the FR? Do logs match `src/`?
 
-| Drift        | Action                                                          |
-|--------------|-----------------------------------------------------------------|
-| spec ≠ src   | route back to executor                                          |
-| src ≠ logs   | route to fix workflow                                           |
-| logs ≠ spec  | fix `src/`, or propose spec amendment if the goal was wrong     |
-| all agree    | surface to user for acceptance                                  |
+| Signal | Action |
+|--------|--------|
+| spec ≠ src | route back to executor |
+| src ≠ logs | route to fix workflow |
+| logs ≠ spec | fix src/ or propose spec amendment |
+| all agree | surface to user for acceptance |
 
-**Done signal:** the user explicitly accepts the phase. Tests and sign-off are necessary
-but not sufficient — the analyser waits for user acceptance before declaring done.
-
-Spec amendments (when the goal turns out to be wrong) go to the supervisor and user for
-approval before any change is made to `spec/`.
+**Done signal:** user explicitly accepts the iteration. Never self-declare done.
+Spec amendments go to supervisor + user for approval before any change is made.
 
 ---
 
 ## Session report
 
-Each stage appends to the single session file at
-`logs/sessions/YYYY-MM-DD-HHMMSS-<branch>.md`.
+Each stage appends to `logs/sessions/YYYY-MM-DD-HHMMSS-<branch>.md`.
+Use the template at `harness/process/templates/SESSION.md`.
 
-Required sections per stage append:
-- **Stage name + timestamp**
-- **Decisions made** (with rationale)
-- **Gate result** (command run + output)
-- **Open questions or blockers**
-- **What is next**
+Per-stage required fields: stage name + timestamp, decisions, gate output, blockers, what is next.

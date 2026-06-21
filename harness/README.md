@@ -33,9 +33,20 @@ sense of the truth and corrects course.
 
 ## Principles
 
-1. **Humans author intent.** The core spec should be written by the user. The researcher
-   can ask questions and help user write, but the words of core intent should be owned by the user.
-2. **Spec should always stay up to date.** Spec should be continuously updated to capture what the code & logs are saying.
+1. **Humans author intent.** The core spec is written by the user. The researcher asks
+   questions and helps structure it, but the words of core intent are owned by the user.
+
+2. **Spec stays current.** Spec is continuously updated to reflect what the code and logs
+   reveal. When they diverge, spec wins — fix the code, or amend the spec first.
+
+3. **15-minute iterations.** Every unit of work is scoped so the executor can complete it
+   in ~15 minutes and leave the system in a runnable, demonstrable state. An iteration
+   that cannot be described in one sentence is too large — split it. This is the atomic
+   unit of the harness: one deliverable, one gate command, one commit.
+
+4. **Always runnable.** After every iteration, the system must start and serve a request.
+   A build that is "almost working" is not working. Partial progress is committed only
+   when the gate passes — never mid-iteration.
 
 
 ## Navigation
