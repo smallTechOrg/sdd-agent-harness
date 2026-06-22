@@ -112,11 +112,23 @@ Everything else (graph wiring, API, DB, settings, tests) is already working.
 cp .env.example .env
 # edit .env: set AGENT_ANTHROPIC_API_KEY=<your key>
 uv sync
-uv run alembic upgrade head
-uv run pytest tests/unit/ -v          # no key needed
-uv run pytest tests/ -v               # requires real key
 python agent.py                        # migrations + frontend build + start server
 python agent.py --check-setup          # verify tools, .env, deps, tests
+```
+
+Once running:
+
+| URL | What |
+|-----|------|
+| `http://localhost:8001/app/` | **UI** — transform form (the capability slot) |
+| `http://localhost:8001/health` | API health check |
+| `http://localhost:8001/docs` | Interactive API docs (Swagger) |
+
+Tests:
+
+```bash
+uv run pytest tests/unit/ -v          # no key needed
+uv run pytest tests/ -v               # requires real key in .env
 ```
 
 ---
