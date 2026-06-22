@@ -14,6 +14,14 @@ Reason: port 8000 is commonly occupied by other local services (FastAPI apps, Dj
 - README must reference `http://localhost:8001`
 - `.env.example` should include `PORT=8001` if the port is configurable
 
+## Frontend Static-Export & Styling Rule
+
+When the frontend is a **Next.js static export served by the backend** (the skeleton's model: `output: 'export'`, `basePath: '/app'`, mounted by FastAPI at `/app`), three things are mandatory — each was a real first-build failure:
+
+- **Single-origin is the canonical run + test path.** The user (and the gate) runs **one** server: `cd frontend && pnpm build` → `uv run python -m src`, then opens **`http://localhost:8001/app/`** (note the port `8001`, the `/app/`, and the trailing slash). Do **not** hand the user the two-server `pnpm dev` (`:3000`) flow as the test path — with `basePath: '/app'`, `localhost:3000/` 404s and the API origin differs, which reads as "nothing loads". `pnpm dev` is for inner-loop dev only.
+- **Tailwind v4 needs a PostCSS config.** Ship `frontend/postcss.config.mjs` with `{ plugins: { '@tailwindcss/postcss': {} } }`. Without it Next inlines `@import "tailwindcss"` but never runs Tailwind's generate step: the built CSS passes through a literal `@tailwind utilities` and ships **zero utility classes**, so the UI renders as unstyled "barebones HTML" while the build still succeeds. A clean build is **not** proof of styling.
+- **Node-version safety.** Node ≥25 exposes a broken global `localStorage` unless `--localstorage-file` is set, which crashes Next SSR (`localStorage.getItem is not a function` → every page 500s). The frontend `dev`/`build`/`start` scripts must carry `NODE_OPTIONS=--no-experimental-webstorage` (or the project must pin a supported Node LTS via `.nvmrc`/`engines`).
+
 ## LLM Model Name Rule
 
 **Always use a current, verified model name — never a deprecated or guessed one.**
