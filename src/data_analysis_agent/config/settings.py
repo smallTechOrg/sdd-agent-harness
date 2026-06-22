@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     @property
     def resolved_llm_provider(self) -> str:
+        """Return ``"openrouter"`` when an API key is configured, else ``"stub"``."""
         key = self.openrouter_api_key.split("#")[0].strip()
         return "openrouter" if key else "stub"
 
@@ -32,6 +33,7 @@ _settings: Settings | None = None
 
 
 def get_settings() -> Settings:
+    """Return the process-wide :class:`Settings` singleton, loading env vars once."""
     global _settings
     if _settings is None:
         _settings = Settings()

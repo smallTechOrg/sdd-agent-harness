@@ -9,6 +9,7 @@ _db: Database | None = None
 
 
 def _get_database() -> Database:
+    """Return the process-wide :class:`Database` singleton, creating it on first use."""
     global _db
     if _db is None:
         from data_analysis_agent.config.settings import get_settings

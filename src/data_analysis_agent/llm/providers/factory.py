@@ -2,6 +2,7 @@ from data_analysis_agent.llm.providers.base import LLMProvider
 
 
 def create_llm_provider() -> LLMProvider:
+    """Build the LLM provider chosen by settings: OpenRouter when keyed, else stub."""
     from data_analysis_agent.config.settings import get_settings
     settings = get_settings()
 

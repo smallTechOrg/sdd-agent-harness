@@ -8,10 +8,12 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 class OpenRouterLLMProvider(LLMProvider):
     def __init__(self, api_key: str, model: str) -> None:
+        """Create an OpenAI-compatible client pointed at OpenRouter for ``model``."""
         self._client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=api_key)
         self._model = model
 
     def complete(self, prompt: str) -> LLMResult:
+        """Send the prompt to OpenRouter and return the reply with usage and cost."""
         response = self._client.chat.completions.create(
             model=self._model,
             messages=[{"role": "user", "content": prompt}],

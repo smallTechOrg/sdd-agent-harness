@@ -7,10 +7,12 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 def _uuid() -> str:
+    """Return a new random UUID string for use as a primary-key default."""
     return str(uuid4())
 
 
 def _now() -> datetime:
+    """Return the current time as a timezone-aware UTC datetime."""
     return datetime.now(timezone.utc)
 
 
@@ -36,12 +38,14 @@ class DataSourceRow(Base):
 
     @property
     def column_names(self) -> list[str]:
+        """Decode the JSON-encoded list of column names (empty list if unset)."""
         if self.column_names_json:
             return json.loads(self.column_names_json)
         return []
 
     @column_names.setter
     def column_names(self, value: list[str]) -> None:
+        """Encode and store the list of column names as JSON."""
         self.column_names_json = json.dumps(value)
 
     @property
@@ -67,6 +71,7 @@ class ToolRow(Base):
 
     @property
     def config(self) -> dict:
+        """Decode the tool's JSON config blob into a dict (empty dict if unset)."""
         if self.config_json:
             return json.loads(self.config_json)
         return {}
@@ -86,6 +91,7 @@ class ToolCapabilityRow(Base):
 
     @property
     def parameter_schema(self) -> dict:
+        """Decode the capability's JSON parameter schema into a dict."""
         return json.loads(self.parameter_schema_json)
 
 
@@ -134,6 +140,7 @@ class QueryRecordRow(Base):
 
     @property
     def query_history(self) -> list[dict]:
+        """Decode the JSON-encoded tool-call trace into a list of dicts."""
         if self.query_history_json:
             return json.loads(self.query_history_json)
         return []

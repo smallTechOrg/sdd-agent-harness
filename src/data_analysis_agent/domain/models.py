@@ -4,6 +4,7 @@ from uuid import uuid4
 
 
 def _uid() -> str:
+    """Return a new random UUID as a string, for use as a default primary key."""
     return str(uuid4())
 
 

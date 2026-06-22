@@ -16,6 +16,7 @@ _PRICING_PER_M: dict[str, tuple[float, float]] = {
 
 
 def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float | None:
+    """Estimate USD cost from token counts, or ``None`` if the model is unpriced."""
     key = model.split(":")[0]  # strip provider suffix variants like ":nitro"
     pricing = _PRICING_PER_M.get(key)
     if pricing is None:

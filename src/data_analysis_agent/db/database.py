@@ -18,6 +18,7 @@ class Database:
     """
 
     def __init__(self, url: str) -> None:
+        """Create the engine and session factory for a SQLite or PostgreSQL URL."""
         connect_args: dict[str, Any] = {}
         if url.startswith("sqlite"):
             connect_args["check_same_thread"] = False
@@ -49,11 +50,14 @@ class Database:
     # ------------------------------------------------------------------ #
 
     def _make_session(self) -> Session:
+        """Return a new ORM session bound to this database's engine."""
         return self.__session_factory()
 
     def _init_schema(self) -> None:
+        """Create all ORM-mapped tables on this engine if they do not exist."""
         from data_analysis_agent.db.models import Base
         Base.metadata.create_all(bind=self.__engine)
 
     def _dispose(self) -> None:
+        """Dispose the engine and close its connection pool."""
         self.__engine.dispose()

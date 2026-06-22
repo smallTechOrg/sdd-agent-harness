@@ -71,6 +71,7 @@ class FileIngester:
         return self._write_parquet(df, dest_dir, stem)
 
     def _write_parquet(self, df: pd.DataFrame, dest_dir: Path, stem: str) -> IngestResult:
+        """Write a DataFrame to ``dest_dir/<stem>.parquet`` and return its metadata."""
         dest_dir.mkdir(parents=True, exist_ok=True)
         parquet_path = dest_dir / f"{stem}.parquet"
         df.to_parquet(str(parquet_path), index=False, engine="pyarrow", compression="snappy")
