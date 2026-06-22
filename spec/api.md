@@ -1,41 +1,213 @@
 # API
 
-> **Boilerplate status:** Filled in by the tech-architect sub-agent. Delete this file if the agent has no external API surface (e.g., it's a pure CLI tool or background worker).
+## API Style
+
+REST over HTTP. JSON request/response bodies except for file upload (multipart/form-data). Session identity is carried by an HTTP-only cookie named `session_id`.
+
+## Authentication
+
+No user authentication in Phase 1. Session identity is established by the `session_id` cookie. The server creates a new session automatically for any request that lacks a valid cookie.
 
 ---
 
-## API Style
+## Endpoints
 
-<!-- FILL IN: REST / GraphQL / CLI / webhook / none -->
+### `POST /api/sessions`
 
-## Endpoints / Commands
+**Purpose:** Explicitly create a new session. Clients may also rely on implicit session creation on any other request — this endpoint is provided for programmatic clients that want a clean session before uploading.
 
-<!-- FILL IN: One section per endpoint or command. -->
+**Request:** No body required.
 
-### `<!-- METHOD /path or command name -->`
+**Response:**
+```json
+{
+  "session_id": "uuid-string",
+  "created_at": "2024-01-01T00:00:00Z"
+}
+```
+Also sets `Set-Cookie: session_id=<uuid>; HttpOnly; SameSite=Strict`.
 
-**Purpose:** <!-- what this endpoint does -->
+**Error cases:**
+| Status | Condition |
+|--------|-----------|
+| 500 | Session store write failed |
+
+---
+
+### `GET /api/sessions/current`
+
+**Purpose:** Retrieve the current session's metadata — dataset list and conversation history. Used by the UI on page load to restore state.
+
+**Request:** No body. Session identified by cookie.
+
+**Response:**
+```json
+{
+  "session_id": "uuid-string",
+  "created_at": "2024-01-01T00:00:00Z",
+  "last_active_at": "2024-01-01T01:00:00Z",
+  "datasets": [
+    {
+      "dataset_id": "uuid-string",
+      "name": "sales_data",
+      "original_filename": "Sales Data.csv",
+      "format": "csv",
+      "columns": [
+        { "name": "order_id", "type": "integer" },
+        { "name": "customer", "type": "text" }
+      ],
+      "row_count": 1500,
+      "size_bytes": 204800,
+      "uploaded_at": "2024-01-01T00:30:00Z"
+    }
+  ],
+  "conversation": [
+    {
+      "turn_id": "uuid-string",
+      "role": "user",
+      "content": "Which customers placed more than 3 orders?",
+      "sql": null,
+      "result_summary": null,
+      "timestamp": "2024-01-01T00:45:00Z"
+    },
+    {
+      "turn_id": "uuid-string",
+      "role": "assistant",
+      "content": "Returned 12 row(s).",
+      "sql": "SELECT customer, COUNT(*) AS order_count FROM sales_data GROUP BY customer HAVING COUNT(*) > 3",
+      "result_summary": "Returned 12 row(s).",
+      "timestamp": "2024-01-01T00:45:03Z"
+    }
+  ]
+}
+```
+
+**Notes:**
+- When no valid session cookie is present the server auto-creates a new session, returns HTTP 200 with an empty session state, and sets `Set-Cookie: session_id=<uuid>; HttpOnly; SameSite=Strict` on the response. There is no 404 for this endpoint.
+
+**Error cases:**
+| Status | Condition |
+|--------|-----------|
+| 500 | Session store read or auto-create write failed |
+
+---
+
+### `POST /api/datasets`
+
+**Purpose:** Upload a CSV or JSON file and register it in the active session.
+
+**Request:** `Content-Type: multipart/form-data`
+- Field `file`: the file binary
+- Field `filename`: original file name (string)
+
+**Response:**
+```json
+{
+  "dataset_id": "uuid-string",
+  "name": "sales_data",
+  "original_filename": "Sales Data.csv",
+  "format": "csv",
+  "columns": [
+    { "name": "order_id", "type": "integer" },
+    { "name": "customer", "type": "text" }
+  ],
+  "row_count": 1500,
+  "size_bytes": 204800,
+  "uploaded_at": "2024-01-01T00:30:00Z"
+}
+```
+
+**Notes:**
+- If a dataset with the same filename already exists in the session, the upload is treated as an overwrite. The existing `dataset_id` is retained; `schema`, `row_count`, `size_bytes`, and `uploaded_at` are updated. The response is HTTP 200 with the updated DatasetMeta — not 409 Conflict.
+
+**Error cases:**
+| Status | Condition |
+|--------|-----------|
+| 400 | File exceeds 50 MB |
+| 400 | Unsupported file format (not `.csv` or `.json`) |
+| 400 | JSON file is not a top-level array of objects |
+| 400 | CSV file has no header row or cannot be parsed |
+| 500 | Filesystem write failed |
+
+---
+
+### `POST /api/query`
+
+**Purpose:** Submit a natural-language question, receive a SQL query and a result table.
 
 **Request:**
 ```json
 {
-  "<!-- field -->": "<!-- type and description -->"
+  "question": "Which customers placed more than 3 orders last month?"
 }
 ```
 
 **Response:**
 ```json
 {
-  "<!-- field -->": "<!-- type and description -->"
+  "turn_id": "uuid-string",
+  "sql": "SELECT customer, COUNT(*) AS order_count FROM sales_data GROUP BY customer HAVING COUNT(*) > 3",
+  "columns": ["customer", "order_count"],
+  "rows": [
+    ["Acme Corp", 5],
+    ["Beta Ltd", 4]
+  ],
+  "row_count": 2,
+  "truncated": false,
+  "total_row_count": 2
+}
+```
+
+When `truncated` is `true`, `rows` contains the first 1 000 rows and `total_row_count` reflects the full result size.
+
+**Error cases:**
+| Status | Condition |
+|--------|-----------|
+| 400 | `question` field missing or empty |
+| 422 | Session has no datasets loaded. Upload a dataset before querying. (`no_datasets`) |
+| 422 | SQL generated by LLM was not a SELECT statement (`sql_rejected`) |
+| 422 | SQL references a table not in the session (`unknown_table`) |
+| 502 | Gemini API returned an error or was unreachable (`llm_unavailable`) |
+| 504 | Query execution exceeded 30-second timeout (`query_timeout`) |
+| 500 | Internal error during execution |
+
+All error responses follow a standard shape:
+```json
+{
+  "error": "error_code",
+  "message": "Human-readable description"
+}
+```
+
+---
+
+### `GET /api/audit`
+
+**Purpose:** Return the audit log entries for the current session, most recent first.
+
+> **Assumed:** The audit log endpoint scopes results to the current session only. A global audit export is out of scope for Phase 1.
+
+**Request:** No body. Session identified by cookie. Optional query parameter: `limit` (integer, default 50, max 200).
+
+**Response:**
+```json
+{
+  "entries": [
+    {
+      "timestamp": "2024-01-01T00:45:03Z",
+      "session_id": "uuid-string",
+      "source_question": "Which customers placed more than 3 orders?",
+      "sql": "SELECT customer, COUNT(*) AS order_count FROM sales_data GROUP BY customer HAVING COUNT(*) > 3",
+      "row_count": 12,
+      "status": "success",
+      "error_message": null
+    }
+  ],
+  "total": 1
 }
 ```
 
 **Error cases:**
 | Status | Condition |
 |--------|-----------|
-| 400 | <!-- bad input --> |
-| 500 | <!-- internal error --> |
-
-## Authentication
-
-<!-- FILL IN: How are API callers authenticated? -->
+| 500 | Audit log read failed |

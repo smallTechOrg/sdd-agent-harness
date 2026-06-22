@@ -1,23 +1,25 @@
 # Capabilities Index
 
-> **Boilerplate status:** The spec-writer sub-agent creates one file per capability in this directory. Each file describes exactly one discrete thing the agent can do.
-
----
-
-## What Is a Capability?
-
-A capability is a single, discrete action or behavior the agent performs. Examples:
-- "Search the web for companies matching criteria X"
-- "Draft a personalized email given a lead profile"
-- "Send a Slack notification when a threshold is crossed"
-
 ## Capabilities in This Project
 
-<!-- FILL IN: List capabilities here as they are defined. Each entry links to its spec file (no number prefix). -->
+| Capability | File | Summary |
+|------------|------|---------|
+| Dataset Upload | [dataset-upload.md](dataset-upload.md) | Accept CSV/JSON files, infer schema, register in session |
+| NL Query | [nl-query.md](nl-query.md) | Translate a natural-language question to a validated SQL SELECT via Gemini |
+| Query Execution | [query-execution.md](query-execution.md) | Execute validated SQL against stored datasets; write audit log entry |
+| Session Management | [session-management.md](session-management.md) | Create and restore server-side sessions binding datasets and conversation history |
 
-| Capability | File |
-|-----------|------|
-| <!-- name --> | [name.md](name.md) |
+## Capability Dependencies
+
+```
+Session Management  ←  all other capabilities depend on an active session
+        |
+        ├── Dataset Upload        (writes dataset metadata to session)
+        │
+        └── NL Query              (reads schema from session)
+                |
+                └── Query Execution   (executes SQL; writes audit log)
+```
 
 ## How to Add a New Capability
 
@@ -26,13 +28,3 @@ Run `/zero-shot-build [description]` on the existing spec. The spec-writer sub-a
 2. Update this index
 3. Flag any dependencies on existing capabilities
 4. Self-review that it fits the architecture and data model before returning
-
-## Capability File Template
-
-Each capability file should answer:
-- **What it does** (one sentence)
-- **Inputs** (what data it receives)
-- **Outputs** (what it produces)
-- **External calls** (APIs, LLMs, databases it touches)
-- **Error cases** (what can go wrong and how it's handled)
-- **Success criteria** (how we test it)
