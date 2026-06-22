@@ -50,22 +50,91 @@ Complete all steps in order before writing any code:
 - [ ] Run `git status` — working tree must be clean before starting
 - [ ] **Create and switch to a feature branch**: `git checkout -b feature/<slug>-v0.1` — **never build on `main`**
 - [ ] **Create the project directory** `<agent-slug>/` if it doesn't exist — never write agent code into the boilerplate root
-- [ ] Open a session report: `<agent-slug>/reports/sessions/YYYY-MM-DD-HHMMSS-[branch].md` — **must exist before Phase 1 starts**
-  - Open a session report at `reports/sessions/YYYY-MM-DD-HHMMSS-[branch].md`
+- [ ] Open a session report at `reports/sessions/YYYY-MM-DD-HHMMSS-[branch].md` — **must exist before Phase 1 starts**
 - [ ] Confirm which phase you are implementing (see `harness/phases.md`)
 
 ## 2. Session Report (Mandatory)
 
-Every session must have a report at `reports/sessions/YYYY-MM-DD-HHMMSS-[branch].md`.
+Every session must have a report at `reports/sessions/YYYY-MM-DD-HHMMSS-[branch].md`. The `reports/` directory is gitignored — these logs are local to the machine running the build.
 
-Minimum required sections:
-- **Goal:** What this session is trying to accomplish
-- **Phase:** Which implementation phase
-- **Steps completed:** Logged as you work (not reconstructed at the end)
-- **Prompt log:** Every user message and a one-line summary of your action
-- **Next steps:** What remains
+### Required structure
 
-Update the report in real time. Do not reconstruct it from memory at the end.
+```markdown
+# Session — YYYY-MM-DD HH:MM
+
+**Branch:** feature/<slug>-v0.1
+**Phase:** <current phase number and name>
+**Goal:** <one sentence — what this session is trying to accomplish>
+**Started:** HH:MM
+
+---
+
+## Steps
+
+<!-- Log entries in real time. Format: HH:MM — [agent or action] — [what happened / outcome] -->
+
+HH:MM — [session start] — read spec, confirmed phase N in scope, working tree clean
+HH:MM — [code-generator] — implemented X, Y, Z; gate ran, PASS
+HH:MM — [code-reviewer] — APPROVED / returned 2 blockers: ...
+HH:MM — [qa-auditor] — VERIFIED / BLOCKED: <specific failures>
+HH:MM — [deployer] — committed + pushed phase-N (abc1234)
+
+---
+
+## Decisions & Assumptions
+
+<!-- Record any non-obvious choice made during this session and why. -->
+
+- <decision>: <rationale>
+
+---
+
+## Blockers & Open Questions
+
+<!-- Anything that stopped progress or needs user input. -->
+
+- [ ] <blocker or question>
+
+---
+
+## Latency Log
+
+| Stage | Agent | Start | End | Duration |
+|-------|-------|-------|-----|----------|
+| Spec draft | spec-writer | HH:MM | HH:MM | Xm |
+| Spec review | spec-reviewer | HH:MM | HH:MM | Xm |
+| Tech design | tech-architect | HH:MM | HH:MM | Xm |
+| Phase 1 code | code-generator | HH:MM | HH:MM | Xm |
+| Phase 1 review | code-reviewer | HH:MM | HH:MM | Xm |
+| Phase 1 gate | qa-auditor | HH:MM | HH:MM | Xm |
+| Phase 1 deploy | deployer | HH:MM | HH:MM | Xm |
+
+---
+
+## End State
+
+**Finished:** HH:MM
+**Phase completed:** <N>
+**Tests:** PASS / FAIL
+**Working tree:** clean / dirty (explain)
+**Next session starts at:** Phase <N+1> — <brief description>
+
+---
+
+## Harness Notes
+
+<!-- Anything this session revealed about the harness itself — confusing rules, missing guidance, slow stages, false-positive gates. These feed harness improvements. -->
+
+- <observation>
+```
+
+### Rules for filling in the report
+
+- **Log in real time** — do not reconstruct at the end. Each step entry as it happens.
+- **Timestamp every action** — start + end time per agent stage. Latency data is how we improve the harness.
+- **Decisions are permanent** — if you chose something non-obvious (a library, a schema shape, a stub strategy), record it. Future sessions need to know why.
+- **Blockers are actionable** — if you're blocked, write the exact question or failure. Not "blocked on DB" but "blocked: `psycopg2` not in PATH, suspect missing C library — need user to run `brew install libpq`."
+- **Harness Notes are gold** — any observation about where the harness slowed you down or gave wrong guidance is a first-class output, not a throwaway comment.
 
 ## 3. Gate Law
 

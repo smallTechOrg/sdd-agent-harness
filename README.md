@@ -54,7 +54,7 @@ INTAKE — 4 questions (scope, stack, trigger, constraints)          [skill]
 [spec-writer]    → Drafts the product spec (ruthless MVP scope)
 [spec-reviewer]  → Independent review → back to spec-writer on blockers
     ↓
-[tech-architect] → Designs AND reviews stack / architecture / agent-graph / plan
+[tech-architect] → Designs AND reviews stack / architecture / agentic-ai / plan
     ↓
 ONE APPROVAL — you see scope + stack + plan; approve once          [skill]
     ↓

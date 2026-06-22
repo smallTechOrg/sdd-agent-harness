@@ -15,7 +15,7 @@ spec/                 ← What the agent does (the product spec)
   data-model.md    ← Data schema
   api.md           ← API surface (REST/GraphQL/CLI/etc.)
   ui.md            ← UI requirements (if any)
-  agent-graph.md   ← Agent orchestration graph
+  agentic-ai.md   ← Agent orchestration graph
   capabilities/       ← One file per discrete capability
   tech-stack.md       ← Language, framework, libraries
   code-style.md       ← Style and structural rules

@@ -9,7 +9,7 @@ The procedure behind the `/zero-shot-build` skill. The skill is the live orchest
 | Stage | Agent | Output |
 |-------|-------|--------|
 | Spec | spec-writer → spec-reviewer | `spec/` filled, reviewed |
-| Tech + plan | tech-architect (designs + self-reviews) | `tech-stack.md`, `code-style.md`, `agent-graph.md`, `reports/implementation-plan.md` |
+| Tech + plan | tech-architect (designs + self-reviews) | `tech-stack.md`, `code-style.md`, `agentic-ai.md`, `reports/implementation-plan.md` |
 | Scaffold | deployer | branch + PR; orchestrator adds dirs, session report, `.env.example` |
 | Build (per phase) | code-generator → code-reviewer → qa-auditor → deployer | code + tests, reviewed, VERIFIED, pushed |
 | Ship | qa-auditor (drift) → deployer | CLEAN audit, PR updated |

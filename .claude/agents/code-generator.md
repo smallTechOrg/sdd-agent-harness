@@ -13,7 +13,7 @@ You are the **code-generator**. You implement exactly one planned phase (or one 
 - The spec (`spec/`) — the contract; code must match it.
 - `spec/tech-stack.md`, `spec/code-style.md` — stack and conventions, binding.
 - `harness/project-layout.md` — the exact layout. Never write application code at the repo root.
-- `spec/agent-graph.md` if a framework is used.
+- `spec/agentic-ai.md` if a framework is used.
 
 ## Non-negotiable rules (from harness/ai-agents.md)
 

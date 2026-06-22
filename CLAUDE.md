@@ -25,7 +25,7 @@ spec/capabilities/          ← all files
 spec/data-model.md
 spec/api.md
 spec/ui.md
-spec/agent-graph.md      ← REQUIRED for any agent framework project
+spec/agentic-ai.md      ← REQUIRED for any agent framework project
 harness/ai-agents.md
 harness/spec-driven.md
 harness/phases.md
@@ -35,7 +35,7 @@ spec/tech-stack.md
 spec/code-style.md
 ```
 
-**`agent-graph.md` is mandatory** for any project using LangGraph, CrewAI, AutoGen, or any agent orchestration framework. If it does not exist when you reach Phase 2, stop and raise it as a blocker.
+**`agentic-ai.md` is mandatory** for any project using LangGraph, CrewAI, AutoGen, or any agent orchestration framework. If it does not exist when you reach Phase 2, stop and raise it as a blocker.
 
 ## If the Spec Is Not Ready
 
@@ -68,7 +68,7 @@ These are the entry points. All are manual (`disable-model-invocation: true`). E
 | `.claude/agents/agent-builder.md` | Orchestrator — coordinates the team for a full build | read/bash/agent |
 | `.claude/agents/spec-writer.md` | Write the product spec | read/write |
 | `.claude/agents/spec-reviewer.md` | Independent spec review | read-only |
-| `.claude/agents/tech-architect.md` | Design **and** review stack/architecture/agent-graph/plan | read/write |
+| `.claude/agents/tech-architect.md` | Design **and** review stack/architecture/agentic-ai/plan | read/write |
 | `.claude/agents/code-generator.md` | Write code + tests for one phase / one fix | read/write/bash |
 | `.claude/agents/code-reviewer.md` | Independent code review (logic, security, spec-fidelity) | read-only |
 | `.claude/agents/qa-auditor.md` | Run gates/tests/app **and** audit spec↔code drift | read-only (bash) |

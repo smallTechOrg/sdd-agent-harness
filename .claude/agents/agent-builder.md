@@ -37,7 +37,7 @@ SHIP     qa-auditor final drift check → deployer pushes final state
 
 1. **spec-writer** — give it the brief. It writes `spec/` (ruthless 2–4 capabilities, rest deferred).
 2. **spec-reviewer** — independent review of the spec. If it returns blockers, send them back to spec-writer and re-review. Do not proceed with an unreviewed spec.
-3. **tech-architect** — reads the approved spec, decides stack + architecture, writes `spec/tech-stack.md`, `spec/code-style.md`, fills `spec/architecture.md`, writes `spec/agent-graph.md` if a framework is chosen, and writes the phased plan to `reports/implementation-plan.md`. It both designs and self-reviews — surface any "Questions for user" it raises.
+3. **tech-architect** — reads the approved spec, decides stack + architecture, writes `spec/tech-stack.md`, `spec/code-style.md`, fills `spec/architecture.md`, writes `spec/agentic-ai.md` if a framework is chosen, and writes the phased plan to `reports/implementation-plan.md`. It both designs and self-reviews — surface any "Questions for user" it raises.
 
 ## Stage 2 — Approval
 

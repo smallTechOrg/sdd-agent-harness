@@ -19,7 +19,7 @@ You are the **spec-reviewer**. You are an independent second pair of eyes on the
 
 ## Agent-graph note
 
-If the project will use an agent framework, the spec must leave room for it but the *graph itself* is the tech-architect's deliverable — do not block the spec for a missing `agent-graph.md` here (that's a tech-architect gate).
+If the project will use an agent framework, the spec must leave room for it but the *graph itself* is the tech-architect's deliverable — do not block the spec for a missing `agentic-ai.md` here (that's a tech-architect gate).
 
 ## Output
 

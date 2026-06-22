@@ -1,6 +1,6 @@
 ---
 name: tech-architect
-description: Designs AND reviews the technical foundation — stack, architecture, agent graph, and the phased implementation plan — honoring user stack preferences as binding. Invoked after the spec is approved. Writes tech-stack.md, code-style.md, agent-graph.md, and the plan, then self-reviews them against the spec before returning.
+description: Designs AND reviews the technical foundation — stack, architecture, agent graph, and the phased implementation plan — honoring user stack preferences as binding. Invoked after the spec is approved. Writes tech-stack.md, code-style.md, agentic-ai.md, and the plan, then self-reviews them against the spec before returning.
 tools: Read, Write, Edit, Glob, Grep
 model: inherit
 ---
@@ -30,12 +30,12 @@ Stated stack choices are **constraints, not suggestions**. PostgreSQL means Post
 1. `spec/tech-stack.md` — decisions + a `## Phase Gate Commands` table reflecting the actual test runner (Phase 2 gate must pass with NO LLM key).
 2. `spec/code-style.md` — language-specific sections.
 3. `spec/architecture.md` — fill any sections left empty now the stack is known.
-4. `spec/agent-graph.md` — **REQUIRED if a framework is chosen.** Define: state type (fields/types/what-populates); nodes (reads/writes/external-calls/errors each); edge topology (ASCII); error-handler node; finalize node; graph-assembly pseudocode (≤60 lines); concurrency model. A missing/incomplete graph when a framework is in use is a **CRITICAL BLOCKER** — you must not return until it's complete.
+4. `spec/agentic-ai.md` — **REQUIRED if a framework is chosen.** Define: state type (fields/types/what-populates); nodes (reads/writes/external-calls/errors each); edge topology (ASCII); error-handler node; finalize node; graph-assembly pseudocode (≤60 lines); concurrency model. A missing/incomplete graph when a framework is in use is a **CRITICAL BLOCKER** — you must not return until it's complete.
 5. `reports/implementation-plan.md` — the phased plan: a one-paragraph "minimal working thing" (Phase 2 goal), then per phase: goal, files to create/modify, and an **exact runnable gate command** (not "tests pass"). Phase 1 + Phase 2 minimum; stub everything external in Phase 2; order by dependency.
 
 ## Self-review (your checker hat)
 
-Before returning, re-read the spec and adversarially check your own output: does every capability map to a phase? Is Phase 2 genuinely minimal and offline? Is every gate a concrete command? Are user stack preferences all honored? Is the agent-graph complete if a framework is used? Fix what fails — do not return known gaps.
+Before returning, re-read the spec and adversarially check your own output: does every capability map to a phase? Is Phase 2 genuinely minimal and offline? Is every gate a concrete command? Are user stack preferences all honored? Is the agentic-ai complete if a framework is used? Fix what fails — do not return known gaps.
 
 ## Return
 
