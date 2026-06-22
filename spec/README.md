@@ -4,29 +4,27 @@ This directory is the authoritative specification for this project. All code mus
 
 ## Status
 
-Check `spec/vision.md` to see if the spec has been filled in. If it still contains `<!-- FILL IN -->` markers, the spec-writer sub-agent needs to complete it before any application code is written.
+Check `spec/roadmap.md` to see if the spec has been filled in. If it still contains `<!-- FILL IN -->` markers, the spec-writer sub-agent needs to complete it before any application code is written.
 
 ## Structure
 
+`spec/` is **the product** — what the agent does, in terms a user can read and edit. Generic engineering doctrine (how to build anything) lives in `harness/`.
+
 ```
-spec/                 ← What the agent does (the product spec)
-  vision.md        ← Purpose, goals, success criteria
-  architecture.md  ← System design, layers, data flow
-  data-model.md    ← Data schema
+spec/                 ← The product (you read & edit this)
+  roadmap.md       ← Purpose, goals, success criteria, future phases
+  architecture.md  ← System design, layers, data flow, and the chosen ## Stack
+  agent.md         ← This agent's graph (state, nodes, edges) — if a framework is used
+  data.md          ← Data schema
   api.md           ← API surface (REST/GraphQL/CLI/etc.)
   ui.md            ← UI requirements (if any)
-  agentic-ai.md   ← Agent orchestration graph
-  capabilities/       ← One file per discrete capability
-  tech-stack.md       ← Language, framework, libraries
-  code-style.md       ← Style and structural rules
+  capabilities/    ← One file per discrete capability
 
-harness/              ← How to build it (the engineering harness)
-  ai-agents.md        ← Rules for ALL Claude Code sessions
-  spec-driven.md      ← Spec-first development rule
-  phases.md           ← Phased implementation model
-  project-layout.md   ← Repo layout rules
-  secret-hygiene.md   ← Secret-handling rules
-  workflows/          ← Repeatable procedures
+harness/              ← How to build it (generic engineering doctrine)
+  rules/           ← Mandatory rules (ai-agents, git, secret-hygiene)
+  patterns/        ← phases, project-layout, test-driven, ui-ux, engineering-practices,
+                     spec-driven, tech-stack (generic stack rules), code (conventions),
+                     agentic-ai (pattern catalogue)
 ```
 
 ## Governance Rules

@@ -31,11 +31,11 @@ When spec comes first:
 - What APIs and integrations it uses
 - What the UI looks like (if any)
 
-**Stack & conventions (in `spec/`):**
-- `spec/tech-stack.md` — what tech stack to use and why
-- `spec/code-style.md` — how to write code consistently
+**Chosen stack (in `spec/architecture.md`):**
+- The project's language/framework/LLM/database lives in the `## Stack` section — app-specific, captured at intake.
 
 **Engineering harness (`harness/`):**
+- `harness/patterns/tech-stack.md` — generic stack rules; `harness/patterns/code.md` — generic code conventions; `harness/patterns/agentic-ai.md` — agentic-pattern catalogue
 - How to handle errors, secrets, and testing
 - What the implementation phases are
 - Repeatable workflows for AI sessions

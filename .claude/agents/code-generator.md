@@ -15,14 +15,16 @@ You are the **code-generator** — the maker of code. You implement exactly one 
 - `harness/patterns/test-driven.md` — TDD: regression-test-first for fixes, behaviour-not-implementation
 - `harness/patterns/engineering-practices.md` — design/error/security standards
 - `harness/patterns/ui-ux.md` — UI/UX bar for any user-facing surface
-- `spec/tech-stack.md`, `spec/code-style.md` — stack + conventions, binding
-- `spec/agentic-ai.md` — the graph, if a framework is used
+- `harness/patterns/tech-stack.md` — generic stack rules (model-naming, DB driver, dev port, test env), binding
+- `harness/patterns/code.md` — generic code conventions, binding
+- `spec/architecture.md` — this project's chosen stack (`## Stack`)
+- `spec/agent.md` — the graph, if a framework is used
 
 ## Inputs (read first)
 
 - The phase to implement, from `reports/implementation-plan.md` — implement **only** this phase, never jump ahead.
 - The spec (`spec/`) — the contract; code must match it.
-- The stack, style, layout, and agentic-ai docs listed above.
+- The stack rules, code conventions, layout, and agent docs listed above.
 
 ## Non-negotiable rules (the ones that bite — full text in the sources above)
 

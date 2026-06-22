@@ -1,6 +1,6 @@
 # Code Style
 
-> **Boilerplate status:** The tech-architect sub-agent fills in the language-specific sections. General rules below apply to all projects.
+> Generic code conventions that apply to **every** project — harness doctrine the code-generator follows, not a per-project file. The language-specific sections are reference; this project's chosen language/stack is in `spec/architecture.md` (`## Stack`).
 
 ---
 

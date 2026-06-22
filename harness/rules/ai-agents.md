@@ -48,7 +48,7 @@ None of this is gated — the Phase 2 gate runs against real keys.
 
 Complete all steps in order before writing any code:
 
-- [ ] Read `spec/vision.md` — know what you're building
+- [ ] Read `spec/roadmap.md` — know what you're building
 - [ ] Check if the spec is complete (no `<!-- FILL IN -->` markers in product spec files)
   - If incomplete: tell the user to run `/zero-shot-build`; do not write application code
 - [ ] If spec is complete: read the full spec manifest in `CLAUDE.md`

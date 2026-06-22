@@ -45,6 +45,24 @@
 |------------|---------|--------------|
 | <!-- name --> | <!-- what it does --> | <!-- what happens if it's down --> |
 
+## Stack
+
+> This project's concrete technology choices (captured at intake, filled by the tech-architect). The generic, every-project rules — model-naming, DB driver, dev port, test environment — live in `harness/patterns/tech-stack.md`; this section is only what **this** project picked.
+
+- **Language:** <!-- FILL IN: e.g., Python 3.12 -->
+- **Agent framework:** <!-- FILL IN: e.g., LangGraph / custom / none -->
+- **LLM provider + model:** <!-- FILL IN: e.g., Anthropic / claude-sonnet-4-6 -->
+- **Backend:** <!-- FILL IN: e.g., FastAPI / none -->
+- **Database + ORM:** <!-- FILL IN: e.g., PostgreSQL + SQLAlchemy 2.0 / none -->
+- **Frontend:** <!-- FILL IN: e.g., Next.js / none -->
+- **Dependency management:** <!-- FILL IN: e.g., uv + pyproject.toml -->
+
+| Key library | Version | Purpose |
+|-------------|---------|---------|
+| <!-- name --> | <!-- ver --> | <!-- purpose --> |
+
+**Avoid:** <!-- FILL IN: libraries/patterns explicitly off-limits, and why -->
+
 ## Deployment Model
 
 <!-- FILL IN: How does this run? (local script, cloud function, long-running service, etc.) -->

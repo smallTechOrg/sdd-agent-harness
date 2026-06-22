@@ -18,7 +18,7 @@ Two modes; the caller says which (or infer from the request).
 - `harness/patterns/ui-ux.md` — the golden-path smoke must assert content + states
 - `harness/rules/ai-agents.md` — real-key testing / prod-DB-driver rules
 - `harness/rules/secret-hygiene.md` — secrets never in code; keys live only in `.env`
-- `spec/code-style.md` — naming, structure, conventions
+- `harness/patterns/code.md` — naming, structure, conventions
 
 ## Mode A — Phase / build gate
 
@@ -26,12 +26,12 @@ Two modes; the caller says which (or infer from the request).
    - **Correctness** — does the logic meet the capability's success criteria? Off-by-one, wrong branch, unhandled None/empty, race in the agent loop.
    - **Spec fidelity** — inputs/outputs/business-rules match the capability spec exactly (spec says "top 5", code returns 10 → blocker).
    - **Security** — no secrets in code, no injection (SQL/shell/prompt), no unvalidated input reaching a sink, no secret logged.
-   - **Code-style** — conforms to `spec/code-style.md`.
+   - **Code-style** — conforms to `harness/patterns/code.md`.
    - **Real-key + secret hygiene** — LLM/API calls run for real via `.env` keys (not stubbed by default); no real keys committed; `.env` gitignored; keys confirmed by presence only. An optional stub fallback, if present, is labelled — but its *absence* is not a finding.
    - **UI/UX** (user-facing changes) — empty/loading/error states exist; error paths render human copy, not stack traces.
    - **Test quality** — tests assert real behaviour (response content, DB state), not just status codes; edge cases, ≥1 end-to-end path, and UI states covered; integration/E2E hit the real LLM/API and assert on stable structure, not exact prose; no test mutated just to pass.
    Default a finding to a blocker if it touches correctness or security; style-only nits are recommendations.
-2. **Run the gate** — the exact command from `reports/implementation-plan.md` / `spec/tech-stack.md`. Report verbatim. Never claim a pass you didn't run.
+2. **Run the gate** — the exact command from `reports/implementation-plan.md` (the test rules it must satisfy are in `harness/patterns/tech-stack.md`). Report verbatim. Never claim a pass you didn't run.
 3. **Real-key check** (Phase 2+) — the gate runs against the REAL LLM/API using keys from `.env`, and against the **production DB driver** (not SQLite if prod is PostgreSQL). A required key missing from `.env` → BLOCKED with the exact key name. Never substitute SQLite for a production DB.
 4. **Golden-path + live-server + UI smoke** (Phase 2+, any UI/HTTP surface) — run the primary user journey against the real LLM/API via `TestClient` asserting **response content** not just status; exercise edge cases and at least one full end-to-end path; for any UI surface assert rendered content and empty/loading/error states; then start the app and `curl` `/health` + one real page (both 200).
 5. **Spot-check** — working tree state sane, no secrets in code, files match the plan for this phase, no phase N+1 code in phase N, and `.env` is gitignored (no real keys committed).

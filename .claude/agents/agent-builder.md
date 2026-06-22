@@ -52,7 +52,7 @@ There is no build/approval gate. Intake is the only interactive step; once it co
 ## Stage 1 — Design
 
 1. **spec-writer** — give it the brief. It writes `spec/` (ruthless 2–4 capabilities, rest deferred) and self-reviews for completeness, coherence, scope, and testability before returning. Surface any `Assumed:` flags it raises.
-2. **tech-architect** — reads the spec, decides stack + architecture, writes `spec/tech-stack.md`, `spec/code-style.md`, fills `spec/architecture.md`, writes `spec/agentic-ai.md` if a framework is chosen, and writes the phased plan to `reports/implementation-plan.md`. It designs and self-reviews and makes every technical decision itself (intake constraints + sensible defaults) — it does not defer questions to the user, since the build is autonomous after intake.
+2. **tech-architect** — reads the spec, decides the stack + architecture, fills `spec/architecture.md` (system design + the `## Stack` section), writes `spec/agent.md` if a framework is chosen, and writes the phased plan to `reports/implementation-plan.md` — following the generic `harness/patterns/tech-stack.md` and `code.md` rules (it does not rewrite them). It designs and self-reviews and makes every technical decision itself (intake constraints + sensible defaults) — it does not defer questions to the user, since the build is autonomous after intake.
 
 ## Stage 2 — Scaffold (you own git)
 

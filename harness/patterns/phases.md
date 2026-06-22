@@ -104,7 +104,7 @@ Whatever the tech-architect decides, the core principle holds: **minimal working
 
 ## Language-Specific Gate Commands
 
-The gate test command depends on the project language. The tech-architect sets this in `spec/tech-stack.md`; the tech-architect uses it in phase definitions.
+The gate test command depends on the project language. The tech-architect sets the exact command per phase in `reports/implementation-plan.md`, honoring the test rules in `harness/patterns/tech-stack.md`.
 
 | Language | Phase 1 gate | Phase 2 gate |
 |----------|-------------|-------------|

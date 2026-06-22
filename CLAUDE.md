@@ -11,7 +11,7 @@ A starting template for building AI agents. The spec in `spec/` is either:
 ## Your First Action Every Session
 
 1. Read `harness/rules/ai-agents.md` — mandatory rules for all AI sessions
-2. Check whether `spec/vision.md` has been filled in:
+2. Check whether `spec/roadmap.md` has been filled in:
    - If it still contains `<!-- FILL IN -->` placeholders → the spec is not ready; do not write application code yet
    - If it is filled in → proceed to read the full spec manifest below before touching any code
 3. Open a session report at `reports/sessions/YYYY-MM-DD-HHMMSS-[branch].md`
@@ -19,13 +19,13 @@ A starting template for building AI agents. The spec in `spec/` is either:
 ## Spec Manifest (read in this order when spec is complete)
 
 ```
-spec/vision.md
+spec/roadmap.md
 spec/architecture.md
 spec/capabilities/          ← all files
-spec/data-model.md
+spec/data.md
 spec/api.md
 spec/ui.md
-spec/agentic-ai.md      ← REQUIRED for any agent framework project
+spec/agent.md     ← REQUIRED for any agent framework project
 harness/rules/ai-agents.md
 harness/patterns/spec-driven.md
 harness/patterns/phases.md
@@ -33,12 +33,13 @@ harness/patterns/project-layout.md
 harness/patterns/engineering-practices.md
 harness/patterns/test-driven.md
 harness/patterns/ui-ux.md
+harness/patterns/tech-stack.md     ← generic stack rules (chosen stack is in spec/architecture.md)
+harness/patterns/code.md           ← generic code conventions
+harness/patterns/agentic-ai.md     ← catalogue of agentic patterns (chosen graph is in spec/agent.md)
 harness/rules/git.md
-spec/tech-stack.md
-spec/code-style.md
 ```
 
-**`agentic-ai.md` is mandatory** for any project using LangGraph, CrewAI, AutoGen, or any agent orchestration framework. If it does not exist when you reach Phase 2, stop and raise it as a blocker.
+**`spec/agent.md` is mandatory** for any project using LangGraph, CrewAI, AutoGen, or any agent orchestration framework. If it does not exist when you reach Phase 2, stop and raise it as a blocker. (The reusable catalogue of agentic-AI patterns to choose from lives in `harness/patterns/agentic-ai.md`.)
 
 ## If the Spec Is Not Ready
 
@@ -71,7 +72,7 @@ These are the entry points. All are manual (`disable-model-invocation: true`). E
 |-------|------|-------|
 | agent-builder | Orchestrator — coordinates the team and owns the git/PR surface for a build | read/bash/agent |
 | spec-writer | Write the product spec **and** self-review it | read/write |
-| tech-architect | Design **and** review stack/architecture/agentic-ai/plan | read/write |
+| tech-architect | Design **and** review stack/architecture/agent/plan | read/write |
 | code-generator | Write code + tests for one phase / one fix | read/write/bash |
 | qa-auditor | Independent code review **and** run gates/tests/app **and** audit spec↔code drift | read-only (bash) |
 

@@ -56,7 +56,7 @@ INTAKE — scope, stack, trigger, constraints; fill .env with the required API k
     ↓
 [spec-writer]    → Drafts AND self-reviews the product spec (ruthless MVP scope)
     ↓
-[tech-architect] → Designs AND reviews stack / architecture / agentic-ai / plan
+[tech-architect] → Designs AND reviews stack / architecture / agent / plan
     ↓
 [agent-builder]  → Feature branch + PR before the first commit
     ↓
@@ -99,13 +99,15 @@ Each phase ends with a commit and passes QA before the next phase begins.
   skills/           ← Entry points (/zero-shot-build, /zero-shot-fix, /zero-shot-sync) — source of truth
   commands/         ← Thin slash-command aliases that defer to the skills
   agents/           ← The team, one full self-contained definition each (agent-builder, spec-writer, tech-architect, code-generator, qa-auditor)
-spec/               ← What your agent does (fill this in or let /zero-shot-build do it)
+spec/               ← The product — what your agent does (you read & edit this)
+  roadmap.md        ← Purpose, goals, success criteria
+  architecture.md   ← System design + the chosen ## Stack
+  agent.md          ← This agent's graph (if a framework is used)
+  data.md  api.md  ui.md
   capabilities/     ← One file per discrete capability
-  tech-stack.md     ← Language, framework, libraries
-  code-style.md     ← Style and structural rules
-harness/            ← How Claude Code should build for this project (doctrine the skills/agents cite)
+harness/            ← How Claude Code should build, generically (doctrine the skills/agents cite)
   rules/            ← Mandatory rules (ai-agents, git, secret-hygiene)
-  patterns/         ← Repeatable patterns (phases, test-driven, project-layout, …)
+  patterns/         ← phases, test-driven, project-layout, tech-stack, code, agentic-ai, …
 reports/
   sessions/         ← Auto-generated session logs from every AI coding session
 CLAUDE.md           ← Entry point for Claude Code
@@ -118,7 +120,7 @@ CLAUDE.md           ← Entry point for Claude Code
 
 If you prefer to write the spec yourself before involving AI:
 
-1. Open `spec/vision.md` and fill in the placeholders
+1. Open `spec/roadmap.md` and fill in the placeholders
 2. Work through each file in `spec/` in order
 3. Once the spec is complete, run `/zero-shot-build` — it sees the filled-in spec and goes straight to planning and building
 
