@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import io
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 import pandas as pd
 
@@ -37,11 +39,27 @@ class FileIngester:
         ".json": lambda p: pd.read_json(p),
     }
 
+    def ingest_stream(
+        self, stream: BinaryIO, suffix: str, dest_dir: Path, stem: str
+    ) -> IngestResult:
+        """
+        Read from an upload stream (no temp file written), convert to Parquet.
+        `suffix` must include the leading dot, e.g. '.csv'.
+        `stem` should be the DataSource UUID.
+        """
+        reader = self._READERS.get(suffix.lower())
+        if reader is None:
+            supported = ", ".join(self._READERS)
+            raise ValueError(
+                f"Unsupported file type {suffix!r}. Supported: {supported}"
+            )
+
+        raw = io.BytesIO(stream.read())
+        df: pd.DataFrame = reader(raw)
+        return self._write_parquet(df, dest_dir, stem)
+
     def ingest(self, source_path: str, dest_dir: Path, stem: str) -> IngestResult:
-        """
-        Read source_path, write Parquet to dest_dir/<stem>.parquet, return metadata.
-        Raises ValueError for unsupported extensions, re-raises pandas read errors.
-        """
+        """Read from an existing file on disk and convert to Parquet."""
         suffix = Path(source_path).suffix.lower()
         reader = self._READERS.get(suffix)
         if reader is None:
@@ -49,9 +67,10 @@ class FileIngester:
             raise ValueError(
                 f"Unsupported file type {suffix!r}. Supported: {supported}"
             )
-
         df: pd.DataFrame = reader(source_path)
+        return self._write_parquet(df, dest_dir, stem)
 
+    def _write_parquet(self, df: pd.DataFrame, dest_dir: Path, stem: str) -> IngestResult:
         dest_dir.mkdir(parents=True, exist_ok=True)
         parquet_path = dest_dir / f"{stem}.parquet"
         df.to_parquet(str(parquet_path), index=False, engine="pyarrow", compression="snappy")

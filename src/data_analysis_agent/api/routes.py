@@ -1,11 +1,9 @@
 import json
-import shutil
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
-import pandas as pd
 import structlog
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -80,26 +78,19 @@ def upload_csv(
     upload_dir.mkdir(parents=True, exist_ok=True)
     parquet_dir = upload_dir / "parquet"
 
-    ds = DataSourceRow(name=filename, type="csv", file_path="")
+    ds = DataSourceRow(name=filename, type="csv")
     session.add(ds)
     session.flush()
 
-    # Save original upload as-is
+    # Convert upload stream directly to Parquet — raw file never touches disk
     suffix = Path(filename).suffix.lower()
-    raw_dest = upload_dir / f"{ds.id}{suffix}"
-    with raw_dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    # Convert to Parquet and extract metadata
     try:
         from data_analysis_agent.tools.ingester import FileIngester
-        result = FileIngester().ingest(str(raw_dest), parquet_dir, ds.id)
+        result = FileIngester().ingest_stream(file.file, suffix, parquet_dir, ds.id)
     except Exception as exc:
-        raw_dest.unlink(missing_ok=True)
         session.rollback()
         raise api_error("PARSE_FAILED", f"Could not process file: {exc}")
 
-    ds.file_path = str(raw_dest)
     ds.parquet_path = result.parquet_path
     ds.row_count = result.row_count
     ds.column_names = result.column_names
@@ -172,8 +163,6 @@ def delete_datasource(
         session.query(ToolCapabilityRow).filter(ToolCapabilityRow.tool_id == t.id).delete()
         session.delete(t)
 
-    if ds.file_path:
-        Path(ds.file_path).unlink(missing_ok=True)
     if ds.parquet_path:
         Path(ds.parquet_path).unlink(missing_ok=True)
 
