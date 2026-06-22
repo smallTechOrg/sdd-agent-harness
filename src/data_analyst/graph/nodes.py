@@ -1,4 +1,5 @@
 import json
+import re
 import time
 
 from data_analyst.db.models import AuditLogEntryRow, DatasetRow, SessionRow
@@ -21,7 +22,13 @@ def _datasets_block(contexts: list[dict], *, include_samples: bool) -> str:
     parts: list[str] = []
     for ctx in contexts:
         schema = ", ".join(f"{c['name']} {c['type']}" for c in ctx.get("schema", []))
-        block = f"<table>{ctx['duckdb_table']}</table> (name: {ctx['name']})\n  columns: {schema}"
+        table = ctx["duckdb_table"]
+        block = (
+            f'SQL table name (use this EXACT name in FROM/JOIN): "{table}"\n'
+            f"  (human label, NOT a table name: {ctx['name']})\n"
+            f"  <table>{table}</table>\n"
+            f"  columns: {schema}"
+        )
         if include_samples and ctx.get("sample_rows"):
             block += f"\n  sample_rows: {json.dumps(ctx['sample_rows'], default=str)}"
         parts.append(block)
@@ -80,6 +87,7 @@ def node_execute_sql(state: AgentState) -> AgentState:
         )
         return {
             **state,
+            "generated_sql": sql,
             "result_columns": result.columns,
             "result_rows": result.rows,
             "row_count": len(result.rows),
@@ -88,6 +96,28 @@ def node_execute_sql(state: AgentState) -> AgentState:
     except Exception as exc:  # noqa: BLE001
         duration_ms = int((time.perf_counter() - started) * 1000)
         log.error("node_execute_sql.error", error=str(exc), retried=state.get("retried"))
+
+        repaired = _repair_table_names(sql, state.get("dataset_contexts", []))
+        if repaired and repaired != sql:
+            try:
+                result = duck.run_query(repaired)
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                log.info("node_execute_sql.repaired", session_id=state.get("session_id"))
+                _write_audit(
+                    state, sql=repaired, row_count=len(result.rows),
+                    duration_ms=duration_ms, status="success", error_message=None,
+                )
+                return {
+                    **state,
+                    "generated_sql": repaired,
+                    "result_columns": result.columns,
+                    "result_rows": result.rows,
+                    "row_count": len(result.rows),
+                    "duration_ms": duration_ms,
+                }
+            except Exception as repair_exc:  # noqa: BLE001
+                log.error("node_execute_sql.repair_failed", error=str(repair_exc))
+
         if not state.get("retried"):
             return {**state, "retried": True, "error": f"SQL execution failed: {exc}"}
         _write_audit(
@@ -193,6 +223,28 @@ def _write_audit(state, *, sql, row_count, duration_ms, status, error_message) -
 
 def _audit_exists_for_run(state) -> bool:
     return state.get("audit_entry_id") is not None
+
+
+def _repair_table_names(sql: str, contexts: list[dict]) -> str:
+    """Deterministically rewrite display-name table refs to real DuckDB tables.
+
+    Safety net for when the model uses a dataset's human label (e.g. ``fifa``)
+    instead of its real session-scoped table (e.g. ``s1_fifa``). Only whole-word,
+    not-already-correct identifiers are remapped; string literals are left alone.
+    """
+    real_tables = {c["duckdb_table"] for c in contexts}
+    out = sql
+    for ctx in contexts:
+        real = ctx["duckdb_table"]
+        aliases = {ctx.get("name", ""), duck.sanitize_table_name(ctx.get("name", ""))}
+        for alias in aliases:
+            if not alias or alias in real_tables or alias == real:
+                continue
+            pattern = re.compile(
+                rf'(?<!["\w])"?{re.escape(alias)}"?(?![\w"])', re.IGNORECASE
+            )
+            out = pattern.sub(f'"{real}"', out)
+    return out
 
 
 def _safe_json(raw: str) -> dict:
