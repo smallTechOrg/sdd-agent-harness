@@ -1,4 +1,5 @@
 .env
+.env.test
 __pycache__/
 *.pyc
 *.pyo
@@ -11,3 +12,12 @@ build/
 *.egg-info/
 .DS_Store
 *.log
+.pytest_cache/
+.ruff_cache/
+.uv/
+uv.lock
+# local data stores (DuckDB datasets + SQLite metadata)
+*.duckdb
+*.duckdb.wal
+data/*.db
+data/*.duckdb
