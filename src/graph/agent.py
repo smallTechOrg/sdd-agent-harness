@@ -1,24 +1,54 @@
 from langgraph.graph import StateGraph, END
 
 from graph.state import AgentState
-from graph.nodes import transform_text, handle_error, finalize
-from graph.edges import after_transform
+from graph.nodes import (
+    profile_schema,
+    generate_sql,
+    execute_sql,
+    narrate,
+    finalize,
+    handle_error,
+)
+from graph.edges import _route
 
 
-def _build_graph() -> StateGraph:
-    g = StateGraph(AgentState)
-    g.add_node("transform_text", transform_text)
-    g.add_node("handle_error", handle_error)
-    g.add_node("finalize", finalize)
-    g.set_entry_point("transform_text")
-    g.add_conditional_edges(
-        "transform_text",
-        after_transform,
+def _build_graph():
+    graph = StateGraph(AgentState)
+
+    graph.add_node("profile_schema", profile_schema)
+    graph.add_node("generate_sql", generate_sql)
+    graph.add_node("execute_sql", execute_sql)
+    graph.add_node("narrate", narrate)
+    graph.add_node("finalize", finalize)
+    graph.add_node("handle_error", handle_error)
+
+    graph.set_entry_point("profile_schema")
+
+    graph.add_conditional_edges(
+        "profile_schema",
+        _route("generate_sql"),
+        {"generate_sql": "generate_sql", "handle_error": "handle_error"},
+    )
+    graph.add_conditional_edges(
+        "generate_sql",
+        _route("execute_sql"),
+        {"execute_sql": "execute_sql", "handle_error": "handle_error"},
+    )
+    graph.add_conditional_edges(
+        "execute_sql",
+        _route("narrate"),
+        {"narrate": "narrate", "handle_error": "handle_error"},
+    )
+    graph.add_conditional_edges(
+        "narrate",
+        _route("finalize"),
         {"finalize": "finalize", "handle_error": "handle_error"},
     )
-    g.add_edge("finalize", END)
-    g.add_edge("handle_error", END)
-    return g.compile()
+
+    graph.add_edge("finalize", END)
+    graph.add_edge("handle_error", END)
+
+    return graph.compile()
 
 
 agentic_ai = _build_graph()

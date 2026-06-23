@@ -1,77 +1,139 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  listAudit,
+  listDatasets,
+  type AskResult,
+  type AuditEntry,
+  type Dataset,
+} from './lib/api'
+import UploadPanel from './components/UploadPanel'
+import DatasetList from './components/DatasetList'
+import AskBox from './components/AskBox'
+import ResultView from './components/ResultView'
+import AuditLog from './components/AuditLog'
+import StubCard from './components/StubCard'
+
+const STUBS = [
+  {
+    title: 'Charts',
+    description: 'Auto-generated visualizations of your query results.',
+  },
+  {
+    title: 'Dashboards',
+    description: 'Pin multiple results into a saved, shareable dashboard.',
+  },
+  {
+    title: 'Cross-Dataset Query',
+    description: 'Ask one question that joins across several datasets.',
+  },
+]
 
 export default function Home() {
-  const [input, setInput] = useState('')
-  const [result, setResult] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [datasets, setDatasets] = useState<Dataset[]>([])
+  const [datasetsLoading, setDatasetsLoading] = useState(true)
+  const [selected, setSelected] = useState<Dataset | null>(null)
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!input.trim()) return
-    setLoading(true)
-    setError(null)
-    setResult(null)
+  const [result, setResult] = useState<AskResult | null>(null)
+
+  const [audit, setAudit] = useState<AuditEntry[]>([])
+  const [auditLoading, setAuditLoading] = useState(true)
+
+  const refreshDatasets = useCallback(async () => {
+    setDatasetsLoading(true)
     try {
-      const res = await fetch('/runs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input_text: input }),
+      const data = await listDatasets()
+      setDatasets(data)
+      setSelected(prev => {
+        if (prev) {
+          const still = data.find(d => d.id === prev.id)
+          if (still) return still
+        }
+        return data[0] ?? null
       })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.detail?.message ?? `Request failed (${res.status})`)
-      } else if (data.data?.error) {
-        setError(data.data.error)
-      } else {
-        setResult(data.data.output_text)
-      }
     } catch {
-      setError('Network error — is the server running?')
+      setDatasets([])
     } finally {
-      setLoading(false)
+      setDatasetsLoading(false)
     }
-  }
+  }, [])
+
+  const refreshAudit = useCallback(async () => {
+    setAuditLoading(true)
+    try {
+      setAudit(await listAudit())
+    } catch {
+      setAudit([])
+    } finally {
+      setAuditLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshDatasets()
+    refreshAudit()
+  }, [refreshDatasets, refreshAudit])
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-16">
-      <h1 className="mb-8 text-3xl font-bold tracking-tight">Agent</h1>
+    <main className="mx-auto max-w-7xl px-4 py-8">
+      <header className="mb-8">
+        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Data Analyst</h1>
+        <p className="mt-1 text-sm text-gray-500">
+          Upload your data, ask in plain English, get an analyst&rsquo;s answer — your rows stay
+          on your machine.
+        </p>
+      </header>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <textarea
-          className="w-full rounded-lg border border-gray-300 p-3 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          rows={4}
-          placeholder="Enter text to transform…"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          disabled={loading}
-        />
-        <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {loading ? 'Running…' : 'Run'}
-        </button>
-      </form>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Left: Datasets */}
+        <section className="space-y-4 lg:col-span-1" aria-labelledby="datasets-heading">
+          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+            <h2 id="datasets-heading" className="mb-3 text-lg font-semibold text-gray-900">
+              Datasets
+            </h2>
+            <UploadPanel onUploaded={refreshDatasets} />
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+            <DatasetList
+              datasets={datasets}
+              loading={datasetsLoading}
+              selectedId={selected?.id ?? null}
+              onSelect={setSelected}
+            />
+          </div>
+        </section>
 
-      {error && (
-        <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
+        {/* Center: Ask + Result */}
+        <section className="space-y-4 lg:col-span-2" aria-labelledby="ask-heading">
+          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+            <h2 id="ask-heading" className="mb-3 text-lg font-semibold text-gray-900">
+              Ask a question
+            </h2>
+            <AskBox dataset={selected} onResult={setResult} onCompleted={refreshAudit} />
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+            <ResultView result={result} />
+          </div>
+        </section>
+      </div>
+
+      {/* Audit Log */}
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <AuditLog entries={audit} loading={auditLoading} />
+      </section>
+
+      {/* Coming soon stubs */}
+      <section className="mt-8" aria-labelledby="coming-soon-heading">
+        <h2 id="coming-soon-heading" className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-400">
+          Coming soon
+        </h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          {STUBS.map(stub => (
+            <StubCard key={stub.title} title={stub.title} description={stub.description} />
+          ))}
         </div>
-      )}
-
-      {result && (
-        <div className="mt-6 rounded-lg border border-gray-200 bg-white p-4 text-sm whitespace-pre-wrap shadow-sm">
-          {result}
-        </div>
-      )}
-
-      {!result && !error && !loading && (
-        <p className="mt-10 text-center text-sm text-gray-400">Results will appear here.</p>
-      )}
+      </section>
     </main>
   )
 }
