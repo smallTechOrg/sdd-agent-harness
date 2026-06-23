@@ -7,15 +7,16 @@ class AgentState(TypedDict, total=False):
     session_id: str
     question: str
 
-    # Tool registry (loaded from DB by load_data)
-    tools: list[dict]  # [{"name", "type", "capabilities": [{"name", "description", "parameter_schema"}]}]
+    # MCP tools, aggregated from list_tools() across all source servers by load_data.
+    # Flat — MCP has no nested capabilities. (Sessions/servers live in mcp_pool, not here.)
+    tools: list[dict]  # [{"name", "table_name", "description", "parameter_schema"}]
 
-    # Schema info (CSV sources)
+    # Schema info (table.column across all attached sources)
     column_names: list[str]
     row_count: int
 
     # ReAct loop state
-    action_history: list[dict]  # [{"capability", "parameters", "result", "is_error"}]
+    action_history: list[dict]  # [{"tool", "arguments", "result", "is_error"}]
     iteration_count: int
     llm_response: str  # raw LLM output from last plan_action call
 

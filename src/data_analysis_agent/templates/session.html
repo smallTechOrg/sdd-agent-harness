@@ -80,9 +80,9 @@
       {% for step in record.query_history %}
       <div style="background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius-sm);padding:.85rem 1rem;">
         <div style="font-size:.75rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:.4rem;">
-          Step {{ loop.index }} · {{ step.capability }}
+          Step {{ loop.index }} · {{ step.tool }}
         </div>
-        <pre style="font-size:.82rem;font-family:monospace;white-space:pre-wrap;word-break:break-word;color:var(--text-soft);margin-bottom:.5rem;">{{ step.parameters.get('query', '') }}</pre>
+        <pre style="font-size:.82rem;font-family:monospace;white-space:pre-wrap;word-break:break-word;color:var(--text-soft);margin-bottom:.5rem;">{{ step.arguments.get('query', '') }}</pre>
         {% if step.is_error %}
         <div style="font-size:.82rem;color:var(--err);">⚠ Error: {{ step.result }}</div>
         {% else %}

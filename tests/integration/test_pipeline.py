@@ -9,6 +9,7 @@ from data_analysis_agent.db.models import (
     DataSourceRow, SessionDataSourceRow,
     SessionRow, QueryRecordRow, AgentRunRow,
 )
+from data_analysis_agent.tools.ingester import FileIngester
 
 
 @pytest.fixture(autouse=True)
@@ -44,15 +45,19 @@ def csv_file(tmp_path):
 
 
 @pytest.fixture
-def session_and_query(csv_file):
+def session_and_query(csv_file, tmp_path):
+    result = FileIngester().ingest(csv_file, tmp_path / "parquet", "sample_ds")
     with session_module.create_db_session() as db:
         ds = DataSourceRow(
             name="sample.csv",
             type="csv",
-            file_path=csv_file,
+            parquet_path=result.parquet_path,
+            row_count=result.row_count,
+            schema_json=result.schema_json,
             tool_description="Execute SQL SELECT queries against the dataset.",
             capability_description="Execute a SQL SELECT statement. Table name is 'sample'.",
         )
+        ds.column_names = result.column_names
         db.add(ds)
         db.flush()
 

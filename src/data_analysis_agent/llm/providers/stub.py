@@ -40,11 +40,14 @@ def _describe_tool_reply(prompt: str) -> str:
 
 def _plan_action_reply(prompt: str) -> str:
     """Build a stub plan_action response: a count query, then a final answer."""
-    if "[1] capability:" in prompt:
+    if "[1] tool:" in prompt:
         return (
             "FINAL ANSWER: (stub) Based on the query results, the data analysis is complete. "
             "Set DATAANALYSIS_OPENROUTER_API_KEY to get real AI-powered answers."
         )
-    match = re.search(r"Table:\s+(\w+)\s+—\s+Columns:", prompt)
-    table = match.group(1) if match else "data"
-    return f'{{"capability": "run_query", "parameters": {{"query": "SELECT COUNT(*) as total_rows FROM {table}"}}}}'
+    tool_match = re.search(r"Tool:\s+(\S+)", prompt)
+    table_match = re.search(r"Table:\s+(\w+)\s+—\s+Columns:", prompt)
+    table = table_match.group(1) if table_match else "data"
+    tool = tool_match.group(1) if tool_match else f"{table}__run_query"
+    query = f"SELECT COUNT(*) as total_rows FROM {table}"
+    return json.dumps({"tool": tool, "arguments": {"query": query}})

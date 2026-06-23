@@ -31,7 +31,7 @@ def build_plan_prompt(state: AgentState) -> str:
 
 
 def _intro_lines() -> list[str]:
-    """Return the static ReAct-loop introduction and SQLite dialect notes."""
+    """Return the static ReAct-loop introduction and DuckDB dialect notes."""
     return [
         _PLAN_TAG,
         "You are a data-analysis agent operating in a ReAct (Reason + Act) loop.",
@@ -40,11 +40,11 @@ def _intro_lines() -> list[str]:
         "tool. Build up a plan across multiple queries — and across multiple tables when",
         "more than one data source is attached — until you can answer the question.",
         "",
-        "SQL dialect: SQLite. Notes:",
-        "- Aggregates available: COUNT, SUM, AVG, MIN, MAX, and (added) STDDEV, VARIANCE.",
-        "- Use SQRT/ABS/ROUND for math; there is no STDEV alias beyond STDDEV/VARIANCE.",
+        "SQL dialect: DuckDB. Notes:",
+        "- Aggregates available natively: COUNT, SUM, AVG, MIN, MAX, STDDEV, VARIANCE, MEDIAN, QUANTILE.",
+        "- Use SQRT/ABS/ROUND for math.",
         "- Only SELECT statements are permitted.",
-        "- If a column is numeric but stored as text, CAST(col AS REAL) before aggregating.",
+        "- If a column is numeric but stored as text, CAST(col AS DOUBLE) before aggregating.",
         "",
     ]
 
@@ -53,15 +53,13 @@ def _tools_lines(tools: list[dict]) -> list[str]:
     """Return the available-tools block, or an empty list when no tools are loaded."""
     if not tools:
         return []
-    lines = ["Available tools (call a tool by its CAPABILITY name, never the tool name):", ""]
+    lines = ["Available tools (call a tool by its exact name):", ""]
     for tool in tools:
-        table = tool.get("config", {}).get("table_name")
+        table = tool.get("table_name")
         suffix = f" (queries table: {table})" if table else ""
         lines.append(f"Tool: {tool['name']}{suffix}")
-        for cap in tool.get("capabilities", []):
-            lines.append(f"  Capability: {cap['name']}")
-            lines.append(f"  Description: {cap['description']}")
-            lines.append(f"  Parameters: {json.dumps(cap.get('parameter_schema', {}))}")
+        lines.append(f"  Description: {tool.get('description', '')}")
+        lines.append(f"  Parameters: {json.dumps(tool.get('parameter_schema', {}))}")
         lines.append("")
     return lines
 
@@ -89,8 +87,8 @@ def _history_lines(history: list[dict]) -> list[str]:
         return []
     lines = ["", "Previous tool calls and results:"]
     for i, entry in enumerate(history, 1):
-        lines.append(f'[{i}] capability: {entry["capability"]}')
-        lines.append(f'    parameters: {json.dumps(entry["parameters"])}')
+        lines.append(f'[{i}] tool: {entry["tool"]}')
+        lines.append(f'    arguments: {json.dumps(entry["arguments"])}')
         if entry.get("is_error"):
             lines.append(f'    result: Error: {entry["result"]}')
             lines.append("    → This call failed. Please write a corrected query.")
@@ -107,8 +105,8 @@ def _response_format_lines() -> list[str]:
         "(no explanations, no markdown, no backticks):",
         "",
         "1. A JSON tool call to gather more data:",
-        '   {"capability": "run_query", "parameters": {"query": "SELECT ..."}}',
-        "   ('capability' MUST be a capability name listed above, e.g. run_query.)",
+        '   {"tool": "<tool_name>", "arguments": {"query": "SELECT ..."}}',
+        "   ('tool' MUST be one of the exact tool names listed above.)",
         "",
         "2. The final answer, when you have enough information:",
         "   FINAL ANSWER: <your complete answer here>",

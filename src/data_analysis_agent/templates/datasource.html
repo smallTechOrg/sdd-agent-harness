@@ -46,17 +46,6 @@
       </div>
     </div>
   </div>
-
-  {% if tool %}
-  <hr style="margin:1.25rem 0 1rem;">
-  <div style="font-size:.85rem;color:var(--muted);">
-    <strong style="color:var(--text);">Tool:</strong> {{ tool.name }} ({{ tool.type }}) —
-    {% for cap in capabilities %}
-    <strong style="color:var(--text);">Capability:</strong> {{ cap.name }}
-    {% if not loop.last %}, {% endif %}
-    {% endfor %}
-  </div>
-  {% endif %}
 </div>
 
 <!-- Sessions -->

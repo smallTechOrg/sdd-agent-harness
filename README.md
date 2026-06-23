@@ -1,6 +1,6 @@
 # Data Analysis Agent
 
-Upload a CSV file and ask questions about your data in plain English. Powered by Google Gemini + LangGraph.
+Upload a CSV file and ask questions about your data in plain English. Powered by Google Gemini + LangGraph, with a Model Context Protocol (MCP) tool layer: each uploaded file becomes an in-process MCP server that answers `run_query` calls with DuckDB over Parquet.
 
 > **All commands run from the repo root.**
 
@@ -66,7 +66,7 @@ If `DATAANALYSIS_GEMINI_API_KEY` is not set, the app runs in **stub mode**:
 uv run pytest
 ```
 
-All 16 tests pass with no Gemini API key required.
+All tests pass with no Gemini API key required (stub mode exercises the full MCP + DuckDB pipeline).
 
 ---
 
@@ -79,8 +79,10 @@ src/data_analysis_agent/
 ├── db/           ← SQLAlchemy models + session
 ├── domain/       ← Pydantic domain models
 ├── graph/        ← LangGraph pipeline (state, nodes, edges, runner)
+│   ├── mcp_pool.py  ← MCP client pool (the only importer of mcp.shared.memory)
+│   └── mcp/          ← per-source in-process MCP servers (csv_server: DuckDB over Parquet)
 ├── llm/          ← Gemini + stub provider
-├── tools/        ← CSV parsing utility
+├── tools/        ← CSV→Parquet ingestion, table naming, LLM-generated descriptions
 └── templates/    ← Jinja2 HTML templates
 
 tests/
@@ -97,9 +99,11 @@ tests/
 | Language | Python 3.12 |
 | Web framework | FastAPI + uvicorn |
 | UI | Jinja2 templates (React/Vite in Phase 4) |
-| Agent | LangGraph |
+| Agent | LangGraph (async nodes) |
+| Tool protocol | Model Context Protocol — official `mcp` SDK 1.28.0 (in-process FastMCP per source) |
+| Data query engine | DuckDB (read-only, over Parquet) |
 | LLM | Google Gemini (`gemini-2.5-flash`) |
-| Database | SQLite + SQLAlchemy 2.0 |
+| Metadata DB | SQLite + SQLAlchemy 2.0 |
 | Migrations | Alembic |
 
 ---

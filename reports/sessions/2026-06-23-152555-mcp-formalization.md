@@ -64,6 +64,18 @@ transport; one MCP server per data source; DuckDB over Parquet; official MCP SDK
 - `config/settings.py`: added `mcp_max_result_rows` (default 200).
 - New isolated tests `tests/unit/graph/test_csv_server.py` (7) + `test_mcp_pool.py` (3) via the real in-memory MCP client. **Full suite: 30 passed** (graph still on the Phase-1 shim — no wiring yet).
 
+### Phase 3 — Async graph cutover (DONE, gate green)
+
+- 5 graph nodes → `async def`; `runner.run_pipeline` stays sync but drives `asyncio.run(agent_graph.ainvoke(...))` with a `try/finally: await close_pool` backstop.
+- `load_data` → `open_pool` + `pool.list_tools()`; `execute_action` → `await pool.call_tool(...)`; `finalize`/`handle_error` → `await close_pool`.
+- `tool_registry.py` shim removed → `load_sources_for_session()` (sources only, with computed `table_name`).
+- `execution.py` rewritten to parse `{"tool","arguments"}` (SQLite executor deleted); `planning.py` → DuckDB dialect + namespaced tool names + `{"tool","arguments"}`; `state.py` comments updated; `stub.py` → `{"tool","arguments"}` + `[1] tool:` sentinel.
+- Templates: `session.html` trace now reads `step.tool`/`step.arguments`; removed the dead `{% if tool %}` block in `datasource.html`.
+- **Deleted** `graph/loading.py`, `graph/data_cache.py`, `graph/sql_aggregates.py`.
+- `tests/integration/test_pipeline.py` fixture now writes a real Parquet via `FileIngester` (CSV fallback gone); `run_pipeline` stays sync so the direct call is unchanged.
+- README updated for the MCP/DuckDB stack (Gemini/OpenRouter drift left as-is, out of scope).
+- **Gate:** `uv run pytest` = **30 passed** in stub mode (real MCP+DuckDB E2E). **Live smoke** (`uv run python -m data_analysis_agent`, port 8001): `/health` 200, upload → session → **3 queries all completed**, **no loop/task/cancel-scope errors** in the log. `alembic heads` = `b8e1f0a2c3d4`.
+
 ---
 
 ## Prompt Log
@@ -87,4 +99,8 @@ transport; one MCP server per data source; DuckDB over Parquet; official MCP SDK
 
 ## Session End State
 
-- (to be filled at close)
+- Branch: feature/data-analysis-agent-v0.1 (PR #57 → main, smallTechOrg/zero-shot-sdd-harness).
+- All 4 phases complete (0 spec+spike, 1 data model, 2 MCP server+pool, 3 async cutover). Each committed + pushed; tests green at every gate.
+- Tests: `uv run pytest` = 30 passed (stub mode, full MCP+DuckDB pipeline). Live server smoke passed (3 repeated queries, no loop errors).
+- The tool layer is now real MCP (official `mcp` 1.28.0): per-source in-process FastMCP servers over DuckDB/Parquet; agent is the MCP client. `tools`/`tool_capabilities` tables gone.
+- Next: PR review/merge. Out of scope (noted): Gemini-vs-OpenRouter spec/README drift; optional Phase-4 polish (structlog MCP fields, README architecture diagram).
