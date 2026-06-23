@@ -6,13 +6,15 @@ disable-model-invocation: true
 allowed-tools: Bash(git*) Bash(gh*)
 ---
 
-You run the human channel — intake, then the testing gate at every phase boundary — and hand the building off to the **agent-builder** orchestrator. The idea is in `$ARGUMENTS` (if empty, ask for it once). Goal: **one prompt → a perfectly-working, thoroughly-tested agent, one user-testable phase at a time.**
+You run the human channel — intake, then the testing gate at every phase boundary — and hand the building off to the **agent-builder** orchestrator. The idea is in `$ARGUMENTS`. **If `$ARGUMENTS` is empty, ask the user in plain text to describe their idea / the problem they want to solve, and WAIT for their free-text reply before doing anything else.** Do NOT load `AskUserQuestion` to solicit, suggest, or pick the idea — the idea must come from the user as their own text. Only once you have the idea do you move to Stage 1 intake. Goal: **one prompt → a perfectly-working, thoroughly-tested agent, one user-testable phase at a time.**
 
 **Autonomy model:** autonomous *within* a phase; a **human testing gate between phases**. Intake is the only interactive SETUP step; after it, agent-builder builds a phase end-to-end without pausing, then returns a test-handoff. You present the handoff, handhold the user through testing, and only proceed to the next phase on the user's go. agent-builder pauses mid-phase only on a hard blocker (e.g. a required key still missing from `.env`).
 
 ## Stage 1 — Intake (the only interactive setup step)
 
 Intake captures scope, stack, LLM provider, output/trigger, and constraints, MAY ask additional clarifying questions up front if anything is ambiguous, and asks the user to fill `.env` with the required API keys/secrets. Aim for a **tight scope** — Phase 1 should be the smallest user-testable **quick win**, not "complete".
+
+**Precondition: you already have the user's idea as their own free text** (from `$ARGUMENTS` or the plain-text prompt above). Never use `AskUserQuestion` to generate or propose the idea itself — it is only for the structured intake questions below, which refine an idea the user has already stated.
 
 1. Acknowledge the idea in one sentence.
 2. Load the question tool: `ToolSearch` with query `select:AskUserQuestion` (before asking).
