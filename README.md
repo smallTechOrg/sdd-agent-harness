@@ -22,7 +22,7 @@ A starting point for building AI agents spec-first. The repo ships with:
 ### Step 1 — Clone
 
 ```bash
-git clone https://github.com/smallTechOrg/sdd-agent-harness.git my-agent
+git clone https://github.com/smallTechOrg/zero-shot-sdd-harness.git my-agent
 cd my-agent
 ```
 
