@@ -53,6 +53,19 @@ For pure-unit isolation, prefer a thin real implementation (in-memory queue, fak
 
 ---
 
+## Stateful Capabilities Need a Second Interaction
+
+A capability that **carries state** — persistent sessions, conversation history, memory, caches, anything that "remembers" or survives a reload/restart — has a bug class the first call can never expose: detached ORM rows, stale or unscoped caches, history-load crashes, session-scoping errors. These fire on the **second** interaction, or after the process restarts — not the first.
+
+So a single happy-path test of a stateful capability is **not coverage of that capability**. For every stateful capability:
+
+- **Multi-interaction test** — drive ≥2 operations in the *same* session/context and assert the later one succeeds AND sees the earlier state (ask → ask-again; create → read → update → read). The bug that shipped past a green Phase-1 gate (history loaded after its DB session closed → `DetachedInstanceError` on the 2nd question) was invisible to every single-turn test; one two-turn test would have caught it.
+- **State-survival test** — reload the page / restart the process, then assert prior state is still present and usable.
+
+Derive what to test from the phase's **capabilities**, not its endpoints: if the spec claims "persistent sessions" or "remembers across…", the absence of a multi-interaction + survival test is a coverage hole, regardless of line coverage.
+
+---
+
 ## The Pyramid
 
 | Level | Count | Speed | Scope |
