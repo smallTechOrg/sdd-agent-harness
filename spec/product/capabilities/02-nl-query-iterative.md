@@ -1,23 +1,23 @@
-# Capability 2: Natural Language Query (Iterative Tool-Call ReAct Loop)
+# Capability 2: Natural Language Query (Iterative MCP Tool-Call ReAct Loop)
 
 ## Overview
 
-The agent answers a user's natural language question by iteratively invoking tool capabilities loaded from the database until it has enough information to provide a confident final answer.
+The agent answers a user's natural language question by acting as an **MCP client**: it discovers the tools exposed by each attached data source's MCP server and invokes them iteratively until it has enough information to give a confident final answer.
 
-This is a **ReAct loop**: the LLM reasons, selects a tool capability to invoke, observes the result, and repeats until it emits `FINAL ANSWER:`. Tool capabilities are not hardcoded — they are loaded from SQLite at runtime, making the loop reusable across different data source types.
+This is a **ReAct loop**: the LLM reasons, selects an MCP tool to call, observes the result, and repeats until it emits `FINAL ANSWER:`. Tools are not hardcoded — they are discovered at runtime via `list_tools()`, making the loop reusable across any data-source type that ships an MCP server.
 
 ## User-Facing Behaviour
 
 1. User types a natural language question in a session.
-2. The agent loads the tool registry for the session's DataSource.
-3. The agent runs one or more tool capability invocations (e.g., SQL queries).
+2. The agent opens one in-memory MCP server+session per attached data source and lists their tools.
+3. The agent runs one or more MCP tool calls (each a read-only DuckDB `SELECT` over a Parquet file).
 4. When the LLM determines it has enough information, it returns a plain-text final answer.
-5. The session page shows the answer inline with: iteration count, token usage, cost estimate, and collapsible SQL trace.
+5. The session page shows the answer inline with: iteration count, token usage, cost estimate, and a collapsible tool-call trace.
 
 ## Agent Loop (ReAct)
 
 ```
-load_data (load Tool registry from DB + load CSV into in-memory SQLite)
+load_data (load DataSource rows + open one MCP server+session per source; list_tools)
     │
     ▼
 plan_action ◄─────────────────────────────────────────┐
@@ -25,8 +25,8 @@ plan_action ◄─────────────────────�
     ├── (FINAL ANSWER:) → finalize → END               │
     │                                                  │
     └── (tool call JSON) → execute_action ─────────────┘
-                               │
-                               └── (error) → plan_action (self-correction)
+                               │  (MCP client call_tool → DuckDB SELECT)
+                               └── (isError) → plan_action (self-correction)
                                └── (max iterations) → handle_error
 ```
 
@@ -35,8 +35,10 @@ plan_action ◄─────────────────────�
 ### Tool call format (LLM output when it wants to act)
 
 ```json
-{"capability": "run_query", "parameters": {"query": "SELECT ..."}}
+{"tool": "ds_2024_sales__run_query", "arguments": {"query": "SELECT ..."}}
 ```
+
+The `tool` value is the exact namespaced tool name advertised in the prompt (`<table_name>__run_query`).
 
 ### Termination format (LLM output when it's done)
 
@@ -49,64 +51,61 @@ FINAL ANSWER: <the complete answer in plain text>
 | Condition | Action |
 |-----------|--------|
 | LLM emits `FINAL ANSWER: ...` | Extract answer, route to `finalize` |
-| SQL error | Append error to history as `is_error: True`, loop back to `plan_action` |
-| Iteration count ≥ `max_agent_iterations` (default 10) | Route to `handle_error` ("max iterations exceeded") |
-| Unknown capability name | Fatal — route to `handle_error` |
-| Non-SELECT SQL | Fatal — route to `handle_error` |
-| LLM call fails | Fatal — route to `handle_error` |
+| DuckDB SQL error / non-SELECT SQL | MCP tool returns `isError=True`; append to history, loop back to `plan_action` |
+| Unknown tool name | Recoverable; pool returns a valid-tool-list message, loop back |
+| Malformed (non-JSON) LLM tool call | Recoverable; ask the LLM to reformat, loop back |
+| Iteration count ≥ `max_agent_iterations` (default 10) | Route to `handle_error` |
+| LLM call fails / missing Parquet / MCP session failure | Fatal — route to `handle_error` |
 
-## Tool Call Execution Rules (csv_query / run_query)
+## Tool Execution Rules (`run_query` via DuckDB)
 
-- Only `SELECT` statements are allowed. Non-SELECT SQL is a fatal error.
-- The table is always named `data`.
-- Results are capped at 200 rows to keep LLM context bounded.
-- Numeric results are formatted to 4 significant figures.
-- The full CSV is loaded into an in-memory SQLite database at the start of each pipeline run.
+- Only `SELECT` statements are allowed. A non-SELECT statement is returned as a recoverable `isError=True` result (never executed).
+- DuckDB queries the Parquet file directly through a read-only view named `<table_name>` (the same name advertised to the LLM).
+- Results are capped at 200 rows (`DATAANALYSIS_MCP_MAX_RESULT_ROWS`) and returned as compact CSV.
+- DuckDB provides native `STDDEV`/`VARIANCE`/`MEDIAN`/`QUANTILE` — no custom aggregates needed.
 
 ## Prompt Protocol
 
 ### `plan_action` prompt (each iteration)
 
 ```
-You are a data analyst. You have access to the following tools:
+You are a data-analysis agent operating in a ReAct loop.
 
-Tool: csv_query
-  Capability: run_query
-  Description: Execute a SQL SELECT query against the dataset. The table is always named 'data'.
-  Parameters: {"query": {"type": "string"}}
+Available tools (call a tool by its exact name):
+
+Tool: ds_2024_sales__run_query  (queries table: ds_2024_sales)
+  Description: <capability_description>
+  Parameters: {"query": {"type": "string", "description": "A valid SQL SELECT statement."}}
+
+SQL dialect: DuckDB. Only SELECT statements are permitted.
 
 Dataset schema:
-Table: data
-Columns: <column_names>
+  Table: ds_2024_sales — Columns: <columns>
 
 User question: <question>
 
-<if iteration > 0:>
+<if history:>
 Previous tool calls and results:
-[1] capability: run_query
-    parameters: {"query": "SELECT ..."}
+[1] tool: ds_2024_sales__run_query
+    arguments: {"query": "SELECT ..."}
     result: ...
-
-[2] capability: run_query
-    parameters: {"query": "SELECT ..."}
-    result: Error: misuse of aggregate function MIN()
-    → This call failed. Please correct it.
 </end if>
 
-Based on the above, decide your next step:
-- If you need more data: respond with a JSON tool call (no markdown, no backticks).
-- If you have enough information: respond with exactly:
-  FINAL ANSWER: <your complete answer here>
+Decide your next step. Respond with EXACTLY ONE of:
+1. {"tool": "<name>", "arguments": {"query": "SELECT ..."}}
+2. FINAL ANSWER: <your complete answer here>
 ```
 
 ## State Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `tools` | `list[dict]` | Loaded from DB: `[{"name", "type", "capabilities": [{"name", "description", "parameter_schema"}]}]` |
-| `action_history` | `list[dict]` | Each entry: `{"capability": str, "parameters": dict, "result": str, "is_error": bool}` |
+| `tools` | `list[dict]` | From `list_tools()`: `[{"name", "table_name", "description", "parameter_schema"}]` (flat) |
+| `action_history` | `list[dict]` | Each entry: `{"tool": str, "arguments": dict, "result": str, "is_error": bool}` |
 | `iteration_count` | `int` | Number of tool calls executed so far |
 | `llm_response` | `str` | Raw LLM output from last `plan_action` call |
+
+(The MCP `ClientSession`s themselves live in the per-`run_id` pool, not in state.)
 
 ## Persistence
 
@@ -114,11 +113,12 @@ Based on the above, decide your next step:
 |-------|-------------|
 | `answer` | Yes (`query_records.answer`) |
 | `iteration_count` | Yes (`query_records.iteration_count`) |
-| `action_history` | Yes (`query_records.query_history_json`) — displayed as agent reasoning trace in UI |
+| `action_history` | Yes (`query_records.query_history_json`) — displayed as the agent reasoning trace |
 | Token counts, cost | Yes (existing columns on `query_records`) |
 
 ## Out of Scope (this capability)
 
 - Streaming intermediate results to the browser (deferred)
 - Chart generation from tool results (Capability 5)
-- Non-CSV data source types (future tool executors)
+- Cross-source SQL joins in a single query (each MCP server wraps one Parquet; combine across tool calls)
+- Non-CSV data source types (future MCP servers)

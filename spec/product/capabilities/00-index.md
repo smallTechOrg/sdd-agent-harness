@@ -4,8 +4,8 @@
 
 | # | Capability | File |
 |---|-----------|------|
-| 1 | Connect a CSV file as a data source (creates Tool + ToolCapability) | [01-connect-csv.md](01-connect-csv.md) |
-| 2 | Answer natural language questions using an iterative tool-call ReAct loop | [02-nl-query-iterative.md](02-nl-query-iterative.md) |
+| 1 | Connect a CSV file as a data source (wraps its Parquet in an MCP server) | [01-connect-csv.md](01-connect-csv.md) |
+| 2 | Answer natural language questions via an iterative MCP tool-call ReAct loop | [02-nl-query-iterative.md](02-nl-query-iterative.md) |
 | 3 | Manage sessions per data source (create, list, delete) | [03-sessions.md](03-sessions.md) |
 
 ## Future Capabilities (deferred)

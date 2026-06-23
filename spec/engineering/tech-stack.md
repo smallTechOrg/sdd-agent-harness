@@ -8,9 +8,25 @@
 
 ## Agent Framework
 
-**LangGraph 0.2+**
+**LangGraph 0.2+** (async nodes)
 
-**Why:** Structured state machine for the CSV-parse → analyze → finalize pipeline. Makes error routing explicit.
+**Why:** Structured state machine for the load → plan → execute → finalize pipeline. Makes error routing explicit. Nodes are `async def` so they can drive the async MCP client; the graph is invoked with `ainvoke()` inside a single `asyncio.run()` owned by the (already-backgrounded) pipeline thread.
+
+## Tool Protocol
+
+**Model Context Protocol (MCP)** via the **official `mcp` SDK, pinned `==1.28.0`**
+
+**Why:** The agent's tools are formalized as MCP. Each data source is wrapped by an in-process `FastMCP` server; the agent is an MCP **client** that discovers tools with `list_tools()` and invokes them with `call_tool()`. MCP is only the agent↔tool transport — the LLM↔agent ReAct protocol stays hand-rolled.
+
+**Transport:** in-process / in-memory (`mcp.shared.memory.create_connected_server_and_client_session`). No subprocess, no ports. This helper is semi-public and touches a private attribute, so it is isolated behind a single adapter module (`graph/mcp_pool.py`) — swapping to stdio / Streamable-HTTP / the v2 `mcp.client.Client` is then a one-file change. The exact `==1.28.0` pin is deliberate: the SDK's v2 line renames the high-level server and removes the in-memory helper.
+
+**Use the official `mcp` SDK only** — do **not** add `langchain-mcp-adapters` or any third-party MCP wrapper.
+
+## Data Source Query Engine
+
+**DuckDB** queries the Parquet files directly, read-only.
+
+**Why:** Each MCP server wraps one Parquet file and runs the LLM's `SELECT` against it via DuckDB (`read_parquet(...)`). DuckDB reads Parquet natively (no load step) and ships native `STDDEV`/`VARIANCE`, so the old pandas→in-memory-SQLite copy and the custom SQLite aggregate functions are removed. SQLite remains the **application metadata** store (below); DuckDB is only the **data-source query engine**.
 
 ## LLM Provider
 
@@ -47,16 +63,21 @@ React/Vite frontend deferred to Phase 4.
 | sqlalchemy | ≥2.0 | ORM + SQLite driver |
 | alembic | ≥1.13 | Schema migrations |
 | pydantic-settings | ≥2.2 | Settings from env |
-| langgraph | ≥0.2 | Agent graph |
+| langgraph | ≥0.2 | Agent graph (async nodes) |
+| mcp | ==1.28.0 | Official Model Context Protocol SDK (FastMCP server + client) — pinned |
+| duckdb | ≥1.1,<2 | Read-only SQL over the Parquet data sources |
 | google-genai | ≥1.0 | Gemini SDK |
-| pandas | ≥2.2 | CSV parsing and analysis |
+| pandas | ≥2.2 | CSV→Parquet ingestion + schema extraction |
+| pyarrow | ≥14 | Parquet engine for pandas |
 | structlog | ≥24 | Structured logging |
 
 ## What to Avoid
 
 - PostgreSQL — user chose SQLite; do not introduce psycopg2
-- Async SQLAlchemy — use sync engine; simpler with SQLite
+- Async SQLAlchemy — use the sync engine; metadata DB calls run directly inside the async nodes (the pipeline owns a dedicated thread, so blocking is fine)
 - OpenAI SDK — Gemini only
+- `langchain-mcp-adapters` or any third-party MCP wrapper — official `mcp` SDK only
+- The `mcp` v2 line (`main` branch) — it renames the server and removes the in-memory transport; stay on `==1.28.0`
 - `alembic revision --autogenerate` before `script.py.mako` exists — it will fail
 
 ## Dependency Management

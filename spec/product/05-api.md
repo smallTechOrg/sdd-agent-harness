@@ -16,23 +16,37 @@ REST (FastAPI) + Server-rendered HTML (Jinja2). Browser UI is the primary surfac
 
 ### `POST /datasources/upload`
 
-**Purpose:** Accept a CSV file. Creates a `DataSource`, a `Tool`, and a `ToolCapability` (`run_query`) atomically.
+**Purpose:** Accept a file (`.csv`/`.xlsx`/`.json`). Converts it to Parquet and creates a single `DataSource` row (with LLM-generated `tool_description`/`capability_description`) atomically. No tool rows are written — the source's MCP server is materialized at query time.
 
-**Request:** `multipart/form-data` with field `file` (CSV)
+**Request:** `multipart/form-data` with field `file`
 
-**Response:** Redirect to `GET /datasources/{id}`
+**Response:** Redirect to `GET /`
 
 **Error cases:**
 | Status | Condition |
 |--------|-----------|
-| 400 | No file provided or file is not CSV |
-| 500 | Disk write or DB insert failed |
+| 400 | No file provided, unsupported type, or parse/convert failed |
+| 500 | Disk write failed |
+
+---
+
+### `POST /datasources/{datasource_id}/sync`
+
+**Purpose:** Re-generate the data source's `tool_description` and `capability_description` from its stored Parquet (e.g. after an upload-time LLM failure) and write them back onto the `DataSource`.
+
+**Response:** Redirect to `GET /`
+
+**Error cases:**
+| Status | Condition |
+|--------|-----------|
+| 404 | DataSource not found |
+| 400 | Parquet file missing — re-upload required |
 
 ---
 
 ### `GET /datasources/{datasource_id}`
 
-**Purpose:** Show a DataSource's detail page: metadata, tools/capabilities, and list of sessions.
+**Purpose:** Show a DataSource's detail page: metadata, schema, and list of sessions.
 
 **Response:** HTML
 
@@ -45,7 +59,7 @@ REST (FastAPI) + Server-rendered HTML (Jinja2). Browser UI is the primary surfac
 
 ### `POST /datasources/{datasource_id}/delete`
 
-**Purpose:** Delete the DataSource and all related records (Tools, ToolCapabilities, Sessions, QueryRecords, AgentRuns) and the CSV file on disk.
+**Purpose:** Delete the DataSource (unlinking it from sessions) and its Parquet file on disk.
 
 **Response:** Redirect to `GET /`
 
@@ -87,7 +101,7 @@ REST (FastAPI) + Server-rendered HTML (Jinja2). Browser UI is the primary surfac
 
 ### `POST /sessions/{session_id}/query`
 
-**Purpose:** Submit a natural language question. Runs the LangGraph pipeline synchronously. On success, redirects to `GET /sessions/{session_id}?new={query_record_id}`.
+**Purpose:** Submit a natural language question. Creates the QueryRecord + AgentRun and runs the LangGraph MCP pipeline on a background daemon thread (which owns its own `asyncio` loop). Redirects to `GET /sessions/{session_id}?new={query_record_id}`.
 
 **Request:** `application/x-www-form-urlencoded` with field `question`
 

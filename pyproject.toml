@@ -17,6 +17,8 @@ dependencies = [
     "openai>=2.41.1",
     "psycopg2-binary>=2.9.12",
     "pyarrow>=24.0.0",
+    "mcp==1.28.0",
+    "duckdb>=1.1,<2",
 ]
 
 [project.optional-dependencies]
