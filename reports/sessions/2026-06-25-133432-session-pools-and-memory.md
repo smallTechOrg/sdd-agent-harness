@@ -41,7 +41,7 @@ pool + 3-step loop, D durable memory.
 - [x] Session report opened
 - [x] Phase A: specs rewritten (07-agent-graph, 02-architecture, 02-nl-query, 03-sessions, tech-stack, 04-data-model) for session-scoped pool + durable memory + tools/ relocation
 - [x] Phase B: relocated MCP code → `tools/mcp/server.py` + `tools/mcp/pool.py` (git mv); tests → `tests/unit/tools/`; imports updated; behavior unchanged; **30 passed**
-- [ ] Phase C: session pool + 3-step loop
+- [x] Phase C: `SessionPoolManager` (lazy build, LRU/idle eviction, per-session lock, deadlock-safe eviction) in `tools/mcp/pool.py`; dropped `load_data`; entry=`plan_action`; nodes read tools/schema from the manager; warm on session create, close on delete + datasource-delete + shutdown; deleted `graph/tool_registry.py`. Gate: **33 passed**; live smoke — 3 queries/session, **1 pool build**, no loop/race errors.
 - [ ] Phase D: durable memory
 
 ## Prompt Log

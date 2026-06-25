@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     upload_dir: str = Field(default="uploads")
     max_agent_iterations: int = Field(default=10)
     mcp_max_result_rows: int = Field(default=200)
+    max_session_pools: int = Field(default=8)
+    session_pool_idle_seconds: int = Field(default=1800)
 
     @property
     def resolved_llm_provider(self) -> str:

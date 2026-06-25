@@ -1,93 +1,86 @@
-"""Per-run pool of in-process MCP servers — the agent's MCP client layer.
+"""Session-scoped pool of in-process MCP servers — the agent's MCP client layer.
 
-This is the ONLY module that imports ``mcp.shared.memory`` (the in-memory transport),
-so swapping to stdio / Streamable-HTTP / the v2 ``mcp.client.Client`` is a one-file change.
+A **session** owns one pool: one DuckDB-backed `FastMCP` server per attached data source,
+built lazily on the session's first query and reused by every later query. This is the ONLY
+module that imports ``mcp.shared.memory`` (the in-memory transport), so swapping to
+stdio / Streamable-HTTP / the v2 ``mcp.client.Client`` stays local.
 
-Design (see spec/product/07-agent-graph.md "Async lifecycle"): LangGraph runs each node in
-its own asyncio task, and AnyIO binds an async context manager to its entering task. So the
-pool holds only **plain, task-safe objects across nodes** — the built ``FastMCP`` servers and
-their DuckDB connections — while every ``ClientSession`` is **transient**, opened and closed
-within a single call. The pool is kept in a module-level dict keyed by ``run_id`` (mirroring
-the old ``data_cache`` pattern); it is not serialisable and never lives in ``AgentState``.
+Concurrency (see spec/product/07-agent-graph.md):
+- LangGraph runs each node in its own asyncio task, so MCP ``ClientSession``s are **transient**
+  (opened/closed within a single call). The pool holds only plain objects across nodes/queries:
+  the built ``FastMCP`` servers and their DuckDB connections.
+- A session's DuckDB connection is not concurrency-safe, so queries on one session are
+  serialized by a per-session ``threading.Lock`` (held by ``run_pipeline`` for the whole query).
+- Pools are idle/LRU-evicted; eviction skips sessions whose lock is currently held (in use).
 """
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import dataclass, field
 from importlib.metadata import version
 
+import structlog
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.memory import create_connected_server_and_client_session
 
-from data_analysis_agent.tools.mcp.server import DEFAULT_MAX_ROWS, build_server
+from data_analysis_agent.config.settings import get_settings
+from data_analysis_agent.db.models import DataSourceRow, SessionDataSourceRow
+from data_analysis_agent.db.session import create_db_session
+from data_analysis_agent.tools.mcp.server import build_server
+from data_analysis_agent.tools.table_naming import sql_table_name
 
-# This module relies on the in-memory transport helper, which exists in mcp 1.x and is
-# removed in the 2.x line. Fail loudly rather than mysteriously if an incompatible major
-# is ever installed (the dependency is pinned ==1.28.0, but lockfiles drift).
+log = structlog.get_logger()
+
+# Relies on the in-memory transport helper, which exists in mcp 1.x and is removed in 2.x.
 _MCP_VERSION = version("mcp")
 if not _MCP_VERSION.startswith("1."):
     raise RuntimeError(
-        f"mcp {_MCP_VERSION} is installed but this code targets the 1.x in-memory transport "
-        f"(mcp.shared.memory.create_connected_server_and_client_session). Pin mcp==1.28.0."
+        f"mcp {_MCP_VERSION} is installed but this code targets the 1.x in-memory transport. "
+        f"Pin mcp==1.28.0."
     )
 
-_pools: dict[str, "McpPool"] = {}
+
+class NoDataSourcesError(Exception):
+    """Raised when a session has no attached data sources to build a pool from."""
 
 
 @dataclass
 class _ToolEntry:
-    """A discovered tool and the server that backs it."""
-
     server: FastMCP
-    server_tool_name: str  # the tool's name on its server, e.g. "run_query"
+    server_tool_name: str  # name on the server, e.g. "run_query"
     table_name: str
     description: str
     parameter_schema: dict
 
 
 @dataclass
-class McpPool:
-    """One run's MCP servers, addressed by namespaced tool key (``<table>__<tool>``)."""
+class SessionPool:
+    """One session's MCP servers, addressed by namespaced tool key (``<table>__<tool>``)."""
 
-    run_id: str
-    _entries: dict[str, _ToolEntry] = field(default_factory=dict)
-    _servers: list[FastMCP] = field(default_factory=list)
-
-    async def add_source(self, source: dict, max_rows: int) -> None:
-        """Build the server for one source and discover its tools (transient session)."""
-        server = build_server(source, source.get("capability_description") or "", max_rows=max_rows)
-        self._servers.append(server)
-        table = source["table_name"]
-        async with create_connected_server_and_client_session(server) as session:
-            listed = await session.list_tools()
-        for tool in listed.tools:
-            self._entries[f"{table}__{tool.name}"] = _ToolEntry(
-                server=server,
-                server_tool_name=tool.name,
-                table_name=table,
-                description=tool.description or "",
-                parameter_schema=_input_properties(tool.inputSchema),
-            )
+    session_id: str
+    entries: dict[str, _ToolEntry]
+    servers: list[FastMCP]
+    column_names: list[str]
+    last_used: float
 
     def list_tools(self) -> list[dict]:
-        """Return the aggregated, agent-facing tool descriptors for ``state['tools']``."""
+        """Agent-facing tool descriptors for the planning prompt."""
         return [
             {
                 "name": key,
-                "table_name": entry.table_name,
-                "description": entry.description,
-                "parameter_schema": entry.parameter_schema,
+                "table_name": e.table_name,
+                "description": e.description,
+                "parameter_schema": e.parameter_schema,
             }
-            for key, entry in self._entries.items()
+            for key, e in self.entries.items()
         ]
 
     async def call_tool(self, key: str, arguments: dict) -> tuple[str, bool]:
-        """Invoke a namespaced tool via a transient session; return ``(text, is_error)``.
-
-        Unknown tool keys are a recoverable error (the LLM is told the valid keys).
-        """
-        entry = self._entries.get(key)
+        """Invoke a namespaced tool via a transient session; ``(text, is_error)``."""
+        entry = self.entries.get(key)
         if entry is None:
-            valid = ", ".join(self._entries) or "(none)"
+            valid = ", ".join(self.entries) or "(none)"
             return f"Unknown tool '{key}'. Valid tools: {valid}.", True
         async with create_connected_server_and_client_session(entry.server) as session:
             result = await session.call_tool(entry.server_tool_name, arguments)
@@ -96,13 +89,146 @@ class McpPool:
 
     def aclose(self) -> None:
         """Close every server's DuckDB connection (plain, task-safe)."""
-        for server in self._servers:
+        for server in self.servers:
             conn = getattr(server, "_duckdb_conn", None)
             if conn is not None:
                 try:
                     conn.close()
                 except Exception:
                     pass
+
+
+class SessionPoolManager:
+    """Builds, caches, serializes, and evicts one MCP pool per session."""
+
+    def __init__(self, max_pools: int, idle_seconds: float) -> None:
+        self._pools: dict[str, SessionPool] = {}
+        self._locks: dict[str, threading.Lock] = {}
+        self._registry = threading.Lock()  # guards _pools and _locks
+        self._max_pools = max_pools
+        self._idle_seconds = idle_seconds
+
+    def session_lock(self, session_id: str) -> threading.Lock:
+        """Return the per-session lock (created on first use); never evicted."""
+        with self._registry:
+            lock = self._locks.get(session_id)
+            if lock is None:
+                lock = self._locks[session_id] = threading.Lock()
+            return lock
+
+    async def acquire(self, session_id: str) -> SessionPool:
+        """Return the session's pool, building it lazily on first use.
+
+        Call while holding ``session_lock(session_id)`` so a session never builds twice.
+        Raises :class:`NoDataSourcesError` if the session has no sources.
+        """
+        with self._registry:
+            pool = self._pools.get(session_id)
+            if pool is not None:
+                pool.last_used = time.monotonic()
+                return pool
+
+        pool = await self._build(session_id)  # async (list_tools) — outside the registry lock
+
+        with self._registry:
+            existing = self._pools.get(session_id)
+            if existing is not None:  # built concurrently elsewhere — keep the first
+                pool.aclose()
+                existing.last_used = time.monotonic()
+                return existing
+            self._pools[session_id] = pool
+            self._evict_locked()
+            log.info("session_pool.built", session_id=session_id, sources=len(pool.servers),
+                     tools=len(pool.entries), active_pools=len(self._pools))
+            return pool
+
+    def snapshot(self, session_id: str) -> tuple[list[dict], list[str]]:
+        """Return ``(tools, column_names)`` for a built pool (read by ``plan_action``)."""
+        with self._registry:
+            pool = self._pools.get(session_id)
+            if pool is None:
+                return [], []
+            pool.last_used = time.monotonic()
+            return pool.list_tools(), list(pool.column_names)
+
+    async def call_tool(self, session_id: str, key: str, arguments: dict) -> tuple[str, bool]:
+        """Route a tool call to the session's pool (must be acquired first)."""
+        with self._registry:
+            pool = self._pools.get(session_id)
+            if pool is not None:
+                pool.last_used = time.monotonic()
+        if pool is None:
+            return f"No MCP pool for session '{session_id}'.", True
+        return await pool.call_tool(key, arguments)
+
+    def close(self, session_id: str) -> None:
+        """Close and forget a session's pool (on session delete). Idempotent."""
+        with self._registry:
+            pool = self._pools.pop(session_id, None)
+            self._locks.pop(session_id, None)
+        if pool is not None:
+            pool.aclose()
+            log.info("session_pool.closed", session_id=session_id)
+
+    def close_all(self) -> None:
+        """Close every pool (on app shutdown)."""
+        with self._registry:
+            pools = list(self._pools.values())
+            self._pools.clear()
+            self._locks.clear()
+        for pool in pools:
+            pool.aclose()
+
+    # ---- internals -------------------------------------------------------
+
+    async def _build(self, session_id: str) -> SessionPool:
+        sources = _load_sources(session_id)
+        if not sources:
+            raise NoDataSourcesError("No data sources attached to this session")
+        max_rows = get_settings().mcp_max_result_rows
+        entries: dict[str, _ToolEntry] = {}
+        servers: list[FastMCP] = []
+        column_names: list[str] = []
+        for source in sources:
+            server = build_server(source, source.get("capability_description") or "", max_rows=max_rows)
+            servers.append(server)
+            table = source["table_name"]
+            column_names.extend(f"{table}.{c}" for c in (source.get("column_names") or []))
+            async with create_connected_server_and_client_session(server) as session:
+                listed = await session.list_tools()
+            for tool in listed.tools:
+                entries[f"{table}__{tool.name}"] = _ToolEntry(
+                    server=server, server_tool_name=tool.name, table_name=table,
+                    description=tool.description or "",
+                    parameter_schema=_input_properties(tool.inputSchema),
+                )
+        return SessionPool(session_id, entries, servers, column_names, time.monotonic())
+
+    def _evict_locked(self) -> None:
+        """Evict idle + over-cap pools, skipping in-use (locked) sessions. Holds ``_registry``."""
+        now = time.monotonic()
+        for sid, pool in list(self._pools.items()):
+            if now - pool.last_used > self._idle_seconds:
+                self._try_close_locked(sid)
+        while len(self._pools) > self._max_pools:
+            sid = min(self._pools, key=lambda s: self._pools[s].last_used)
+            if not self._try_close_locked(sid):
+                break  # everything left is in use — stop to avoid spinning
+
+    def _try_close_locked(self, sid: str) -> bool:
+        """Close a pool iff its session is not currently in use. Holds ``_registry``."""
+        lock = self._locks.get(sid)
+        if lock is not None and not lock.acquire(blocking=False):
+            return False  # in use
+        try:
+            pool = self._pools.pop(sid, None)
+            if pool is not None:
+                pool.aclose()
+                log.info("session_pool.evicted", session_id=sid)
+            return True
+        finally:
+            if lock is not None:
+                lock.release()
 
 
 def _input_properties(input_schema: dict | None) -> dict:
@@ -112,30 +238,37 @@ def _input_properties(input_schema: dict | None) -> dict:
     return input_schema.get("properties", input_schema)
 
 
-async def open_pool(run_id: str, sources: list[dict], max_rows: int = DEFAULT_MAX_ROWS) -> McpPool:
-    """Build one MCP server per source and register the pool under ``run_id``.
-
-    On any failure mid-build, the partially-built pool is closed before re-raising so no
-    DuckDB connection leaks (a missing Parquet raises here → fatal for the run).
-    """
-    pool = McpPool(run_id)
-    try:
-        for source in sources:
-            await pool.add_source(source, max_rows)
-    except BaseException:
-        pool.aclose()
-        raise
-    _pools[run_id] = pool
-    return pool
+def _load_sources(session_id: str) -> list[dict]:
+    """Load a session's attached data sources as serialisable dicts (incl. table name)."""
+    with create_db_session() as db:
+        links = (
+            db.query(SessionDataSourceRow)
+            .filter(SessionDataSourceRow.session_id == session_id)
+            .all()
+        )
+        rows = [db.get(DataSourceRow, link.data_source_id) for link in links]
+        return [_serialize_source(r) for r in rows if r is not None]
 
 
-def get_pool(run_id: str) -> McpPool | None:
-    """Return the pool for a run, or ``None`` if none is registered."""
-    return _pools.get(run_id)
+def _serialize_source(ds: DataSourceRow) -> dict:
+    return {
+        "id": ds.id,
+        "name": ds.name,
+        "table_name": sql_table_name(ds.name),
+        "parquet_path": ds.parquet_path,
+        "column_names": ds.column_names,
+        "row_count": ds.row_count,
+        "capability_description": ds.capability_description,
+    }
 
 
-async def close_pool(run_id: str) -> None:
-    """Close and forget a run's pool; safe to call multiple times (idempotent)."""
-    pool = _pools.pop(run_id, None)
-    if pool is not None:
-        pool.aclose()
+_manager: SessionPoolManager | None = None
+
+
+def get_manager() -> SessionPoolManager:
+    """Return the process-wide :class:`SessionPoolManager` singleton."""
+    global _manager
+    if _manager is None:
+        s = get_settings()
+        _manager = SessionPoolManager(s.max_session_pools, s.session_pool_idle_seconds)
+    return _manager

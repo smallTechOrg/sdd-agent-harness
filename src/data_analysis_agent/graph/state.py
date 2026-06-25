@@ -7,15 +7,10 @@ class AgentState(TypedDict, total=False):
     session_id: str
     question: str
 
-    # MCP tools, aggregated from list_tools() across all source servers by load_data.
-    # Flat — MCP has no nested capabilities. (Sessions/servers live in mcp_pool, not here.)
-    tools: list[dict]  # [{"name", "table_name", "description", "parameter_schema"}]
+    # Tools + schema are read from the SessionPoolManager (by session_id), not stored here.
+    # The MCP servers + DuckDB connections live in that manager, never in state.
 
-    # Schema info (table.column across all attached sources)
-    column_names: list[str]
-    row_count: int
-
-    # ReAct loop state
+    # ReAct loop state (per-query scratch — reset via the ainvoke input each query)
     action_history: list[dict]  # [{"tool", "arguments", "result", "is_error"}]
     iteration_count: int
     llm_response: str  # raw LLM output from last plan_action call

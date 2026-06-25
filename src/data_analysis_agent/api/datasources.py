@@ -17,6 +17,7 @@ from data_analysis_agent.db.models import (
 from data_analysis_agent.db.session import get_session
 from data_analysis_agent.tools.descriptions import generate_tool_descriptions
 from data_analysis_agent.tools.ingester import FileIngester, IngestResult
+from data_analysis_agent.tools.mcp.pool import get_manager
 from data_analysis_agent.tools.table_naming import sql_table_name
 
 log = structlog.get_logger()
@@ -77,6 +78,7 @@ def delete_data_source(
 ):
     """Delete a data source, its session links, and its Parquet file."""
     ds = get_data_source_or_404(session, datasource_id)
+    _close_pools_using(session, datasource_id)  # sessions querying this source now have a stale pool
     _unlink_from_sessions(session, datasource_id)
     if ds.parquet_path:
         Path(ds.parquet_path).unlink(missing_ok=True)
@@ -114,6 +116,18 @@ def _require_parquet(ds: DataSourceRow) -> None:
     """Raise a recoverable API error if the source's Parquet file is missing."""
     if not ds.parquet_path or not Path(ds.parquet_path).exists():
         raise api_error("NO_PARQUET", "Parquet file is missing — re-upload the data source.")
+
+
+def _close_pools_using(session: Session, datasource_id: str) -> None:
+    """Close the MCP pool of every session that includes this data source."""
+    links = (
+        session.query(SessionDataSourceRow)
+        .filter(SessionDataSourceRow.data_source_id == datasource_id)
+        .all()
+    )
+    manager = get_manager()
+    for link in links:
+        manager.close(link.session_id)
 
 
 def _unlink_from_sessions(session: Session, datasource_id: str) -> None:

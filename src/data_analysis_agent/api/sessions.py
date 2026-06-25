@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Annotated
 
@@ -22,6 +23,7 @@ from data_analysis_agent.db.models import (
     SessionRow,
 )
 from data_analysis_agent.db.session import get_session
+from data_analysis_agent.tools.mcp.pool import get_manager
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -41,8 +43,11 @@ def create_session(
     session.add(sess)
     session.flush()
     _attach_data_sources(session, sess.id, data_source_ids)
-    log.info("session.created", session_id=sess.id, ds_count=len(data_source_ids))
-    return RedirectResponse(url=f"/sessions/{sess.id}", status_code=303)
+    session_id = sess.id
+    log.info("session.created", session_id=session_id, ds_count=len(data_source_ids))
+    session.commit()  # make the links visible before warming the pool
+    _warm_pool(session_id)
+    return RedirectResponse(url=f"/sessions/{session_id}", status_code=303)
 
 
 @router.get("/sessions/{session_id}")
@@ -75,6 +80,7 @@ def delete_session(
 ):
     """Delete a session along with its query records, agent runs, and data-source links."""
     sess = get_session_or_404(session, session_id)
+    get_manager().close(session_id)  # release the session's MCP pool / DuckDB connections
     _delete_query_records(session, session_id)
     session.query(SessionDataSourceRow).filter(
         SessionDataSourceRow.session_id == session_id
@@ -87,6 +93,18 @@ def delete_session(
 def _default_session_name() -> str:
     """Return a timestamped default session name, e.g. ``Session 2026-06-22 12:30``."""
     return f"Session {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+
+
+def _warm_pool(session_id: str) -> None:
+    """Best-effort: build the session's MCP pool now so its first query is fast.
+
+    Failures (e.g. a transient build error) are logged and ignored — the pool is rebuilt
+    lazily on the first query regardless.
+    """
+    try:
+        asyncio.run(get_manager().acquire(session_id))
+    except Exception as exc:
+        log.warning("session.warm_failed", session_id=session_id, error=str(exc))
 
 
 def _attach_data_sources(session: Session, session_id: str, data_source_ids: list[str]) -> None:

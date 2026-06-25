@@ -21,6 +21,8 @@ async def _lifespan(app: FastAPI):
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     init_db()
     yield
+    from data_analysis_agent.tools.mcp.pool import get_manager
+    get_manager().close_all()
 
 
 def create_app() -> FastAPI:

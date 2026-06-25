@@ -9,21 +9,24 @@ from data_analysis_agent.graph.state import AgentState
 _PLAN_TAG = "<node:plan_action>"
 
 
-def build_plan_prompt(state: AgentState) -> str:
+def build_plan_prompt(state: AgentState, tools: list[dict], column_names: list[str]) -> str:
     """Assemble the full plan_action prompt for the current ReAct turn.
 
-    Concatenates the intro, available-tools block, dataset schema, the user
-    question, prior tool-call history, and the response-format instructions.
+    Concatenates the intro, available-tools block, dataset schema, the user question,
+    prior tool-call history, and the response-format instructions. Tools and schema are
+    supplied by the caller (read from the session's pool), not stored in state.
 
     Args:
-        state: The current agent state carrying tools, schema, and history.
+        state: The current agent state carrying the question and history.
+        tools: The session's MCP tool descriptors (from ``SessionPoolManager``).
+        column_names: The ``table.column`` schema for the session's sources.
 
     Returns:
         The complete prompt string sent to the LLM.
     """
     lines = _intro_lines()
-    lines += _tools_lines(state.get("tools", []))
-    lines += _schema_lines(state.get("column_names", []))
+    lines += _tools_lines(tools)
+    lines += _schema_lines(column_names)
     lines.append(f"User question: {state['question']}")
     lines += _history_lines(state.get("action_history", []))
     lines += _response_format_lines()
