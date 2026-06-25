@@ -1,52 +1,66 @@
-# Capability 1: Connect a CSV File as a Data Source
+# Capability 1: Connect a Dataset
 
 ## Overview
 
-The user uploads a CSV file. The system converts it to Parquet, creates a single `DataSource` record (with LLM-generated descriptions), and the source appears on the home page, ready for sessions. There is no separate tool table: the source's MCP server — and its `run_query` tool — is materialized at query time from the stored Parquet. Conceptually, **uploading a CSV creates an MCP server that wraps that Parquet file.**
+The user names a **dataset** and picks a **type**, then connects data to it. For the default `parquet` type, uploading a CSV converts it to Parquet and creates a dataset — a **directory of related Parquet files**, where **one CSV → one Parquet file → one table**. An existing parquet dataset accepts more CSVs; each new CSV becomes a new table inside the same dataset. For the external `postgresql` type (BETA, flag-gated), the user supplies a connection URI instead of a file. Either way the system creates one `DataSource` record (the dataset) plus one `DatasetTableRow` child per table, with LLM-generated descriptions, and the dataset appears on the home page, ready for sessions. There is no separate tool table: the dataset's MCP server — exposing **one capability per table** — is materialized at query time from the stored tables. Conceptually, **a dataset is one MCP server, and tool name = dataset name, capability = table name.**
 
 ## User-Facing Behaviour
 
-1. User selects a file (`.csv`, `.xlsx`, or `.json`) on the home page and clicks "Connect".
-2. The system validates the file and streams it straight to a Parquet file, extracting column names, dtypes, and row count.
-3. The system asks the LLM for a short dataset description and a `run_query` description (falling back to deterministic templates on any failure, so uploads never fail), and stores them on the `DataSource`.
-4. The user is redirected to the home page, where the new data source is listed.
+1. User enters a **dataset name**, picks a **type** (default "Upload CSV" / `parquet`; "Connect a database" / `postgresql` shown only when external datasets are enabled), and either selects a file (`.csv`, `.xlsx`, or `.json`) or enters a connection URI, then clicks "Connect".
+2. The system validates the input. For parquet: it streams the CSV straight to a Parquet file under the dataset directory, extracting column names, dtypes, and row count for that table. For external: it records the URI (no file is written).
+3. The system runs a **connection check** before persisting — for parquet the directory and each Parquet file must be readable; for external a real connect + `SELECT 1` + `information_schema` introspection must succeed (hard timeout). On failure the dataset is **never persisted**: the transaction rolls back and the user sees a sanitized error.
+4. The system asks the LLM for a dataset-level `tool_description` plus a per-table `capability_description` generated from the schema of all tables (falling back to deterministic templates on any failure, so connects never fail on description alone), and stores them on the dataset and its table rows.
+5. The user is redirected to the home page, where the new dataset is listed.
+6. To grow a parquet dataset, the user clicks **"Add CSV"** on its card and uploads another file; it becomes a new table (auto-suffixed name on collision).
 
 ## Inputs
 
-- `file`: a `multipart/form-data` file upload (`.csv` / `.xlsx` / `.json`)
+- `dataset_name`: required text — the canonical name of the dataset (and the tool name).
+- `dataset_type`: `parquet` (default) or `postgresql` (external, BETA, flag-gated).
+- For parquet: `file`, a `multipart/form-data` file upload (`.csv` / `.xlsx` / `.json`).
+- For external: `dataset_uri`, a connection URI (`postgresql://user:pass@host:port/db`).
+- Add-CSV (`POST /datasources/{id}/add-csv`): a single `file` to append as a new table to an existing parquet dataset.
 
 ## Outputs
 
-- One new `DataSource` record in SQLite with: `name`, `type=csv`, `parquet_path`, `row_count`, `column_names_json`, `schema_json`, `tool_description`, `capability_description`.
-- A Parquet file written under the upload directory (named by the DataSource UUID).
+- One new `DataSource` record (the dataset) in SQLite with: `name` (dataset name), `type` (`parquet` | `postgresql`), `uri`, `tool_description`, `last_synced_at`, `connection_error`.
+- One `DatasetTableRow` child per table with: `table_name`, `source_filename`, `parquet_path` (NULL for external), `row_count`, `column_names_json`, `schema_json`, `capability_description`.
+- For parquet: a Parquet file written under the dataset directory (`{datasets_dir}/{dataset_id}/{table}.parquet`).
 - Redirect to `GET /` (home).
 
 ## What Gets Stored
 
 | Record | Key Fields Set |
 |--------|---------------|
-| DataSource | name (filename), type=csv, parquet_path, row_count, column_names_json, schema_json, tool_description, capability_description |
+| DataSource (dataset) | name (dataset name), type (`parquet`/`postgresql`), uri, tool_description, last_synced_at, connection_error |
+| DatasetTableRow (×N, one per table) | dataset_id (FK), table_name, source_filename, parquet_path (NULL for external), row_count, column_names_json, schema_json, capability_description |
 
-No `Tool` or `ToolCapability` rows are written — those tables no longer exist. The MCP tool is derived at run start: key `<table_name>__run_query` (`table_name = sql_table_name(name)`), `inputSchema` auto-generated by FastMCP, description = `capability_description`.
+No `Tool` or `ToolCapability` rows are written — those tables no longer exist. The dataset's MCP server is derived at run start: one server per dataset, with one `query_{table_name}` capability per table (`table_name = sql_table_name(source_filename)`, auto-suffixed on collision within the dataset), `inputSchema` auto-generated by FastMCP, description = that table's `capability_description`. The deprecated per-source columns on `DataSource` (`parquet_path`, `row_count`, `column_names_json`, `schema_json`, `capability_description`) are no longer written but kept nullable for rollback.
 
 ## Re-sync descriptions
 
-`POST /datasources/{id}/sync` re-generates `tool_description` and `capability_description` from the stored Parquet and writes them back onto the `DataSource` (used when the LLM was unavailable at upload time).
+`POST /datasources/{id}/sync` re-generates the dataset-level `tool_description` and **every** per-table `capability_description` from the schema of all tables, sets `last_synced_at`, and writes them back (used when the LLM was unavailable at connect time, or after adding tables). Sync re-runs the connection check and fails loudly before commit.
 
 ## Error Cases
 
 | Error | Behaviour |
 |-------|-----------|
-| No file selected | JS validation message; form does not submit |
+| No dataset name | JS validation message; form does not submit |
+| No file selected (parquet) | JS validation message; form does not submit |
+| Duplicate dataset name | 400 response; user sees name-taken message |
 | Unsupported extension | 400 response; user sees supported-types message |
 | Parse/convert fails | 400 response; transaction rolled back; user sees error |
+| Connection check fails | Transaction rolled back; dataset never persisted; user sees sanitized error |
+| External type while flag is off | 501 response; external option hidden in the UI |
 | Disk write fails | 500 response; renders error.html |
-| LLM description fails | Silent fallback to deterministic templates; upload still succeeds |
+| LLM description fails | Silent fallback to deterministic templates; connect still succeeds |
 
 ## Success Criteria
 
-- After upload, the DataSource appears on the home page with correct row count and column names.
-- A Parquet file exists at `parquet_path`.
-- `tool_description` and `capability_description` are populated (LLM or fallback).
-- Starting a session on the source and asking a question materializes an MCP server whose `list_tools()` returns a `<table_name>__run_query` tool.
+- After connecting, the dataset appears on the home page with the correct table count, row counts, and column names.
+- For parquet, a Parquet file exists under the dataset directory for each table.
+- A failed connection check leaves no dataset persisted (no orphan rows or files).
+- The dataset's `tool_description` and each table's `capability_description` are populated (LLM or fallback).
+- Adding a second CSV creates a second table (auto-suffixed on name collision) without disturbing the first.
+- Starting a session on the dataset and asking a question materializes one MCP server whose `list_tools()` returns one `query_{table_name}` capability per table.
 - Redirects to the home page on success.

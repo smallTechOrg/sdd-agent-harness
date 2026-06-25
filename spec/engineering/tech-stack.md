@@ -16,21 +16,36 @@
 
 **Model Context Protocol (MCP)** via the **official `mcp` SDK, pinned `==1.28.0`**
 
-**Why:** The agent's tools are formalized as MCP. Each data source is wrapped by an in-process `FastMCP` server; the agent is an MCP **client** that discovers tools with `list_tools()` and invokes them with `call_tool()`. MCP is only the agent↔tool transport — the LLM↔agent ReAct protocol stays hand-rolled.
+**Why:** The agent's tools are formalized as MCP. Each **dataset** is wrapped by an in-process `FastMCP` server exposing one tool per table (`query_{table}`); the agent is an MCP **client** that discovers tools with `list_tools()` and invokes them with `call_tool()`. The LLM↔agent ReAct protocol stays hand-rolled and uses a two-level call shape, `{"tool":"<dataset>","capability":"<table>","arguments":{"query":"SELECT …"}}` — MCP is only the agent↔tool transport.
 
 **Transport:** in-process / in-memory (`mcp.shared.memory.create_connected_server_and_client_session`). No subprocess, no ports. This helper is semi-public and touches a private attribute, so it is isolated to the MCP package under **`tools/mcp/`** (`server.py` builds a server, `pool.py` is the `SessionPoolManager`) — swapping to stdio / Streamable-HTTP / the v2 `mcp.client.Client` is then a localized change. The exact `==1.28.0` pin is deliberate: the SDK's v2 line renames the high-level server and removes the in-memory helper.
 
 **All MCP/tool code lives under `tools/`** (ingestion, descriptions, table-naming, MCP servers, the pool manager).
 
-**Pooling:** one MCP pool **per session** (not per query) — built lazily on first query, reused, idle/LRU-evicted, closed on session delete + shutdown. Queries on a session are serialized by a per-session lock (the DuckDB connection is not concurrency-safe).
+**Pooling:** one MCP pool **per session** (not per query), holding one server **per attached dataset** — built lazily on first query, reused, idle/LRU-evicted, closed on session delete + shutdown (and on add-csv/sync/delete of an attached dataset). Queries on a session are serialized by a per-session lock (the DuckDB connection is not concurrency-safe); `close()` acquires that lock before teardown so a dataset change never closes a connection mid-query.
 
 **Use the official `mcp` SDK only** — do **not** add `langchain-mcp-adapters` or any third-party MCP wrapper.
 
-## Data Source Query Engine
+## Dataset Query Engine
 
-**DuckDB** queries the Parquet files directly, read-only.
+**DuckDB** queries each dataset, read-only.
 
-**Why:** Each MCP server wraps one Parquet file and runs the LLM's `SELECT` against it via DuckDB (`read_parquet(...)`). DuckDB reads Parquet natively (no load step) and ships native `STDDEV`/`VARIANCE`, so the old pandas→in-memory-SQLite copy and the custom SQLite aggregate functions are removed. SQLite remains the **application metadata** store (below); DuckDB is only the **data-source query engine**.
+**Why:** A "tool" is now a **named dataset** addressed by a URI, and each dataset is wrapped by one MCP server exposing **one capability per table**. A dataset is either an internal **directory of Parquet files** (one CSV → one Parquet → one table) or, in BETA, an external **PostgreSQL** database. One DuckDB connection backs each dataset, with one **view per table**, so any capability may `JOIN` the other tables in the **same** dataset; cross-dataset joins are not possible (separate servers) and are composed by the agent across ReAct iterations.
+
+- **Internal (parquet):** DuckDB reads the dataset's Parquet files natively via `read_parquet(...)` (no load step) and ships native `STDDEV`/`VARIANCE`, so the old pandas→in-memory-SQLite copy and the custom SQLite aggregate functions are removed.
+- **External (postgresql, BETA, flag-gated):** DuckDB's **postgres extension** (`postgres_scanner`) attaches the database with `ATTACH … (TYPE postgres, READ_ONLY)` and creates one view per introspected table. The `READ_ONLY` attach means the agent cannot mutate, but it can read **any** table the credentials can reach (not only the introspected ones) — scope the DB user accordingly. Gated by `DATAANALYSIS_ENABLE_EXTERNAL_DATASETS` (default off).
+
+SQLite remains the **application metadata** store (below); DuckDB is only the **dataset query engine**.
+
+## Connector Seam
+
+**`tools/connectors/` package** abstracts dataset access behind a `DatasetConnector` Protocol.
+
+**Why:** The query path must not branch on dataset type inline. A connector exposes `connection_check()`, `discover_tables()`, and `build_server(max_rows)`; `get_connector(dataset_row, table_rows)` dispatches on `type`. `ParquetConnector` is fully implemented; `PostgresConnector` (BETA, flag-gated) is the only place psycopg2 is used. `DatasetURI` (in `uri.py`, built on `urllib.parse`) parses the URI and exposes a `display()` that **strips credentials** — every log line, stored `connection_error`, template field, and surfaced exception uses `display()` only. Shared SQL helpers (`_run_select` SELECT-only guard + row cap, `build_dataset_server`, `DEFAULT_MAX_ROWS`) stay in `tools/mcp/server.py`.
+
+**External connection-check / introspection:** **`psycopg2`** performs the real `connect` + `SELECT 1` + `information_schema` introspection for external datasets (with a hard timeout). This is independent of DuckDB's attach-based query path. Internal datasets are checked by confirming the directory and each Parquet file are readable. A broken dataset is **never persisted** — the check runs before commit on create, add-csv, and sync.
+
+**Deferred database types:** **MySQL** (DuckDB extension not installed here) and **DocumentDB/Mongo** (non-SQL — does not fit the table/`SELECT` model, so not a drop-in) are explicitly deferred and are **not** trivial additions.
 
 ## Agent Memory
 
@@ -75,7 +90,8 @@ React/Vite frontend deferred to Phase 4.
 | pydantic-settings | ≥2.2 | Settings from env |
 | langgraph | ≥0.2 | Agent graph (async nodes) |
 | mcp | ==1.28.0 | Official Model Context Protocol SDK (FastMCP server + client) — pinned |
-| duckdb | ≥1.1,<2 | Read-only SQL over the Parquet data sources |
+| duckdb | ≥1.1,<2 | Read-only SQL over each dataset; `postgres_scanner` extension for external `ATTACH … READ_ONLY` (BETA) |
+| psycopg2-binary | ≥2.9 | External Postgres connection-check + `information_schema` introspection (BETA, only used by `PostgresConnector`) |
 | langgraph-checkpoint-sqlite | latest | Durable per-session agent memory (`SqliteSaver`/`AsyncSqliteSaver`) |
 | google-genai | ≥1.0 | Gemini SDK |
 | pandas | ≥2.2 | CSV→Parquet ingestion + schema extraction |
@@ -84,7 +100,8 @@ React/Vite frontend deferred to Phase 4.
 
 ## What to Avoid
 
-- PostgreSQL — user chose SQLite; do not introduce psycopg2
+- PostgreSQL as the **application metadata** store — user chose SQLite; the metadata DB stays SQLite. (psycopg2 IS used, but **only** in `PostgresConnector` to query external Postgres *datasets*, BETA + flag-gated — not for app metadata.)
+- MySQL / DocumentDB (Mongo) datasets — deferred; do not add MySQL or Mongo drivers
 - Async SQLAlchemy — use the sync engine; metadata DB calls run directly inside the async nodes (the pipeline owns a dedicated thread, so blocking is fine)
 - OpenAI SDK — Gemini only
 - `langchain-mcp-adapters` or any third-party MCP wrapper — official `mcp` SDK only
@@ -116,6 +133,13 @@ All generated projects **must** use **port 8001** as the default development por
 ### DB Driver Rule
 
 SQLite driver (`sqlite3`) is part of the Python standard library — no extra package needed. `aiosqlite` is NOT used (sync only).
+
+### Dataset Settings
+
+Two settings drive the dataset layer (via `pydantic-settings`, `DATAANALYSIS_` prefix):
+
+- `DATAANALYSIS_DATASETS_DIR` — root for internal Parquet datasets; physical files live at `{datasets_dir}/{dataset_id}/{table}.parquet` (keyed by dataset_id so renames never move files). On Render this **must** point at the persistent `/data` disk, or new datasets are lost on redeploy. Lifespan ensures the directory exists.
+- `DATAANALYSIS_ENABLE_EXTERNAL_DATASETS` — default **off**; when off, the external-dataset create path returns HTTP 501 and the UI hides the external option. External Postgres is BETA.
 
 ### Test Environment Rule
 

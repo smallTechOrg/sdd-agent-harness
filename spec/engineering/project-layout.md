@@ -65,7 +65,12 @@ The repo root **is** the agent project. There is no `<agent-slug>/` subdirectory
 │       │       ├── factory.py        ← create_llm_client()
 │       │       └── anthropic.py      ← default provider
 │       ├── tools/                    ← pure functions: (inputs) → domain models
-│       │   └── <tool>.py
+│       │   ├── <tool>.py
+│       │   └── connectors/            ← data-source connectors (see note below)
+│       │       ├── uri.py             ← URI parsing + credential-safe display()
+│       │       ├── base.py            ← connector Protocol + factory
+│       │       ├── parquet.py         ← internal Parquet datasets
+│       │       └── postgres.py        ← external SQL datasets (optional)
 │       ├── prompts/                  ← LLM prompt templates (.md files)
 │       │   └── <name>.md
 │       └── observability/
@@ -458,3 +463,4 @@ def test_pipeline_runs_end_to_end(_use_sqlite, _stub_env):
 8. **FastAPI response envelope** — every route returns `ok(data)` or raises `api_error()`
 9. **Settings singleton** must be resettable via `monkeypatch.setattr(m, "_settings", None)`
 10. **Phase 2 gate must pass with zero env vars** — SQLite in-memory, stubs only, no network I/O
+11. **Data-source connectors go in `tools/connectors/`** — if the agent reads from external or file-backed data sources, the connection seam (URI parsing, connector Protocol + factory, per-type implementations) lives here, not scattered across the codebase. Any file-backed data the agent ingests (e.g. internal Parquet datasets) is written under a configurable directory (`datasets_dir`), set via settings and pointed at a persistent disk in production — never committed to the repo.
