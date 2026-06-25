@@ -41,6 +41,10 @@ services:
       - key: DATAANALYSIS_DATABASE_URL
         value: sqlite:////data/app.db
 
+      # Durable per-session agent memory (LangGraph SqliteSaver) — separate file on /data
+      - key: DATAANALYSIS_CHECKPOINT_DB
+        value: /data/checkpoints.db
+
       - key: DATAANALYSIS_UPLOAD_DIR
         value: /data/uploads
 

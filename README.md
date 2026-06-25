@@ -47,6 +47,7 @@ Open [http://localhost:8001](http://localhost:8001) in your browser.
 
 - **CSV Upload** — upload any CSV file via the web form
 - **Natural Language Q&A** — type a question, get a plain-text answer from Gemini
+- **Sessions with memory** — each session keeps one MCP pool over its data and remembers prior Q&A (durable across restarts), so follow-up questions have context
 - **Query History** — review past questions and answers per dataset
 
 ---
@@ -78,11 +79,10 @@ src/data_analysis_agent/
 ├── config/       ← Settings (pydantic-settings)
 ├── db/           ← SQLAlchemy models + session
 ├── domain/       ← Pydantic domain models
-├── graph/        ← LangGraph pipeline (state, nodes, edges, runner)
-│   ├── mcp_pool.py  ← MCP client pool (the only importer of mcp.shared.memory)
-│   └── mcp/          ← per-source in-process MCP servers (csv_server: DuckDB over Parquet)
+├── graph/        ← LangGraph pipeline (state, nodes, edges, runner); SqliteSaver memory
 ├── llm/          ← Gemini + stub provider
-├── tools/        ← CSV→Parquet ingestion, table naming, LLM-generated descriptions
+├── tools/        ← CSV→Parquet ingestion, table naming, LLM descriptions
+│   └── mcp/      ← per-source MCP servers (server.py: DuckDB/Parquet) + session pool (pool.py)
 └── templates/    ← Jinja2 HTML templates
 
 tests/
@@ -99,9 +99,10 @@ tests/
 | Language | Python 3.12 |
 | Web framework | FastAPI + uvicorn |
 | UI | Jinja2 templates (React/Vite in Phase 4) |
-| Agent | LangGraph (async nodes) |
+| Agent | LangGraph (async nodes; one MCP pool + memory per session) |
 | Tool protocol | Model Context Protocol — official `mcp` SDK 1.28.0 (in-process FastMCP per source) |
 | Data query engine | DuckDB (read-only, over Parquet) |
+| Agent memory | LangGraph `SqliteSaver` checkpointer (durable, per session) |
 | LLM | Google Gemini (`gemini-2.5-flash`) |
 | Metadata DB | SQLite + SQLAlchemy 2.0 |
 | Migrations | Alembic |

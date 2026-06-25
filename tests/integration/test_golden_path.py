@@ -22,6 +22,7 @@ def _use_sqlite(tmp_path, monkeypatch):
 
     monkeypatch.setattr(session_module, "_db", db)
     monkeypatch.setattr(session_module, "init_db", lambda: None)
+    monkeypatch.setenv("DATAANALYSIS_CHECKPOINT_DB", str(tmp_path / "ckpt.db"))
 
     yield
 

@@ -25,12 +25,25 @@ def build_plan_prompt(state: AgentState, tools: list[dict], column_names: list[s
         The complete prompt string sent to the LLM.
     """
     lines = _intro_lines()
+    lines += _conversation_lines(state.get("conversation", []))
     lines += _tools_lines(tools)
     lines += _schema_lines(column_names)
     lines.append(f"User question: {state['question']}")
     lines += _history_lines(state.get("action_history", []))
     lines += _response_format_lines()
     return "\n".join(lines)
+
+
+def _conversation_lines(conversation: list[dict]) -> list[str]:
+    """Return the durable per-session memory block, or empty when there is none."""
+    if not conversation:
+        return []
+    lines = ["Conversation so far (prior questions and answers in this session):"]
+    for i, turn in enumerate(conversation, 1):
+        lines.append(f'[{i}] Q: {turn.get("question", "")}')
+        lines.append(f'    A: {turn.get("answer", "")}')
+    lines.append("")
+    return lines
 
 
 def _intro_lines() -> list[str]:

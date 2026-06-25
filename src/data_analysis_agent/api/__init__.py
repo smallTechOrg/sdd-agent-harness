@@ -19,6 +19,7 @@ async def _lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(log_level=settings.log_level, log_file=settings.log_file)
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+    Path(settings.checkpoint_db).parent.mkdir(parents=True, exist_ok=True)
     init_db()
     yield
     from data_analysis_agent.tools.mcp.pool import get_manager

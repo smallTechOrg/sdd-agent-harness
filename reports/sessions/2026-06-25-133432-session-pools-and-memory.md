@@ -42,7 +42,14 @@ pool + 3-step loop, D durable memory.
 - [x] Phase A: specs rewritten (07-agent-graph, 02-architecture, 02-nl-query, 03-sessions, tech-stack, 04-data-model) for session-scoped pool + durable memory + tools/ relocation
 - [x] Phase B: relocated MCP code → `tools/mcp/server.py` + `tools/mcp/pool.py` (git mv); tests → `tests/unit/tools/`; imports updated; behavior unchanged; **30 passed**
 - [x] Phase C: `SessionPoolManager` (lazy build, LRU/idle eviction, per-session lock, deadlock-safe eviction) in `tools/mcp/pool.py`; dropped `load_data`; entry=`plan_action`; nodes read tools/schema from the manager; warm on session create, close on delete + datasource-delete + shutdown; deleted `graph/tool_registry.py`. Gate: **33 passed**; live smoke — 3 queries/session, **1 pool build**, no loop/race errors.
-- [ ] Phase D: durable memory
+- [x] Phase D: durable per-session memory via LangGraph `AsyncSqliteSaver` (thread_id=session_id); `conversation` state channel; runner compiles per query with the checkpointer + resets scratch via `_fresh_input`; planning renders a "Conversation so far" block; checkpoint env wired into .env.example/Dockerfile/render. **Gotcha fixed:** `operator.add` reducer double-appended on checkpoint resume → switched to a plain "last-value" channel where `finalize` writes the full list (idempotent under replay). Gate: **34 passed** (incl. multi-turn memory test); live durability — 2 turns → server restart → 3rd query in same session shows all 3 turns; no errors.
+
+## Session End State
+
+- Branch: feature/data-analysis-agent-v0.1 (PR #57 → main). All 4 phases (A spec, B relocate, C session pool, D memory) committed + pushed; tests green at every gate (34 passed).
+- A **session** is now the agent context: one MCP pool per session (lazy build, reused, LRU/idle evicted, per-session lock, closed on delete/shutdown) + durable memory (SqliteSaver, thread_id=session_id, survives restart). Per-query loop = plan → execute → finalize (no load_data). All MCP code under `tools/mcp/`.
+- New deps: `langgraph-checkpoint-sqlite`. New settings: `max_session_pools`, `session_pool_idle_seconds`, `checkpoint_db`.
+- Out of scope (unchanged): Gemini-vs-OpenRouter drift; vestigial dataset/answer/history templates.
 
 ## Prompt Log
 
@@ -52,8 +59,6 @@ pool + 3-step loop, D durable memory.
 
 ## Next steps
 
-Phases A→D per the plan; commit+push each; live smoke + memory-durability check at the end.
-
-## Session End State
-
-- (to be filled at close)
+Complete — see **Session End State** above. Follow-up candidates: trim the prompt's
+"Conversation so far" to the last N turns if it grows large; best-effort delete of a session's
+checkpoint rows on session delete.

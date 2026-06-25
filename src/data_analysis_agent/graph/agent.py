@@ -34,8 +34,3 @@ def build_graph() -> StateGraph:
     )
     g.add_edge("handle_error", END)
     return g
-
-
-# Default compiled graph (no checkpointer). The runner compiles per query with a checkpointer
-# for durable per-session memory.
-agent_graph = build_graph().compile()

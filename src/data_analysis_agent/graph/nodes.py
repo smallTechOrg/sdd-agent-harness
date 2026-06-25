@@ -74,15 +74,22 @@ async def execute_action(state: AgentState) -> AgentState:
 
 
 async def finalize(state: AgentState) -> AgentState:
-    """Persist the final answer and usage stats. Does not touch the session pool."""
+    """Persist the answer/usage and append this turn to durable memory.
+
+    ``conversation`` is a plain "last-value" channel, so we return the FULL updated list
+    (restored history + this turn); the overwrite is idempotent if the checkpointer replays
+    it on resume. Does not touch the pool.
+    """
     run_id = state.get("run_id", "")
     try:
         mark_completed(state)
+        turn = {"question": state.get("question", ""), "answer": state.get("answer", "")}
+        conversation = [*state.get("conversation", []), turn]
         log.info("finalize.done", run_id=run_id)
-        return state
+        return {"conversation": conversation}
     except Exception as exc:
         log.error("finalize.failed", run_id=run_id, error=str(exc))
-        return {**state, "error": f"Finalize failed: {exc}"}
+        return {"error": f"Finalize failed: {exc}"}
 
 
 async def handle_error(state: AgentState) -> AgentState:

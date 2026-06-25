@@ -25,6 +25,7 @@ def _use_sqlite(tmp_path, monkeypatch):
 
     monkeypatch.setattr(session_module, "_db", db)
     monkeypatch.setattr(session_module, "init_db", lambda: None)
+    monkeypatch.setenv("DATAANALYSIS_CHECKPOINT_DB", str(tmp_path / "ckpt.db"))
 
     yield
 
@@ -101,3 +102,28 @@ def test_pipeline_runs_end_to_end(session_and_query):
         runs = s.query(AgentRunRow).filter_by(query_record_id=query_record_id).all()
         assert len(runs) == 1
         assert runs[0].status == "completed"
+
+
+def _add_query(session_id: str, question: str) -> str:
+    with session_module.create_db_session() as db:
+        qr = QueryRecordRow(session_id=session_id, question=question)
+        db.add(qr)
+        db.flush()
+        return qr.id
+
+
+def test_session_memory_accumulates_across_queries(session_and_query):
+    """Two queries in one session → the durable `conversation` carries both turns."""
+    from data_analysis_agent.graph.runner import run_pipeline
+
+    import data_analysis_agent.llm.client as llm_module
+    llm_module._client = None
+
+    session_id, qr1 = session_and_query
+    run_pipeline(query_record_id=qr1, session_id=session_id, question="What is the total sales?")
+
+    qr2 = _add_query(session_id, "And the average?")
+    final2 = run_pipeline(query_record_id=qr2, session_id=session_id, question="And the average?")
+
+    convo = final2.get("conversation", [])
+    assert [t["question"] for t in convo] == ["What is the total sales?", "And the average?"], convo
