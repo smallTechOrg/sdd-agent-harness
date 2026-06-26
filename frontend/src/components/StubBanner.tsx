@@ -1,14 +1,9 @@
 'use client'
 
 /**
- * Stub-mode primitives for the Data Analysis Agent shell.
- *
- *  - <StubBanner provider /> : the yellow "stub mode" banner. From Phase 2 it is
- *      driven by GET /health's `provider`: shown ONLY when the backend runs in
- *      stub mode (no API key) so canned answers are never mistaken for real.
- *  - <StubPill />  : a small "Phase N — not yet wired" tag reused on every
- *      placeholder control that is still a labelled stub.
- *  - <StubNote />  : a plain-words "coming in a later phase" note.
+ * <StubBanner provider /> : the yellow "stub mode" banner. Driven by GET
+ * /health's `provider`: shown ONLY when the backend runs in stub mode (no API
+ * key) so canned answers are never mistaken for real output.
  */
 
 export function StubBanner({ provider }: { provider?: string | null }) {
@@ -31,21 +26,4 @@ export function StubBanner({ provider }: { provider?: string | null }) {
       real analysis.
     </div>
   )
-}
-
-export function StubPill({ phase = 2, label }: { phase?: number; label?: string }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-yellow-300 bg-yellow-50 px-2 py-0.5 text-[11px] font-medium whitespace-nowrap text-yellow-800">
-      <span aria-hidden="true">●</span>
-      {label ?? `Phase ${phase} — not yet wired`}
-    </span>
-  )
-}
-
-/**
- * A standardised "coming in a later phase" note. Use under a placeholder
- * control to spell out, in plain words, that it does nothing yet.
- */
-export function StubNote({ children }: { children: React.ReactNode }) {
-  return <p className="mt-1 text-xs text-gray-400">{children}</p>
 }
