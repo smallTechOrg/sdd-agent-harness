@@ -20,6 +20,7 @@ import pandas as pd
 
 from db.models import DatasetRow, QueryRunRow
 from db.session import create_db_session
+from graph.memory import get_memory_block  # owned by slice-3c; 3b only imports it
 from graph.sandbox import build_namespace, eval_expression
 from graph.state import AgentState
 from llm.client import LLMClient
@@ -33,8 +34,15 @@ _FINALIZE_PROMPT_PATH = _PROMPTS_DIR / "finalize.md"
 
 # Run-scoped DataFrame registry: {run_id: {"frames": [df, ...], "filenames": [...]}}.
 # Phase 2 single-turn loads here and releases on finalize/error. Phase 3 adds the
-# session-keyed cache in `setup`.
+# session-keyed cache below (C27) for multi-turn sessions.
 _dataframes: dict[str, dict[str, Any]] = {}
+
+# Session DataFrame cache (C27): {session_id: {"frames": {dataset_id: df},
+#   "order": [dataset_id, ...]}}. Reused across turns of the same conversation so
+# a multi-turn session does not re-read Parquet/CSV every turn. Small LRU bound
+# on the number of cached sessions (insertion order = LRU order; touch on hit).
+_session_cache: dict[str, dict[str, Any]] = {}
+_SESSION_CACHE_MAX = 8
 
 # Node tags injected so the stub provider can branch deterministically.
 _PLAN_TAG = "<node:plan>"
@@ -87,6 +95,60 @@ def _schema_block(df: pd.DataFrame, name: str, notes: str | None = None) -> str:
     return "\n".join(lines)
 
 
+def _safe_memory_block() -> str:
+    """Read the global persistent memory block (slice-3c), defensively.
+
+    A 3c regression (import/runtime failure) must NEVER crash planning, so any
+    exception yields an empty block — planning simply proceeds without memory.
+    """
+    try:
+        return (get_memory_block() or "").strip()
+    except Exception as exc:  # noqa: BLE001 — memory is best-effort context
+        logger.warning("memory_block_failed", error=str(exc))
+        return ""
+
+
+# --------------------------------------------------------------------------- #
+# Session DataFrame cache (C27)
+# --------------------------------------------------------------------------- #
+
+
+def _session_load_frame(session_id: str, dataset_id: str) -> pd.DataFrame:
+    """Return the DataFrame for `dataset_id` within `session_id`, using the cache.
+
+    On a cache HIT: reuse the stored DataFrame and LRU-touch the session. On a
+    MISS: load via `_load_dataframe`, store it, and bound the cache to
+    `_SESSION_CACHE_MAX` sessions (evict the oldest on overflow).
+    """
+    entry = _session_cache.get(session_id)
+    if entry is None:
+        entry = {"frames": {}, "order": []}
+        _session_cache[session_id] = entry
+
+    # LRU-touch the session (move to most-recent).
+    _session_cache.pop(session_id, None)
+    _session_cache[session_id] = entry
+
+    frames: dict[str, pd.DataFrame] = entry["frames"]
+    if dataset_id in frames:
+        logger.info("session_cache_hit", session_id=session_id, dataset_id=dataset_id)
+        return frames[dataset_id]
+
+    frame = _load_dataframe(dataset_id)
+    frames[dataset_id] = frame
+    if dataset_id not in entry["order"]:
+        entry["order"].append(dataset_id)
+    logger.info("session_cache_miss", session_id=session_id, dataset_id=dataset_id)
+
+    # Bound the number of cached sessions (evict the oldest).
+    while len(_session_cache) > _SESSION_CACHE_MAX:
+        oldest = next(iter(_session_cache))
+        _session_cache.pop(oldest, None)
+        logger.info("session_cache_evict", session_id=oldest)
+
+    return frame
+
+
 # --------------------------------------------------------------------------- #
 # Nodes
 # --------------------------------------------------------------------------- #
@@ -95,10 +157,14 @@ def _schema_block(df: pd.DataFrame, name: str, notes: str | None = None) -> str:
 def setup(state: AgentState) -> AgentState:
     """Load DataFrame(s) for the run and build the dataset context.
 
-    Phase 2: simple per-run load into `_dataframes[run_id]`. A fatal load/lookup
-    error sets `error` -> handle_error.
+    When `session_id` is set (multi-turn), DataFrames come from the session cache
+    (C27) — hit reuses + LRU-touches, miss loads Parquet/CSV and stores. Without
+    a `session_id` (single-turn), the simple per-run `_dataframes[run_id]` path is
+    used unchanged. The frames list stays ordered by `dataset_ids`. A fatal
+    load/lookup error sets `error` -> handle_error.
     """
     run_id = state.get("run_id", "")
+    session_id = state.get("session_id")
     dataset_ids = state.get("dataset_ids") or []
 
     if not dataset_ids:
@@ -114,7 +180,10 @@ def setup(state: AgentState) -> AgentState:
                 row = session.get(DatasetRow, dataset_id)
                 if row is None:
                     return {**state, "error": f"Dataset {dataset_id!r} not found."}
-                frame = _load_dataframe(dataset_id)
+                if session_id:
+                    frame = _session_load_frame(session_id, dataset_id)
+                else:
+                    frame = _load_dataframe(dataset_id)
                 frames.append(frame)
                 filenames.append(row.filename or f"{dataset_id}.csv")
                 schema_parts.append(
@@ -124,9 +193,12 @@ def setup(state: AgentState) -> AgentState:
         logger.warning("setup_load_failed", run_id=run_id, error=str(exc))
         return {**state, "error": f"Failed to load dataset(s): {exc}"}
 
+    # The run-scoped registry is what execute_action reads each step; populate it
+    # for BOTH paths (the session cache is the source of frames, this is the
+    # per-run handle). The frames list stays ordered by `dataset_ids`.
     _dataframes[run_id] = {"frames": frames, "filenames": filenames}
     dataset_context = "\n\n".join(schema_parts)
-    logger.info("setup_ok", run_id=run_id, datasets=len(frames))
+    logger.info("setup_ok", run_id=run_id, datasets=len(frames), session=bool(session_id))
     return {**state, "dataset_context": dataset_context, "status": "running"}
 
 
@@ -137,6 +209,13 @@ def _assemble_plan_prompt(state: AgentState, wrap_up: bool) -> str:
     dataset_context = state.get("dataset_context")
     if dataset_context:
         parts.append("## Datasets\n" + dataset_context)
+
+    # Global persistent memory (slice-3c) is authoritative in every plan prompt,
+    # injected only when non-empty. Read defensively so a 3c failure can't crash
+    # planning.
+    memory_block = _safe_memory_block()
+    if memory_block:
+        parts.append("## Persistent memory\n" + memory_block)
 
     conversation_history = state.get("conversation_history") or []
     if conversation_history:
