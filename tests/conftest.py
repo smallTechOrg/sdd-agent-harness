@@ -27,6 +27,15 @@ def _isolated_db(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def _require_gemini_key():
+    """Skip if no Gemini API key is set."""
+    from config.settings import get_settings
+    s = get_settings()
+    if not s.gemini_api_key:
+        pytest.skip("No Gemini key set in .env (AGENT_GEMINI_API_KEY)")
+
+
+@pytest.fixture
 def _require_llm_key():
     """Skip if no LLM provider key is set — works for Anthropic or Gemini."""
     from config.settings import get_settings

@@ -224,39 +224,14 @@ def do_check() -> None:
 
 
 def main() -> None:
-<<<<<<< HEAD
-    parser = argparse.ArgumentParser(description="Check local setup (default) or run the agent")
-    parser.add_argument("--run", action="store_true", help="build frontend + apply migrations + start server")
-=======
     parser = argparse.ArgumentParser(description="Verify local setup or run the agent")
     parser.add_argument("--run", action="store_true", help="apply migrations, build frontend, and start server")
->>>>>>> 599e02c (fix: tighten version requirements and fix agent.py startup)
     args = parser.parse_args()
 
     if args.run:
         do_run()
-<<<<<<< HEAD
-        return
-
-    print(f"\n{BOLD}=== Setup Check ==={RESET}")
-    check_tools()
-    check_env()
-    check_python_env()
-    check_db()
-    check_tests()
-    check_frontend()
-    print()
-    if _failures:
-        print(f"{RED}{BOLD}{len(_failures)} issue(s) found — fix before running.{RESET}")
-        for f in _failures:
-            print(f"  {RED}✗{RESET}  {f}")
-        sys.exit(1)
-    else:
-        print(f"{GREEN}{BOLD}All checks passed. Run: python agent.py --run{RESET}\n")
-=======
     else:
         do_check()
->>>>>>> 599e02c (fix: tighten version requirements and fix agent.py startup)
 
 
 if __name__ == "__main__":

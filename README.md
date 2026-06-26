@@ -152,6 +152,88 @@ uv run pytest tests/ -v               # requires real key in .env
 
 ---
 
+## Phase 1 — CSV Analytics Agent
+
+### Starting the server
+
+```bash
+uv run python -m src
+```
+
+The server starts on `http://localhost:8001`.
+
+### API Endpoints
+
+#### `GET /health`
+
+Liveness probe. Returns `{"ok": true}`.
+
+#### `POST /upload`
+
+Upload a CSV file to create a named SQLite table and get a session ID.
+
+```bash
+curl -X POST http://localhost:8001/upload \
+  -F "file=@your_data.csv"
+```
+
+Response:
+```json
+{
+  "ok": true,
+  "data": {
+    "session_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "table_name": "your_data_3fa85f64",
+    "row_count": 1500,
+    "schema": [
+      {"column": "product_name", "type": "TEXT"},
+      {"column": "quantity", "type": "INTEGER"},
+      {"column": "revenue", "type": "REAL"}
+    ]
+  }
+}
+```
+
+#### `POST /query`
+
+Run the five-node LangGraph pipeline against an uploaded session and get SQL, chart spec, and insight.
+
+```bash
+curl -X POST http://localhost:8001/query \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "3fa85f64-...", "question": "What are the top 5 products by revenue?"}'
+```
+
+Response:
+```json
+{
+  "ok": true,
+  "data": {
+    "query_run_id": "...",
+    "status": "completed",
+    "sql": "SELECT ...",
+    "chart_spec": {"type": "bar", ...},
+    "insight": "Widget A leads with $45,200 in total revenue..."
+  }
+}
+```
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AGENT_GEMINI_API_KEY` | Yes (if using Gemini) | Google Gemini API key |
+| `AGENT_ANTHROPIC_API_KEY` | Yes (if using Anthropic) | Anthropic API key |
+| `LANGCHAIN_API_KEY` | Optional | LangSmith tracing API key |
+| `LANGCHAIN_TRACING_V2` | Optional | Set to `true` to enable LangSmith tracing |
+| `LANGCHAIN_PROJECT` | Optional | LangSmith project name |
+
+### LLM Provider
+
+The default LLM provider for Phase 1 is **Gemini** (`gemini-2.0-flash` or as configured in `AGENT_LLM_MODEL`). Set `AGENT_GEMINI_API_KEY` in `.env` to use it. The `AGENT_ANTHROPIC_API_KEY` key is also supported and auto-detected.
+
+---
+
 ## Rules AI Agents Follow
 
 Full rules in `harness/rules/ai-agents.md`. Summary:

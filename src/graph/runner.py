@@ -1,25 +1,25 @@
+"""
+Runner for the data-analysis pipeline.
+
+The primary entry point is the query endpoint (src/api/query.py), which
+calls agentic_ai.invoke() directly. This module exposes run_query() as a
+convenience wrapper for scripts and future CLI use.
+"""
 from graph.agent import agentic_ai
 from graph.state import AgentState
-from db.session import create_db_session, init_db
-from db.models import RunRow
 
 
-def run_agent(input_text: str) -> str:
-    init_db()
-
-    with create_db_session() as session:
-        run = RunRow(input_text=input_text)
-        session.add(run)
-        session.flush()
-        run_id = run.id
-
-    initial: AgentState = {"run_id": run_id, "input_text": input_text, "error": None}
-    final = agentic_ai.invoke(initial)
-
-    with create_db_session() as session:
-        run = session.get(RunRow, run_id)
-        run.status = final.get("status", "completed")
-        run.output_text = final.get("output_text")
-        run.error_message = final.get("error")
-
-    return run_id
+def run_query(
+    session_id: str,
+    table_name: str,
+    question: str,
+    run_id: str,
+) -> AgentState:
+    """Invoke the 5-node pipeline and return the final state."""
+    initial: AgentState = {
+        "run_id": run_id,
+        "session_id": session_id,
+        "table_name": table_name,
+        "question": question,
+    }
+    return agentic_ai.invoke(initial)

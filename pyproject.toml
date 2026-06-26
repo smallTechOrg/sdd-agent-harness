@@ -13,6 +13,10 @@ dependencies = [
     "structlog>=24.1",
     "langgraph>=0.1",
     "google-genai>=2.9.0",
+    "langchain-google-genai>=2.0",
+    "langchain-core>=0.3",
+    "langchain>=0.3",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

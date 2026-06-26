@@ -7,6 +7,8 @@ from fastapi.staticfiles import StaticFiles
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    from config.settings import configure_langsmith
+    configure_langsmith()
     from db.session import init_db
     init_db()
     yield
@@ -14,9 +16,10 @@ async def _lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Agent", version="0.1.0", lifespan=_lifespan)
-    from api import health, runs
+    from api import health, upload, query
     app.include_router(health.router)
-    app.include_router(runs.router)
+    app.include_router(upload.router)
+    app.include_router(query.router)
 
     # Serve the built Next.js static export at /app
     # Run `cd frontend && pnpm build` to generate frontend/out/ before starting.

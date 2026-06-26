@@ -1,7 +1,7 @@
 from graph.state import AgentState
 
 
-def after_transform(state: AgentState) -> str:
+def route_or_error(state: AgentState, next_node: str) -> str:
     if state.get("error"):
         return "handle_error"
-    return "finalize"
+    return next_node
