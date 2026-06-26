@@ -37,9 +37,9 @@ def test_provider_raises_with_no_key(monkeypatch, tmp_path):
     import config.settings as m
     m._settings = None
 
-    from llm.client import _make_provider
+    from llm.client import _resolve_provider_name
     with pytest.raises(RuntimeError, match="No LLM provider configured"):
-        _make_provider()
+        _resolve_provider_name()
 
 
 def test_explicit_provider_wins(monkeypatch, tmp_path):

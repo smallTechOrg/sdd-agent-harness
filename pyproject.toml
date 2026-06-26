@@ -28,4 +28,6 @@ packages = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-pythonpath = ["src"]
+pythonpath = ["src", "."]
+markers = ["eval: the no-eval-no-launch LLM-as-judge gate (opt-in; slower)"]
+addopts = "-m 'not eval'"

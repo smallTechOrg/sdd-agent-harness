@@ -9,9 +9,17 @@ class NodeTrace(TypedDict):
 class AgentState(TypedDict, total=False):
     # Identity
     run_id: str
+    conversation_id: str                 # keys session memory
 
     # Input
     input_text: str
+
+    # ReAct loop
+    messages: list[dict]                 # provider-shaped running history
+    iterations: int                      # THE loop counter (react owns it; budget reads it)
+
+    # Memory
+    memory_context: str                  # session transcript, fenced as untrusted
 
     # Output
     output_text: str
@@ -25,4 +33,5 @@ class AgentState(TypedDict, total=False):
 
     # Control
     error: str | None
+    guard_code: str | None               # machine-readable guard verdict
     status: str

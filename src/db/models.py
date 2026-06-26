@@ -33,10 +33,37 @@ class RunRow(Base):
     latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     model: Mapped[str | None] = mapped_column(Text, nullable=True)
     node_trace: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    guard_code: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_now
     )
     updated_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+class TurnRow(Base):
+    """Session memory: one row per conversation turn (the wired memory flavour)."""
+    __tablename__ = "turns"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=_uuid)
+    conversation_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(Text, nullable=False)   # "user" | "assistant"
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_now
+    )
+
+
+class FactRow(Base):
+    """Semantic memory facts (LABELLED SLOT — not on the green path)."""
+    __tablename__ = "facts"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=_uuid)
+    subject: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    key: Mapped[str] = mapped_column(Text, nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_now
     )

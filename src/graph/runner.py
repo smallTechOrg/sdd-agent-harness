@@ -9,7 +9,7 @@ from observability.events import get_logger
 _log = get_logger("runner")
 
 
-def run_agent(input_text: str) -> str:
+def run_agent(input_text: str, conversation_id: str = "") -> str:
     init_db()
 
     with create_db_session() as session:
@@ -23,11 +23,14 @@ def run_agent(input_text: str) -> str:
 
     initial: AgentState = {
         "run_id": run_id,
+        "conversation_id": conversation_id,
         "input_text": input_text,
         "error": None,
         "tokens_in": 0,
         "tokens_out": 0,
         "cost_usd": 0.0,
+        "iterations": 0,
+        "messages": [],
         "node_trace": [],
     }
     final = agentic_ai.invoke(initial)
@@ -54,5 +57,6 @@ def run_agent(input_text: str) -> str:
         run.latency_ms = latency_ms
         run.model = final.get("model")
         run.node_trace = final.get("node_trace", [])
+        run.guard_code = final.get("guard_code")
 
     return run_id

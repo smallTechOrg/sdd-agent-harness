@@ -30,6 +30,17 @@ class Settings(BaseSettings):
     model_tools: str = Field(default="")
     model_reason: str = Field(default="")
 
+    # Guardrails + per-run budget (hard caps enforced inside the ReAct loop)
+    max_input_chars: int = Field(default=20_000)
+    react_max_steps: int = Field(default=6)          # loop-of-death cap
+    max_cost_usd_per_run: float = Field(default=1.0)
+    max_tokens_per_run: int = Field(default=200_000)
+
+    # MCP consumption (optional; tools register into the same registry)
+    mcp_server_url: str = Field(default="")
+    mcp_server_name: str = Field(default="")
+    mcp_auth_token: str = Field(default="")
+
 
 _settings: Settings | None = None
 

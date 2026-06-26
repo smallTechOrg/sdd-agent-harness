@@ -1,0 +1,4 @@
+{"input": "Use the calculator to compute 47 * 89.", "expect": "answer contains 4183"}
+{"input": "What is the capital of France? One word.", "expect": "answer is Paris"}
+{"input": "Compute (12 + 8) * 3 using the calculator.", "expect": "answer contains 60"}
+{"input": "Summarize in one sentence: the sun is a star at the center of the solar system.", "expect": "a one-sentence summary mentioning the sun and a star or solar system"}
