@@ -15,20 +15,22 @@ Single-screen web app — a Next.js 15 static export (React 19, Tailwind v4) ser
 **Key elements (top to bottom):**
 - **Title + one-line intro** — "Local Data Analyst — your data stays on this machine."
 - **CSV upload** — a file input that reads the chosen file with `FileReader.readAsText` into `csv_text`. Shows the file name and row/column hint once loaded. Rejects obviously non-CSV files with a friendly message before submit.
+- **Mode toggle** (Phase 2+) — a toggle/selector control above the question input: "Analyze with: [Pandas (default)] [SQL]". User chooses one before asking a question. Defaults to Pandas. (Phase 1: omitted; all runs assume pandas.)
 - **Question input** — a text box for the natural-language question.
 - **Run button** — disabled until both a CSV and a question are present; shows a loading state while the request is in flight.
 - **Answer card** (REAL) — the `answer` line plus the `explanation` paragraph.
 - **"Show its work" panel** (REAL) — the `generated_code` rendered as a monospaced code block, and the `result_table` rendered as an HTML table (`columns` as headers, `rows` as cells). This satisfies constraint 2 (show its work) and is always visible alongside the answer.
 - **Labelled NON-FUNCTIONAL stubs** (clearly marked "coming soon", visibly disabled/greyed — never look like bugs):
-  - "Charts (coming soon)" — a greyed placeholder where a chart will render (wired in Phase 3).
+  - "Charts (coming soon)" — a greyed placeholder where a chart will render (wired in Phase 4).
   - "Connect a database (coming soon)" — a disabled control.
   - "Export results (coming soon)" — a disabled button.
 
 **Actions available:**
 - Choose a CSV file.
+- Select a mode (Phase 2+): Pandas or SQL (Phase 1: pandas only, no visible toggle).
 - Type a question.
-- Submit (Run) → `POST /runs` with `{ csv_text, question }`, read `data.data`.
-- Read the answer, explanation, generated code, and result table.
+- Submit (Run) → `POST /runs` with `{ csv_text, question, mode }` (mode defaults to `"pandas"` if not sent), read `data.data`.
+- Read the answer, explanation, generated code (pandas snippet or SQL query), and result table.
 
 ## Error States
 

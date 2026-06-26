@@ -16,9 +16,10 @@ One analysis: a question asked of an uploaded CSV, plus everything needed to aud
 |-------|------|----------|-------------|
 | id | Text (UUID) | yes | Primary key |
 | status | Text | yes | `pending` → `completed` / `failed` |
+| mode | Text | no | `"pandas"` or `"sql"` (Phase 2+); defaults to `"pandas"` for Phase 1 runs |
 | input_text | Text | no | Legacy/back-compat: stores the question (the analyst path uses `question`); kept so existing skeleton code still works |
 | question | Text | no | The natural-language question the user asked |
-| generated_code | Text | no | The exact pandas snippet that was executed (the "show its work" artifact) |
+| generated_code | Text | no | The exact code that was executed (the "show its work" artifact): pandas snippet (Phase 1–2) or SQL query (Phase 2+) or both depending on mode |
 | result_table | Text (JSON) | no | The computed result serialized as JSON: `{"columns": [...], "rows": [[...]]}` or a scalar wrapper |
 | output_text | Text | no | Compact answer + explanation summary (back-compat with the skeleton response field) |
 | answer | Text | no | The short answer line |

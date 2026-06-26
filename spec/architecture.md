@@ -45,14 +45,18 @@ Key point: **`profile_csv` and `execute_code` touch the full data and run entire
 
 ## Data Flow
 
-1. **Trigger:** user submits the form in the UI → `POST /runs` with `{ "csv_text": "...", "question": "..." }` (CSV sent as text in the JSON body — see [`api.md`](api.md)).
-2. **Persist + start:** `runner.run_agent(csv_text, question)` creates a `RunRow` (status `pending`) and invokes the graph.
-3. **`profile_csv` (local):** parse `csv_text` into a pandas DataFrame; reject if unparseable or over the row/byte cap; build a **schema** (column names + inferred dtypes) and a **capped sample** (default 15 rows, hard cap 20). The full DataFrame is held in graph state for local execution; it is NOT placed in any LLM prompt.
-4. **`generate_code` (Gemini):** send the schema + capped sample + question to Gemini with the code-generation system prompt; receive a single pandas expression/snippet that assigns to `result` using the bound name `df`.
-5. **`execute_code` (local sandbox):** run the generated code in `src/analysis/sandbox.py` against the **full** `df`, with restricted builtins, no imports, a wall-clock timeout, and result-size caps. Extract `result` and normalize it to a JSON-serializable scalar or table.
-6. **`explain_result` (Gemini):** send the question + the generated code + the **small** computed result to Gemini with the explanation system prompt; receive a plain-English explanation. (Never sends the full data — only the already-computed small result.)
-7. **`finalize` / `handle_error`:** write status, answer fields, generated code, and result table back to the `RunRow`.
-8. **Output:** the API returns `{ data: { run_id, status, answer, explanation, generated_code, result_table, error } }`.
+1. **Trigger:** user selects a mode (Pandas or SQL), uploads a CSV, and submits a question → `POST /runs` with `{ "csv_text": "...", "question": "...", "mode": "pandas" | "sql" }` (CSV sent as text in the JSON body — see [`api.md`](api.md)).
+2. **Persist + start:** `runner.run_agent(csv_text, question, mode)` creates a `RunRow` (status `pending`) and invokes the graph with the mode.
+3. **`profile_csv` (local):** parse `csv_text` into a pandas DataFrame; reject if unparseable or over the row/byte cap; build a **schema** (column names + inferred dtypes) and a **capped sample** (default 15 rows, hard cap 20). The full DataFrame is held in graph state for local execution; it is NOT placed in any LLM prompt. (For SQL mode, the schema is also used to create the in-memory SQLite table.)
+4. **`generate_code` (Gemini, branched on mode):** 
+   - **Pandas:** send the schema + capped sample + question to Gemini with the pandas code-generation system prompt; receive a single pandas expression/snippet that assigns to `result` using the bound name `df`.
+   - **SQL:** send the schema + capped sample + question to Gemini with the SQL code-generation system prompt; receive a single SQL query (SELECT statement) that will be executed against the in-memory table.
+5. **`execute_code` (local, branched on mode):**
+   - **Pandas:** run the generated code in `src/analysis/sandbox.py` against the **full** DataFrame `df`, with restricted builtins, no imports, a wall-clock timeout, and result-size caps. Extract `result` and normalize it to a JSON-serializable scalar or table.
+   - **SQL:** load the CSV into an in-memory SQLite table, execute the generated SQL query in `src/analysis/sql_executor.py` with query validation (SELECT-only, no escapes), a wall-clock timeout, and result-size caps. Extract the result set and normalize it to a JSON-serializable `{columns, rows}` table.
+6. **`explain_result` (Gemini):** send the question + the generated code (pandas or SQL) + the **small** computed result to Gemini with the explanation system prompt; receive a plain-English explanation. (Never sends the full data — only the already-computed small result.)
+7. **`finalize` / `handle_error`:** write status, answer fields, generated code, mode, and result table back to the `RunRow`.
+8. **Output:** the API returns `{ data: { run_id, status, mode, answer, explanation, generated_code, result_table, error } }`.
 
 ## External Dependencies
 
@@ -64,16 +68,49 @@ Key point: **`profile_csv` and `execute_code` touch the full data and run entire
 
 No other network calls. The dataset never leaves the process except as schema + capped sample to Gemini.
 
+## Execution Modes: Pandas and SQL
+
+The analyst agent supports two interchangeable modes, selectable by the user before asking a question:
+
+- **Pandas mode** (default): Generate a pandas snippet from the CSV data, execute locally, return the result. Idiomatic, supports all pandas operations, most users' first choice.
+- **SQL mode** (Phase 2+): Generate a SQL query, load the CSV into an in-memory SQLite table, execute the query locally, return the result. Alternative for users comfortable with SQL, supports standard ANSI SQL operations.
+
+Both modes:
+- Load the full CSV data locally; only schema + capped sample + question reach Gemini
+- Execute code locally on the full dataset; only the computed result (a table or scalar) returns to the UI
+- Sandbox the generated code against the same threats (no imports/escapes, timeouts, size caps, restricted execution namespace)
+- Expose the generated code in "Show its work"
+- Handle the same analytical shapes: group-by aggregation, filter + aggregate, top-N, scalar (count/sum/mean/etc.)
+- Fail gracefully on malformed input, unanswerable questions, and runtime errors
+
+The **mode choice is user-selected and sent in the API request** (`mode: "pandas" | "sql"`); the agent branches on this field in the `generate_code` and `execute_code` nodes.
+
 ## Sandbox Security Model
 
-The generated pandas code is **untrusted LLM output executed locally**, so it runs in a constrained namespace in `src/analysis/sandbox.py`. The model (and its limits) are documented here explicitly:
+Generated code (pandas or SQL) is **untrusted LLM output executed locally**, so it runs in a constrained namespace. The model (and its limits) are documented here explicitly for **both modes**:
+
+### Pandas Sandbox (`src/analysis/sandbox.py`)
 
 - **Bound names only.** The execution namespace exposes exactly: `df` (the full DataFrame), `pd` (pandas), and a small allow-list of safe builtins (`len`, `min`, `max`, `sum`, `sorted`, `round`, `abs`, `range`, `list`, `dict`, `set`, `str`, `int`, `float`, `bool`). `__builtins__` is replaced with this restricted mapping (no `open`, `eval`, `exec`, `__import__`, `compile`, `input`, `os`, `sys`).
 - **No imports.** The generated source is statically rejected (AST scan) if it contains an `import` / `from ... import`, any dunder name (`__...__`, e.g. `__globals__`, `__class__`), or attribute access into `os`/`sys`/`subprocess`/`builtins`. A rejected snippet → categorized error, never executed.
-- **Result contract.** The snippet must assign its answer to a variable named `result`. The sandbox reads `result` after execution; absence of `result` is an error.
+- **Result contract.** The pandas snippet must assign its answer to a variable named `result`. The sandbox reads `result` after execution; absence of `result` is an error.
 - **Timeout.** Execution runs under a wall-clock timeout (default 10s, `AGENT_EXEC_TIMEOUT`). Exceeding it aborts with a timeout error.
-- **Result-size cap.** A returned table is capped (default 1000 rows, `AGENT_MAX_RESULT_ROWS`); larger results are truncated with a `truncated: true` flag (Phase 2). Scalars and small frames pass through.
+- **Result-size cap.** A returned table is capped (default 1000 rows, `AGENT_MAX_RESULT_ROWS`); larger results are truncated with a `truncated: true` flag (Phase 3). Scalars and small frames pass through.
 - **Input caps.** Upstream, `profile_csv` enforces `AGENT_MAX_UPLOAD_BYTES` (5 MB) and `AGENT_MAX_ROWS` (200k) before any execution.
+
+### SQL Executor (`src/analysis/sql_executor.py`, Phase 2+)
+
+- **Table creation.** The CSV is loaded into an in-memory SQLite table with schema inferred from the first row (column names + types). The table is created within a transaction scoped to the request (exists only in memory for the duration of the run).
+- **Query restrictions (static AST validation).** The generated SQL is checked for:
+  - Only `SELECT` statements allowed (no `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, etc.)
+  - No subqueries (prevents some indirect escapes; later relaxed if needed)
+  - No multi-statement (semicolon-terminated) queries
+  - No explicit file I/O functions (`LOAD_EXTENSION`, `ATTACH`, etc.)
+  - Allowed operations: `SELECT`, `FROM`, `WHERE`, `GROUP BY`, `ORDER BY`, `LIMIT`, `JOIN` (on the same table with CTEs or aliases), aggregate functions (`SUM`, `COUNT`, `AVG`, `MIN`, `MAX`), and scalar functions (`CAST`, `COALESCE`, `ABS`, string functions, date functions).
+- **Execution context.** The query runs against the in-memory SQLite connection in a read-only mode (no mutations possible). A single result set is returned.
+- **Result contract.** The query must produce a result set (one or more rows/columns). The result is normalized to a JSON-serializable `{columns: [...], rows: [[...]]}` table.
+- **Timeout.** Execution runs under a wall-clock timeout (default 10s, same as pandas). Exceeding it aborts with a timeout error.
+- **Result-size cap.** The returned table is capped at `AGENT_MAX_RESULT_ROWS` (default 1000); larger results are truncated with a `truncated: true` flag (Phase 3).
 
 **Documented limits (honest about what this is and isn't):** this is a *defense-in-depth restriction for a single-user local tool*, not a hardened multi-tenant sandbox. It blocks the common dangerous primitives (imports, file/network, dunder traversal) and bounds time/size, but Python's `exec` is not a true security boundary — a determined adversary with arbitrary code could potentially find an escape. It is acceptable here because (a) the tool is single-user and local, (b) the code is generated from the *user's own* question against the *user's own* data, and (c) the AST allow-list plus restricted builtins remove the obvious escape hatches. If this ever became multi-tenant or remotely exposed, execution must move to a real isolation boundary (subprocess with seccomp, container, or WASM). This requirement is recorded as out-of-scope-but-known.
 

@@ -12,24 +12,26 @@ REST over HTTP (FastAPI), single-origin with the UI at `http://localhost:8001`. 
 
 ### `POST /runs`
 
-**Purpose:** Run one analysis — given a CSV and a question, return the computed answer, explanation, the generated pandas code, and the result table.
+**Purpose:** Run one analysis — given a CSV, a question, and an analysis mode, return the computed answer, explanation, the generated code (pandas or SQL), and the result table.
 
 **Request:**
 ```json
 {
   "csv_text": "string — the full CSV file content as text (≤ AGENT_MAX_UPLOAD_BYTES)",
-  "question": "string — the natural-language question"
+  "question": "string — the natural-language question",
+  "mode": "string — 'pandas' (default) or 'sql' (Phase 2+)"
 }
 ```
 
-> `RunRequest` is extended to `{ csv_text: str, question: str }`. (The legacy `input_text` field is removed from the analyst request; if any back-compat is needed, `question` maps to it server-side.)
+> `RunRequest` is extended to `{ csv_text: str, question: str, mode?: str }`. The `mode` field defaults to `"pandas"` if omitted (backward compatible with Phase 1). (The legacy `input_text` field is removed from the analyst request; if any back-compat is needed, `question` maps to it server-side.)
 
-**Response (200):**
+**Response (200) — Pandas mode example:**
 ```json
 {
   "data": {
     "run_id": "uuid",
     "status": "completed",
+    "mode": "pandas",
     "answer": "Total sales by region, highest first: North 41200, ...",
     "explanation": "I grouped the rows by region and summed the sales column, then sorted descending. North had the highest total at 41,200.",
     "generated_code": "result = df.groupby('region')['sales'].sum().sort_values(ascending=False).reset_index()",
@@ -41,7 +43,25 @@ REST over HTTP (FastAPI), single-origin with the UI at `http://localhost:8001`. 
 }
 ```
 
-> On a handled failure, the endpoint still returns HTTP 200 with `data.status = "failed"` and `data.error` set (mirrors the skeleton's "error must surface in the body, never silently swallowed" contract). `generated_code` may be present even on failure (so the user can see what was attempted).
+**Response (200) — SQL mode example (Phase 2+):**
+```json
+{
+  "data": {
+    "run_id": "uuid",
+    "status": "completed",
+    "mode": "sql",
+    "answer": "Total sales by region, highest first: North 41200, ...",
+    "explanation": "I grouped the rows by region and summed the sales column, then sorted descending. North had the highest total at 41,200.",
+    "generated_code": "SELECT region, SUM(sales) as sales FROM runs GROUP BY region ORDER BY sales DESC",
+    "result_table": { "columns": ["region", "sales"], "rows": [["North", 41200], ["South", 38050]] },
+    "truncated": false,
+    "error": null
+  },
+  "error": null
+}
+```
+
+> On a handled failure, the endpoint still returns HTTP 200 with `data.status = "failed"` and `data.error` set (mirrors the skeleton's "error must surface in the body, never silently swallowed" contract). `generated_code` may be present even on failure (so the user can see what was attempted). The `mode` field echoes the request mode.
 
 **Error cases:**
 | Status | Condition |

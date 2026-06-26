@@ -74,30 +74,51 @@ Additional constraints:
   6. Also try a bad input: upload a `.txt` or a malformed file → expect a clear "couldn't read that as a CSV" message, not a crash.
   7. **Labelled stubs (NOT bugs):** a greyed-out "Charts (coming soon)" area, a disabled "Connect a database (coming soon)" control, and a disabled "Export results (coming soon)" button. These are intentionally non-functional placeholders showing the roadmap.
 
-### Phase 2 — Robustness, retry, and richer result handling
+### Phase 2 — SQL query mode alongside pandas
 
-- **Goal:** Harden the core loop: when the generated code errors or returns nothing usable, the agent shows a clear, specific message (and optionally retries once with the error fed back), large result tables are paginated/capped sensibly, and the four analytical shapes plus edge cases (empty result, all-null column, division-by-zero) are covered end-to-end.
+- **Goal:** Add SQL as an alternative analysis mode. Users toggle between Pandas and SQL modes before asking a question. In SQL mode, the agent loads the CSV into an in-memory SQLite table, generates SQL (not pandas) to answer the question, runs it locally, and shows the generated SQL code in "Show its work" — mirroring all the pandas path's capabilities (group-by, filter+aggregate, top-N, scalar, error handling). Both modes keep data local (only schema + sample + question to Gemini; full dataset computed locally), always expose generated code, and handle edge cases (malformed CSV, unanswerable questions).
 - **Independent slices (parallel build units):**
-  - `backend-resilience` (backend) — one bounded retry of `generate_code` when `execute_code` raises (feeding the error back to the LLM), result-size capping/truncation with a "truncated" flag, and clearer sandbox error categorization. Deps: none.
-  - `backend-edgetests` (backend) — edge-case integration tests (empty result, all-null, divide-by-zero, question unanswerable from columns) against real Gemini. Deps: declared dependency on `backend-resilience`; serialize after it.
+  - `backend-sql` (backend) — add SQL generation and execution paths in the analyst node. Extend `generate_code` to branch on a `mode` field (pandas vs SQL); add SQL-specific prompts (`generate_sql.md`), a SQLite table builder, and a local SQL executor (mirroring the pandas sandbox's restrictions: sandboxed execution, timeout, result-size caps). Deps: none.
+  - `backend-tests-sql` (backend) — integration tests for SQL mode, mirroring all the Phase-1 pandas tests (group-by, filter+aggregate, top-N, scalar, malformed CSV, unanswerable question) against real Gemini. Deps: declared dependency on `backend-sql`; serialize after it.
+  - `frontend-mode-toggle` (frontend) — add a mode toggle control (Pandas / SQL) above the question input; wire it to the request payload (add `mode` field). Deps: none.
+- **Key surfaces / files:**
+  - `backend-sql` writes: `src/graph/nodes.py` (extend `generate_code` + `execute_code` to handle SQL), `src/graph/edges.py`, `src/graph/agent.py`, `src/graph/state.py` (add `mode: str` field), `src/analysis/sql_executor.py` (new), `src/prompts/generate_sql.md` (new), `src/domain/run.py` (extend for SQL).
+  - `backend-tests-sql` writes: `tests/integration/test_analyst_sql.py` (new), `tests/fixtures/*.csv` (new or reused).
+  - `frontend-mode-toggle` writes: `frontend/src/app/page.tsx` (add mode toggle control above question input).
+  - Disjoint: backend slices touch only `src/` + `tests/`; frontend touches only `frontend/`. No shared file between backend and frontend beyond the API contract.
+- **Gate command:** `uv run alembic upgrade head && uv run pytest tests/integration/test_analyst.py tests/integration/test_analyst_sql.py tests/unit/test_api.py -q` (runs against the real Gemini API via `AGENT_GEMINI_API_KEY` in `.env`; SQLite is the production driver).
+- **How the user tests it (handoff seed):**
+  1. Build and start the app as in Phase 1.
+  2. Open **http://localhost:8001/app/** and upload `tests/fixtures/sales.csv`.
+  3. **Test Pandas mode (existing):** toggle to Pandas (default), type **"What were total sales by region, highest first?"**, submit → expect the same pandas answer, code, and result table as Phase 1.
+  4. **Test SQL mode (new):** toggle to SQL, type **"What were total sales by region, highest first?"**, submit → expect a correct answer (same numbers as pandas), a one-paragraph plain-English explanation, a "Show its work" panel showing the generated **SQL** (a `SELECT ... GROUP BY ... ORDER BY ...` snippet), and a result table. The SQL is sandboxed (no multi-statement, no mutations, no file access) and executed against a local in-memory SQLite table built from the CSV.
+  5. **Test SQL edge cases:** upload a CSV with a column that does not apply (e.g., "gender" in a sales table), toggle to SQL, ask **"What was the average gender?"** → expect a clear "I can't compute that" error (not a wrong result).
+  6. **Labelled stubs (unchanged):** greyed-out "Charts (coming soon)", disabled "Connect a database (coming soon)", disabled "Export results (coming soon)". These remain as Phase 1.
+
+### Phase 3 — Robustness, retry, and richer result handling
+
+- **Goal:** Harden the core loop for both pandas and SQL modes: when the generated code errors or returns nothing usable, the agent shows a clear, specific message (and optionally retries once with the error fed back), large result tables are paginated/capped sensibly, and the four analytical shapes plus edge cases (empty result, all-null column, division-by-zero) are covered end-to-end for both modes.
+- **Independent slices (parallel build units):**
+  - `backend-resilience` (backend) — one bounded retry of `generate_code` when `execute_code` raises (feeding the error back to the LLM), result-size capping/truncation with a "truncated" flag, and clearer sandbox error categorization for both pandas and SQL paths. Deps: none.
+  - `backend-edgetests` (backend) — edge-case integration tests (empty result, all-null, divide-by-zero, question unanswerable from columns) for both pandas and SQL modes against real Gemini. Deps: declared dependency on `backend-resilience`; serialize after it.
   - `frontend-polish` (frontend) — render the "truncated" flag, the retry/error states, and an empty-result state cleanly in the UI. Deps: none.
 - **Key surfaces / files:**
-  - `backend-resilience` writes: `src/graph/nodes.py`, `src/graph/edges.py`, `src/graph/agent.py`, `src/analysis/sandbox.py`, `src/domain/run.py`.
-  - `backend-edgetests` writes: `tests/integration/test_analyst_edges.py` (new), `tests/fixtures/*.csv` (new).
+  - `backend-resilience` writes: `src/graph/nodes.py`, `src/graph/edges.py`, `src/graph/agent.py`, `src/analysis/sandbox.py`, `src/analysis/sql_executor.py`, `src/domain/run.py`.
+  - `backend-edgetests` writes: `tests/integration/test_analyst_edges.py` (new), `tests/integration/test_analyst_sql_edges.py` (new), `tests/fixtures/*.csv` (new).
   - `frontend-polish` writes: `frontend/src/app/page.tsx`.
 - **Gate command:** `uv run alembic upgrade head && uv run pytest tests/integration -q` (real Gemini via `.env`).
-- **How the user tests it (handoff seed):** Start the app as in Phase 1, open http://localhost:8001/app/, upload `tests/fixtures/sales.csv`, and ask a deliberately impossible question ("What is the average customer satisfaction score?" when no such column exists) → expect a clear "I don't see a column for that" style message, not a wrong number or a crash. Then ask a filter that matches no rows ("total sales where region = 'Atlantis'") → expect a clean "no matching rows" answer. The code panel still shows what was attempted.
+- **How the user tests it (handoff seed):** Start the app as in Phase 2, open http://localhost:8001/app/, upload `tests/fixtures/sales.csv`. Test pandas mode: ask a deliberately impossible question ("What is the average customer satisfaction score?" when no such column exists) → expect a clear error message. Test SQL mode: ask the same impossible question → expect the same clarity. Then ask a filter that matches no rows in each mode ("total sales where region = 'Atlantis'") → expect a clean "no matching rows" answer in both. The code panel shows what was attempted in each mode.
 
-### Phase 3 — Charts (wire the first deferred stub)
+### Phase 4 — Charts (wire the first deferred stub)
 
-- **Goal:** Turn the "Charts (coming soon)" stub into a real, optional chart for results that are naturally chartable (a group-by series), rendered locally from the computed result table — no new data leaves the machine.
+- **Goal:** Turn the "Charts (coming soon)" stub into a real, optional chart for results that are naturally chartable (a group-by series), rendered locally from the computed result table — no new data leaves the machine. Both pandas and SQL modes support charts.
 - **Independent slices (parallel build units):**
-  - `backend-chartspec` (backend) — emit a small, declarative chart spec (type + x/y from the result table) when the result is chartable. Deps: none.
+  - `backend-chartspec` (backend) — emit a small, declarative chart spec (type + x/y from the result table) when the result is chartable, agnostic to whether the result came from pandas or SQL. Deps: none.
   - `frontend-charts` (frontend) — render the chart spec with a local chart library; remove the stub label. Deps: declared dependency on `backend-chartspec`'s response field; serialize the chart-render test after it, but the component scaffold can start in parallel.
 - **Key surfaces / files:**
   - `backend-chartspec` writes: `src/graph/nodes.py`, `src/domain/run.py`, `tests/integration/test_chartspec.py` (new).
   - `frontend-charts` writes: `frontend/src/app/page.tsx`, `frontend/package.json`.
 - **Gate command:** `uv run alembic upgrade head && uv run pytest tests/integration -q` (real Gemini via `.env`).
-- **How the user tests it (handoff seed):** Open http://localhost:8001/app/, upload `tests/fixtures/sales.csv`, ask "total sales by region" → expect the existing answer/code/table PLUS a bar chart of region totals where the "Charts (coming soon)" stub used to be.
+- **How the user tests it (handoff seed):** Open http://localhost:8001/app/, upload `tests/fixtures/sales.csv`. Test pandas mode: ask "total sales by region" in Pandas mode → expect the answer/code/table PLUS a bar chart of region totals. Test SQL mode: ask the same question in SQL mode → expect the same chart (derived from the SQL result). The "Charts (coming soon)" stub is now a real chart.
 
 > Further deferred work (each its own future phase, currently labelled stubs or out-of-scope): live database connections, multi-file joins, large-file streaming, conversation/follow-up memory, result export.
