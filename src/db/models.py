@@ -25,6 +25,12 @@ class RunRow(Base):
     input_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Analyst capability columns
+    question: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generated_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_table: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON-serialized
+    answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_now
     )

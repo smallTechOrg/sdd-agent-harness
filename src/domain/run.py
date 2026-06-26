@@ -2,11 +2,16 @@ from pydantic import BaseModel
 
 
 class RunRequest(BaseModel):
-    input_text: str
+    csv_text: str
+    question: str
 
 
 class RunResponse(BaseModel):
     run_id: str
     status: str
-    output_text: str | None = None
+    answer: str | None = None
+    explanation: str | None = None
+    generated_code: str | None = None
+    result_table: dict | None = None
+    truncated: bool = False
     error: str | None = None

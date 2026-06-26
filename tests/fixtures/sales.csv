@@ -1,0 +1,17 @@
+region,product,sales,shipped_late
+North,Widget,100,True
+North,Gadget,200,False
+North,Widget,150,False
+South,Widget,80,True
+South,Gadget,120,False
+South,Gizmo,50,True
+East,Gadget,300,False
+East,Gizmo,90,True
+East,Widget,60,False
+West,Gizmo,40,False
+West,Gadget,220,True
+West,Widget,110,False
+North,Gizmo,70,False
+South,Gadget,130,False
+East,Widget,140,True
+West,Gizmo,160,False
