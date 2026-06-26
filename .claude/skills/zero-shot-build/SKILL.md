@@ -23,8 +23,8 @@ Intake captures scope, stack, LLM provider, output/trigger, and constraints, MAY
    - **Stack** — language, database, hosting? ("no preference" → sensible defaults, documented as an assumption; no later user round to confirm).
    - **LLM provider** — offer these options: **OpenRouter**, **Gemini (API key)**, **Anthropic (API key)**, **Other**. (Drives which key the user sets and the default model from `harness/patterns/tech-stack.md`.)
    - **Output/trigger** — how invoked, what produced?
-   - **Key constraints** — hard no's, compliance, systems to integrate.
-4. **API key** (the only manual user step). Based on the chosen provider, tell the user to set the matching key in `.env` (from `.env.example`): `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, or `ANTHROPIC_API_KEY` (for **Other**, ask which env var + base URL). The build and tests load the key programmatically from `.env` (gitignored) and use it for all tests and evals; confirm by presence (bool) only — never echo, print, paste, or commit a secret value.
+   - **Key constraints** *(multiSelect: true)* — hard no's, compliance, systems to integrate.
+4. **API key** (the only manual user step). **First, read `.env` and check whether the matching key for the chosen provider is already set (non-empty):** `AGENT_OPENROUTER_API_KEY`, `AGENT_GEMINI_API_KEY`, or `AGENT_ANTHROPIC_API_KEY` (for **Other**, ask which env var + base URL). If the key is already present and non-empty, skip the prompt entirely and proceed silently. Only if the key is missing or empty, tell the user to set it in `.env` (from `.env.example`) and wait for their confirmation before continuing. The build and tests load the key programmatically from `.env` (gitignored) and use it for all tests and evals; confirm by presence (bool) only — never echo, print, paste, or commit a secret value.
 5. Synthesize answers into a one-paragraph brief. ("Just build it" → narrow MVP, Python + PostgreSQL defaults, documented as assumptions.)
 
 ## Stage 2 — Design + scaffold + build Phase 1 (delegate)
