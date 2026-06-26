@@ -16,6 +16,7 @@ from pathlib import Path
 
 from analysis.profiler import ProfileError, profile
 from analysis.sandbox import SandboxError, run_sandbox
+from analysis.sql_executor import SQLExecutorError, run_sql
 from config.settings import get_settings
 from graph.state import AgentState
 from llm.client import LLMClient
@@ -60,7 +61,15 @@ def profile_csv(state: AgentState) -> AgentState:
 
 def generate_code(state: AgentState) -> AgentState:
     try:
-        system = _load_prompt("generate_code.md")
+        # Determine the mode (default to pandas for backward compatibility)
+        mode = state.get("mode", "pandas")
+
+        # Choose the appropriate system prompt
+        if mode == "sql":
+            system = _load_prompt("generate_sql.md")
+        else:
+            system = _load_prompt("generate_code.md")
+
         # Build the user message from schema + capped sample + row count + question ONLY.
         user_msg = (
             f"SCHEMA (columns and dtypes):\n{json.dumps(state['schema'])}\n\n"
@@ -81,15 +90,36 @@ def generate_code(state: AgentState) -> AgentState:
 def execute_code(state: AgentState) -> AgentState:
     try:
         settings = get_settings()
-        result_table, result_scalar, truncated = run_sandbox(
-            state["generated_code"], state["df"], settings
-        )
-        return {
-            **state,
-            "result_table": result_table,
-            "result_scalar": result_scalar,
-            "truncated": truncated,
-        }
+        mode = state.get("mode", "pandas")
+
+        if mode == "sql":
+            # SQL mode: execute the generated SQL query
+            result_table, truncated = run_sql(
+                state["generated_code"],
+                state["df"],
+                table_name="data",
+                timeout=settings.exec_timeout,
+                max_rows=settings.max_result_rows,
+            )
+            return {
+                **state,
+                "result_table": result_table,
+                "result_scalar": None,
+                "truncated": truncated,
+            }
+        else:
+            # Pandas mode: execute the generated pandas code (original path)
+            result_table, result_scalar, truncated = run_sandbox(
+                state["generated_code"], state["df"], settings
+            )
+            return {
+                **state,
+                "result_table": result_table,
+                "result_scalar": result_scalar,
+                "truncated": truncated,
+            }
+    except SQLExecutorError as exc:
+        return {**state, "error": str(exc)}
     except SandboxError as exc:
         return {**state, "error": str(exc)}
     except Exception as exc:  # noqa: BLE001

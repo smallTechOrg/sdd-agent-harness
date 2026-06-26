@@ -27,6 +27,7 @@ class RunRow(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Analyst capability columns
     question: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mode: Mapped[str | None] = mapped_column(Text, nullable=True, default="pandas")  # "pandas" or "sql"
     generated_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     result_table: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON-serialized
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)

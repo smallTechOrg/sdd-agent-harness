@@ -27,6 +27,7 @@ def _to_response(run: RunRow) -> dict:
     return RunResponse(
         run_id=run.id,
         status=run.status,
+        mode=getattr(run, "mode", "pandas"),
         answer=run.answer,
         explanation=run.explanation,
         generated_code=run.generated_code,
@@ -38,7 +39,7 @@ def _to_response(run: RunRow) -> dict:
 
 @router.post("/runs")
 def create_run(req: RunRequest, session: Session = Depends(get_session)) -> dict:
-    run_id = run_agent(req.csv_text, req.question)
+    run_id = run_agent(req.csv_text, req.question, mode=req.mode)
     run = session.get(RunRow, run_id)
     if run is None:
         raise api_error("NOT_FOUND", "Run not found after creation", 500)

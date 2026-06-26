@@ -16,7 +16,7 @@ def _compact_output(answer: str | None, explanation: str | None) -> str | None:
     return parts[0]
 
 
-def run_agent(csv_text: str, question: str) -> str:
+def run_agent(csv_text: str, question: str, mode: str = "pandas") -> str:
     init_db()
 
     with create_db_session() as session:
@@ -29,6 +29,7 @@ def run_agent(csv_text: str, question: str) -> str:
         "run_id": run_id,
         "csv_text": csv_text,
         "question": question,
+        "mode": mode,
         "retry_count": 0,
         "error": None,
     }
@@ -41,6 +42,7 @@ def run_agent(csv_text: str, question: str) -> str:
     with create_db_session() as session:
         run = session.get(RunRow, run_id)
         run.status = final.get("status", "completed")
+        run.mode = mode
         run.generated_code = final.get("generated_code")
         run.answer = answer
         run.explanation = explanation
