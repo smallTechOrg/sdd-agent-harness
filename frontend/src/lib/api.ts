@@ -91,6 +91,15 @@ async function postJson<T>(path: string, payload: unknown): Promise<T> {
   return unwrap<T>(res)
 }
 
+async function patchJson<T>(path: string, payload: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return unwrap<T>(res)
+}
+
 async function del<T>(path: string): Promise<T> {
   const res = await fetch(path, { method: 'DELETE', headers: { Accept: 'application/json' } })
   return unwrap<T>(res)
@@ -150,24 +159,46 @@ export interface AskStep {
   is_error: boolean
 }
 
+/**
+ * Response from POST /ask. Two variants share this shape (spec/api.md):
+ *  - `type: "answer"`       — the full analysis result (answer + steps + tokens…)
+ *  - `type: "clarification"`— a thin pre-flight (C26) result carrying
+ *    `clarification_question`, `run_id`, and `session_id` only; the answer/steps
+ *    fields are absent, so they are typed optional here.
+ */
 export interface AskResponse {
   type: string
   run_id: string
   session_id?: string | null
-  dataset_ids: string[]
+  dataset_ids?: string[]
+  derived_dataset_ids?: string[]
   datasets_used?: string[]
-  answer_markdown: string
+  selector_reasoning?: string | null
+  answer_markdown?: string
   answer_html?: string
-  iteration_count: number
-  tokens_input: number
-  tokens_output: number
-  status: string
-  is_best_effort: boolean
-  steps: AskStep[]
-  suggested_questions: string[]
+  iteration_count?: number
+  tokens_input?: number
+  tokens_output?: number
+  status?: string
+  is_best_effort?: boolean
+  steps?: AskStep[]
+  suggested_questions?: string[]
   prompt_breakdown?: Record<string, unknown>
-  // Clarification variant (Phase 3 — handled defensively here):
+  // Clarification variant (type === "clarification"):
   clarification_question?: string
+}
+
+/** Arguments for the `ask` wrapper — datasets are optional (selector picks). */
+export interface AskArgs {
+  question: string
+  /** Explicit multi-dataset selection (C19 selector runs when omitted/empty). */
+  datasetIds?: string[]
+  /** Single-dataset convenience (back-compat with the Phase-2 caller). */
+  datasetId?: string
+  /** Continue an existing session; omit to start a new one server-side. */
+  sessionId?: string | null
+  /** Skip the C26 clarification pre-flight (used on clarification re-submit). */
+  skipClarification?: boolean
 }
 
 export interface CurrentRun {
@@ -175,6 +206,70 @@ export interface CurrentRun {
   status: string
   iteration_count: number
   max_iterations: number
+}
+
+/** GET /stats/daily — today's aggregated usage (spec/api.md). */
+export interface DailyStats {
+  date: string
+  model: string
+  tokens_input: number
+  tokens_output: number
+  query_count: number
+  context_limit: number
+}
+
+// ---------------------------------------------------------------------------
+// Session types (Phase 3)
+// ---------------------------------------------------------------------------
+
+/** A session summary as returned by GET /sessions and /datasets/{id}/sessions. */
+export interface Session {
+  id: string
+  name: string | null
+  dataset_id?: string | null
+  dataset_ids?: string[]
+  turn_count: number
+  first_question: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  [key: string]: unknown
+}
+
+/** One turn within a session (GET /sessions/{id} → turns[]). Mirrors /ask. */
+export interface TurnView {
+  run_id: string
+  question: string
+  answer_markdown?: string | null
+  answer_html?: string | null
+  type?: string
+  clarification_question?: string | null
+  iteration_count?: number
+  tokens_input?: number
+  tokens_output?: number
+  status?: string
+  is_best_effort?: boolean
+  steps?: AskStep[]
+  suggested_questions?: string[]
+  dataset_ids?: string[]
+  datasets_used?: string[]
+  selector_reasoning?: string | null
+  prompt_breakdown?: Record<string, unknown>
+  created_at?: string | null
+  [key: string]: unknown
+}
+
+/** Full session detail with its turns (GET /sessions/{id}). */
+export interface SessionDetail extends Session {
+  turns: TurnView[]
+}
+
+// ---------------------------------------------------------------------------
+// Memory types (Phase 3 — C29/C31)
+// ---------------------------------------------------------------------------
+
+export interface MemoryResponse {
+  global_memory: string
+  global_memory_facts: string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -212,8 +307,57 @@ export const api = {
 
   deleteDataset: (id: string) => del<unknown>(`/datasets/${encodeURIComponent(id)}`),
 
-  ask: (datasetId: string, question: string) =>
-    postJson<AskResponse>('/ask', { dataset_id: datasetId, question }),
+  /**
+   * POST /ask — the analysis entry point (spec/api.md).
+   *
+   * Body: `{dataset_id? | dataset_ids?, question, session_id?, skip_clarification}`.
+   *  - Pass `datasetIds` to pin an explicit set of datasets (C19 selector is
+   *    skipped); pass a single `datasetId` for the simple one-dataset case;
+   *    omit both to let the server's selector pick over all uploaded datasets.
+   *  - Pass `sessionId` to continue a session; omit to start a new one.
+   *  - Pass `skipClarification` to bypass the C26 pre-flight (used when a user
+   *    re-submits after a clarification turn).
+   *
+   * Returns either a `type:"answer"` or a `type:"clarification"` AskResponse.
+   */
+  ask: (args: AskArgs) => {
+    const body: Record<string, unknown> = {
+      question: args.question,
+      skip_clarification: args.skipClarification ?? false,
+    }
+    if (args.datasetIds && args.datasetIds.length > 0) {
+      body.dataset_ids = args.datasetIds
+    } else if (args.datasetId) {
+      body.dataset_id = args.datasetId
+    }
+    if (args.sessionId) body.session_id = args.sessionId
+    return postJson<AskResponse>('/ask', body)
+  },
 
   currentRun: () => getJson<CurrentRun>('/runs/current'),
+
+  dailyStats: () => getJson<DailyStats>('/stats/daily'),
+
+  // --- Sessions (Phase 3) ---------------------------------------------------
+
+  listSessions: () => getJson<Session[]>('/sessions'),
+
+  getSession: (id: string) => getJson<SessionDetail>(`/sessions/${encodeURIComponent(id)}`),
+
+  renameSession: (id: string, name: string) =>
+    patchJson<Session>(`/sessions/${encodeURIComponent(id)}/name`, { name }),
+
+  deleteSession: (id: string) => del<unknown>(`/sessions/${encodeURIComponent(id)}`),
+
+  deleteAllSessions: () => del<unknown>('/sessions'),
+
+  datasetSessions: (datasetId: string) =>
+    getJson<Session[]>(`/datasets/${encodeURIComponent(datasetId)}/sessions`),
+
+  // --- Memory (Phase 3 — C29/C31) ------------------------------------------
+
+  getMemory: () => getJson<MemoryResponse>('/memory'),
+
+  patchMemory: (text: string) =>
+    patchJson<MemoryResponse>('/memory', { global_memory: text }),
 }

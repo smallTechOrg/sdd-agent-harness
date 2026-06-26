@@ -8,18 +8,22 @@ import {
 } from '@/lib/api'
 
 /**
- * Datasets / "Tables" card — REAL in Phase 2.
+ * Datasets / "Tables" card — REAL, multi-select in Phase 3.
  *
  * Fetches GET /datasets on mount and whenever `datasetsVersion` changes (the
  * parent bumps it after each upload and each completed ask, surfacing new /
- * derived datasets). Each row shows filename + rows×cols + format, a radio to
- * pick THE active dataset for asking (single-dataset in Phase 2), a "cols"
- * toggle that lazily fetches GET /datasets/{id} for the column schema, and a
- * delete action with an inline confirm → DELETE /datasets/{id}.
+ * derived datasets). Each row shows filename + rows×cols + format, a checkbox to
+ * include the dataset in the next question, a "cols" toggle that lazily fetches
+ * GET /datasets/{id} for the column schema, and a delete action with an inline
+ * confirm → DELETE /datasets/{id}.
+ *
+ * Phase-3 sessions can span MULTIPLE datasets. Selection is now multi-select:
+ *  - select one or more datasets to pin them for the next ask, OR
+ *  - select none ("Let the agent pick") so the server's C19 selector chooses
+ *    over all uploaded datasets.
  *
  * The filter tabs (All|Uploaded|Derived|This session) remain labelled stubs —
- * filtering by session is a Phase-3 concept and there are no derived datasets
- * until Phase 4 — so they are shown disabled, not wired.
+ * there are no derived datasets until Phase 4 — so they are shown disabled.
  */
 
 const FILTERS = ['All', 'Uploaded', 'Derived', 'This session'] as const
@@ -32,13 +36,15 @@ interface ColsState {
 
 export function TablesCard({
   datasetsVersion,
-  selectedDatasetId,
-  onSelect,
+  selectedDatasetIds,
+  onToggleSelect,
+  onClearSelection,
   onDeleted,
 }: {
   datasetsVersion: number
-  selectedDatasetId: string | null
-  onSelect: (id: string) => void
+  selectedDatasetIds: string[]
+  onToggleSelect: (id: string) => void
+  onClearSelection: () => void
   onDeleted: (id: string) => void
 }) {
   const [datasets, setDatasets] = useState<DatasetSummary[]>([])
@@ -138,6 +144,31 @@ export function TablesCard({
         </button>
       </div>
 
+      {/* Selection mode: explicit datasets vs. let the agent pick (C19). */}
+      {datasets.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs">
+          {selectedDatasetIds.length === 0 ? (
+            <span className="font-medium text-gray-700">
+              Let the agent pick the dataset(s)
+            </span>
+          ) : (
+            <>
+              <span className="font-medium text-gray-700">
+                {selectedDatasetIds.length} dataset
+                {selectedDatasetIds.length === 1 ? '' : 's'} selected
+              </span>
+              <button
+                type="button"
+                onClick={onClearSelection}
+                className="rounded border border-gray-300 bg-white px-2 py-0.5 font-medium text-gray-600 hover:bg-gray-50"
+              >
+                Clear (let agent pick)
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Filter tabs — still labelled stubs (no session/derived concept yet). */}
       <div
         role="group"
@@ -190,7 +221,7 @@ export function TablesCard({
         <ul role="list" className="space-y-2">
           {datasets.map(ds => {
             const cols = colsById[ds.id]
-            const selected = selectedDatasetId === ds.id
+            const selected = selectedDatasetIds.includes(ds.id)
             return (
               <li
                 key={ds.id}
@@ -201,10 +232,10 @@ export function TablesCard({
                 <div className="flex flex-wrap items-center gap-2">
                   <label className="flex min-w-0 flex-1 items-center gap-2">
                     <input
-                      type="radio"
-                      name="active-dataset"
+                      type="checkbox"
                       checked={selected}
-                      onChange={() => onSelect(ds.id)}
+                      onChange={() => onToggleSelect(ds.id)}
+                      aria-label={`Include ${ds.filename} in the next question`}
                       className="h-4 w-4 shrink-0"
                     />
                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800">

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { StubBanner } from '@/components/StubBanner'
 import { AnalyseTab } from '@/components/analyse/AnalyseTab'
 import { DatabaseTab } from '@/components/database/DatabaseTab'
+import { MemoryModal } from '@/components/analyse/MemoryModal'
 import { api } from '@/lib/api'
 
 type Tab = 'analyse' | 'database'
@@ -23,6 +24,8 @@ export function AppShell() {
   const [tab, setTab] = useState<Tab>('analyse')
   // undefined = still loading health; string = resolved provider.
   const [provider, setProvider] = useState<string | undefined>(undefined)
+  // Global-memory ("Project notes") modal — REAL in Phase 3.
+  const [memoryOpen, setMemoryOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -71,10 +74,9 @@ export function AppShell() {
             )}
             <button
               type="button"
-              disabled
-              aria-disabled="true"
-              title="Coming in Phase 3"
-              className="cursor-not-allowed rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm font-medium text-gray-400"
+              onClick={() => setMemoryOpen(true)}
+              title="Edit the agent's global project notes (memory)"
+              className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
               Project notes
             </button>
@@ -108,7 +110,9 @@ export function AppShell() {
           aria-labelledby="tab-analyse"
           hidden={tab !== 'analyse'}
         >
-          {tab === 'analyse' && <AnalyseTab provider={provider} />}
+          {tab === 'analyse' && (
+            <AnalyseTab provider={provider} onOpenMemory={() => setMemoryOpen(true)} />
+          )}
         </div>
         <div
           role="tabpanel"
@@ -119,6 +123,9 @@ export function AppShell() {
           {tab === 'database' && <DatabaseTab />}
         </div>
       </main>
+
+      {/* Global-memory / Project notes modal (reachable from header + sidebar). */}
+      <MemoryModal open={memoryOpen} onClose={() => setMemoryOpen(false)} />
     </div>
   )
 }
