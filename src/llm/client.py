@@ -31,5 +31,5 @@ class LLMClient:
     def __init__(self) -> None:
         self._provider = _make_provider()
 
-    def call_model(self, prompt: str, *, system: str | None = None) -> str:
+    def call_model(self, prompt: str, *, system: str | None = None):
         return self._provider.call_model(prompt, system=system)
