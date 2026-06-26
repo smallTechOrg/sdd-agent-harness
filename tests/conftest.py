@@ -28,11 +28,14 @@ def _isolated_db(tmp_path, monkeypatch):
 
 @pytest.fixture
 def _require_llm_key():
-    """Skip if no LLM provider key is set — works for Anthropic or Gemini."""
+    """Skip if no LLM provider key is set — Anthropic, Gemini, or OpenRouter."""
     from config.settings import get_settings
     s = get_settings()
-    if not s.anthropic_api_key and not s.gemini_api_key:
-        pytest.skip("No LLM key set in .env (AGENT_ANTHROPIC_API_KEY or AGENT_GEMINI_API_KEY)")
+    if not s.anthropic_api_key and not s.gemini_api_key and not s.openrouter_api_key:
+        pytest.skip(
+            "No LLM key set in .env (AGENT_ANTHROPIC_API_KEY, "
+            "AGENT_GEMINI_API_KEY, or AGENT_OPENROUTER_API_KEY)"
+        )
 
 
 @pytest.fixture

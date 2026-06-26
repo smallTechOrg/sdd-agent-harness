@@ -64,6 +64,38 @@ function nextTurnId(): string {
   return `t${turnSeq}-${Date.now()}`
 }
 
+/**
+ * C32 collapse state persists per browser session via sessionStorage, keyed by
+ * turn id. We only persist explicit user overrides (the default — latest turn
+ * expanded, older collapsed — is recomputed on render), so a resumed thread
+ * restores exactly the expand/collapse choices the user last made this session.
+ */
+const COLLAPSE_STORAGE_KEY = 'conversation:collapse-overrides'
+
+function loadCollapseOverrides(): Record<string, boolean> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = window.sessionStorage.getItem(COLLAPSE_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object') {
+      return parsed as Record<string, boolean>
+    }
+  } catch {
+    /* corrupt/unavailable storage — fall back to defaults */
+  }
+  return {}
+}
+
+function saveCollapseOverrides(overrides: Record<string, boolean>): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.setItem(COLLAPSE_STORAGE_KEY, JSON.stringify(overrides))
+  } catch {
+    /* storage unavailable / quota — collapse simply won't persist */
+  }
+}
+
 /** Map a persisted TurnView (from GET /sessions/{id}) into a thread Turn. */
 function turnFromView(v: TurnView): Turn {
   if (v.type === 'clarification' && v.clarification_question) {
@@ -123,8 +155,17 @@ export function ConversationCard({
   const [progress, setProgress] = useState<{ iteration: number; max: number } | null>(null)
   const [progressLabel, setProgressLabel] = useState('Thinking…')
   // Turn ids the user has manually expanded/collapsed (overrides the default).
-  const [expandedOverride, setExpandedOverride] = useState<Record<string, boolean>>({})
+  // Restored from sessionStorage on mount so collapse choices survive this
+  // browser session (C32).
+  const [expandedOverride, setExpandedOverride] = useState<Record<string, boolean>>(() =>
+    loadCollapseOverrides(),
+  )
   const questionId = useId()
+
+  // Persist collapse overrides to sessionStorage whenever they change (C32).
+  useEffect(() => {
+    saveCollapseOverrides(expandedOverride)
+  }, [expandedOverride])
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const canAsk = question.trim().length > 0 && !running
@@ -145,7 +186,8 @@ export function ConversationCard({
       hydrate: (detail: SessionDetail) => {
         const next = (detail.turns ?? []).map(turnFromView)
         setTurns(next)
-        setExpandedOverride({})
+        // Restore the user's per-turn collapse choices for this session (C32).
+        setExpandedOverride(loadCollapseOverrides())
       },
       reset: () => {
         setTurns([])
@@ -249,6 +291,24 @@ export function ConversationCard({
     setExpandedOverride(prev => ({ ...prev, [id]: value }))
   }, [])
 
+  // C32 bulk controls: set an explicit override for every collapsible (answer)
+  // turn so the whole thread expands/collapses at once. Pending/error/
+  // clarification turns aren't collapsible and are left untouched.
+  const setAllExpanded = useCallback(
+    (value: boolean) => {
+      setExpandedOverride(prev => {
+        const next = { ...prev }
+        for (const t of turns) {
+          if (t.status === 'answer') next[t.id] = value
+        }
+        return next
+      })
+    },
+    [turns],
+  )
+
+  const collapsibleCount = turns.filter(t => t.status === 'answer').length
+
   const lastTurn = turns[turns.length - 1]
   const latestSuggestions =
     lastTurn?.status === 'answer' ? (lastTurn.answer?.suggested_questions ?? []) : []
@@ -262,9 +322,35 @@ export function ConversationCard({
         <h2 id="conversation-heading" className="text-sm font-semibold text-gray-800">
           Conversation
         </h2>
-        {sessionId && (
-          <span className="text-[11px] text-gray-400">Session active</span>
-        )}
+        <div className="flex items-center gap-2">
+          {/* C32 bulk collapse/expand controls. */}
+          {collapsibleCount > 1 && (
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setAllExpanded(false)}
+                aria-label="Collapse all answers"
+                className="rounded px-1.5 py-0.5 font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+              >
+                Collapse all
+              </button>
+              <span aria-hidden="true" className="text-gray-300">
+                ·
+              </span>
+              <button
+                type="button"
+                onClick={() => setAllExpanded(true)}
+                aria-label="Expand all answers"
+                className="rounded px-1.5 py-0.5 font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+              >
+                Expand all
+              </button>
+            </div>
+          )}
+          {sessionId && (
+            <span className="text-[11px] text-gray-400">Session active</span>
+          )}
+        </div>
       </div>
 
       {/* Thread */}
