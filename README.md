@@ -1,4 +1,4 @@
-# Zero Shot Spec-Driven-Development Agent Harness
+# Zero Shot SDD Harness for Building Agents
 
 Give it a one-line idea. Walk away with a working, tested, phased agent.
 
