@@ -9,13 +9,21 @@ from fastapi.staticfiles import StaticFiles
 async def _lifespan(app: FastAPI):
     from db.session import init_db
     init_db()
+    # Ensure the uploads dir exists so the first upload never races a missing dir.
+    (Path(__file__).resolve().parent.parent.parent / "uploads").mkdir(
+        parents=True, exist_ok=True
+    )
     yield
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Agent", version="0.1.0", lifespan=_lifespan)
-    from api import health, runs
+    from api import ask, datasets, health, runs, stats, upload
     app.include_router(health.router)
+    app.include_router(upload.router)
+    app.include_router(datasets.router)
+    app.include_router(ask.router)
+    app.include_router(stats.router)
     app.include_router(runs.router)
 
     # Serve the built Next.js static export at /app
