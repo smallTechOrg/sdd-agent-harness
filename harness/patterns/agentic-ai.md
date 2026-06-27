@@ -110,23 +110,9 @@ The reusable catalogue of agentic design patterns — generic engineering doctri
 **Example** — A research agent branches across queries and sources to map an unfamiliar topic.
 
 ### 22. LLM-Generated Code Execution
-**What** — For dynamic questions over structured data (tables, DataFrames, CSVs), the LLM writes executable code (Python/pandas) and the system runs it with the data in scope. The LLM answers by writing code, not by selecting from a fixed operation list.
-**When** — Any capability where the user asks arbitrary, open-ended questions about data. This is the only correct pattern for data analysis agents.
-**Example** — User asks "top 5 teams by average goals"; LLM writes `df.groupby('team')['goals'].mean().nlargest(5)`, the system `exec()`s it with `df` in scope, and returns the result.
-
-**Anti-pattern to avoid — Rigid Op-List Interpreter:** A hardcoded list of operations (groupby, sort_values, head, filter…) that the LLM must map user questions onto. This fails silently when column names don't match, when the user's question requires chained operations, or when the op-list simply doesn't contain the right primitive. A wrong answer is returned with no error. Never use a rigid op-list for dynamic user questions — always generate executable code.
-
-```python
-# Correct: LLM generates code, system executes it
-code = llm.generate(f"Write pandas code to answer: {user_question}\nDataFrame 'df' is in scope.")
-local_vars = {"df": df}
-exec(code, {}, local_vars)
-result = local_vars.get("result")
-
-# Wrong: rigid op-list interpreter
-op = llm.classify(user_question, ops=["groupby", "sort", "head", "filter"])
-result = apply_op(op, df)  # fails when question doesn't fit a bucket
-```
+**What** — For dynamic questions over structured data, the LLM writes executable code (Python/pandas) and the system runs it with the data in scope.
+**When** — Any capability where users ask arbitrary, open-ended questions about data. **Anti-pattern:** a hardcoded op-list the LLM maps questions onto — fails silently when column names don't match or the op-list lacks a primitive. Always generate executable code, never a rigid op-list interpreter.
+**Example** — User asks "top 5 teams by avg goals"; LLM writes `df.groupby('team')['goals'].mean().nlargest(5)`, system `exec()`s it with `df` in scope.
 
 ---
 
