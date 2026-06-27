@@ -1,19 +1,19 @@
 from langgraph.graph import StateGraph, END
 
 from graph.state import AgentState
-from graph.nodes import transform_text, handle_error, finalize
-from graph.edges import after_transform
+from graph.nodes import analyze_data, handle_error, finalize
+from graph.edges import after_analyze
 
 
 def _build_graph() -> StateGraph:
     g = StateGraph(AgentState)
-    g.add_node("transform_text", transform_text)
+    g.add_node("analyze_data", analyze_data)
     g.add_node("handle_error", handle_error)
     g.add_node("finalize", finalize)
-    g.set_entry_point("transform_text")
+    g.set_entry_point("analyze_data")
     g.add_conditional_edges(
-        "transform_text",
-        after_transform,
+        "analyze_data",
+        after_analyze,
         {"finalize": "finalize", "handle_error": "handle_error"},
     )
     g.add_edge("finalize", END)

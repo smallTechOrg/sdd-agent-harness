@@ -1,0 +1,26 @@
+month,product,revenue
+January,Widget A,12000
+January,Widget B,8500
+February,Widget A,13500
+February,Widget B,9200
+March,Widget A,15000
+March,Widget B,10800
+April,Widget A,14200
+April,Widget B,11500
+May,Widget A,16800
+May,Widget B,12300
+June,Widget A,18200
+June,Widget B,13100
+July,Widget A,17500
+July,Widget B,12800
+August,Widget A,19000
+August,Widget B,14200
+September,Widget A,16500
+September,Widget B,13600
+October,Widget A,20100
+October,Widget B,15300
+November,Widget A,22500
+November,Widget B,16800
+December,Widget A,25000
+December,Widget B,18500
+January,Widget C,7200
