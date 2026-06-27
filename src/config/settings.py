@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="")
     gemini_api_key: str = Field(default="")
 
+    # Analysis self-correction retry ceiling (1 initial generate + up to N-1 retries)
+    max_attempts: int = Field(default=3)
+
 
 _settings: Settings | None = None
 

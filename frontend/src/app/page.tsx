@@ -1,77 +1,66 @@
 'use client'
 
 import { useState } from 'react'
+import { UploadZone } from './components/UploadZone'
+import { QuestionInput } from './components/QuestionInput'
+import { ResultView } from './components/ResultView'
+import { HistoryStub } from './components/HistoryStub'
+import { runAnalysis, type Analysis, type Dataset } from './components/api'
 
 export default function Home() {
-  const [input, setInput] = useState('')
-  const [result, setResult] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [dataset, setDataset] = useState<Dataset | null>(null)
+  const [analysis, setAnalysis] = useState<Analysis | null>(null)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!input.trim()) return
-    setLoading(true)
-    setError(null)
-    setResult(null)
+  function handleUploaded(next: Dataset) {
+    setDataset(next)
+    // a new dataset invalidates the previous result
+    setAnalysis(null)
+    setAnalysisError(null)
+  }
+
+  async function handleAsk(question: string) {
+    if (!dataset) return
+    setAnalyzing(true)
+    setAnalysisError(null)
+    setAnalysis(null)
     try {
-      const res = await fetch('/runs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input_text: input }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.detail?.message ?? `Request failed (${res.status})`)
-      } else if (data.data?.error) {
-        setError(data.data.error)
-      } else {
-        setResult(data.data.output_text)
-      }
-    } catch {
-      setError('Network error — is the server running?')
+      const result = await runAnalysis(dataset.dataset_id, question)
+      setAnalysis(result)
+    } catch (err) {
+      setAnalysisError(
+        err instanceof Error ? err.message : 'The analysis could not be run. Please try again.',
+      )
     } finally {
-      setLoading(false)
+      setAnalyzing(false)
     }
   }
 
+  const datasetReady = dataset?.status === 'ready'
+
   return (
-    <main className="mx-auto max-w-2xl px-4 py-16">
-      <h1 className="mb-8 text-3xl font-bold tracking-tight">Agent</h1>
+    <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
+      <header className="mb-8">
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Data Analysis Agent</h1>
+        <p className="mt-1 text-base text-slate-600">
+          Ask questions about your data — answers computed locally, with the code shown.
+        </p>
+      </header>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <textarea
-          className="w-full rounded-lg border border-gray-300 p-3 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          rows={4}
-          placeholder="Enter text to transform…"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          disabled={loading}
-        />
-        <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {loading ? 'Running…' : 'Run'}
-        </button>
-      </form>
+      <div className="space-y-6">
+        <UploadZone dataset={dataset} onUploaded={handleUploaded} />
 
-      {error && (
-        <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+        <QuestionInput enabled={!!datasetReady} loading={analyzing} onAsk={handleAsk} />
 
-      {result && (
-        <div className="mt-6 rounded-lg border border-gray-200 bg-white p-4 text-sm whitespace-pre-wrap shadow-sm">
-          {result}
-        </div>
-      )}
+        <ResultView analysis={analysis} loading={analyzing} error={analysisError} />
 
-      {!result && !error && !loading && (
-        <p className="mt-10 text-center text-sm text-gray-400">Results will appear here.</p>
-      )}
+        <HistoryStub />
+      </div>
+
+      <footer className="mt-10 text-center text-xs text-slate-400">
+        Your raw data never leaves this machine — only the schema and a small sample are sent to the model.
+      </footer>
     </main>
   )
 }

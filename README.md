@@ -1,176 +1,122 @@
-# Zero Shot SDD Harness for Building Agents
+# Data Analysis Agent
 
-Give it a one-line idea. Walk away with a working, tested, phased agent.
+> **All commands below run from the repo root** (the directory containing `pyproject.toml`, `alembic.ini`, and this README). There is no subdirectory to `cd` into except the one-time `frontend` build step, which returns you to the root.
 
-A lean, Claude-Code-native harness for building agentic software **spec-first**. One person with an idea and one API key can drive a real, production-shaped agent into existence — and a senior engineer opening the result finds a conventional, reviewable stack, not generated mush.
-
----
-
-## The Spirit
-
-Six convictions the whole repo is built around:
-
-1. **Spec is the source of truth.** The spec is written before the code, always. When spec and code disagree, the spec wins and the code is fixed (`/zero-shot-sync`). Every AI session reads the same requirements instead of re-deriving them.
-2. **Built for two audiences at once.** A non-coder drives it with a single sentence; a senior engineer inherits a clean FastAPI + LangGraph stack they can read, review, and own. Neither audience is an afterthought.
-3. **Lean harness, not a framework.** `harness/` is engineering *mindfulness* — rules and patterns that keep every session consistent — deliberately Claude-Code-only and kept small. The product runtime stays provider-agnostic; the harness does not.
-4. **Smallest first-time-right win, phase by phase.** Each phase ships the smallest increment a human can actually test, and it must work the *first* time they test it — real on the tested path, with clearly-labelled stubs for everything still to come. No rough edges on the path you're handed.
-5. **A human gates every phase.** The build is autonomous *within* a phase and stops at each boundary for you to test the increment. You stay in control of what "done" means.
-6. **Real LLM/API or it doesn't count.** Gates, tests, and evals run against the real model with keys from `.env`. A stubbed pass is not a pass.
+Upload a spreadsheet and ask questions about it in plain English. The agent computes the **real** answer over your **actual** data — it never guesses a number — and shows you the plain-language answer, the exact pandas code it ran, and the captured output of running that code. Your raw data stays on your machine: only the column schema and a small sample are ever sent to the LLM.
 
 ---
 
-## What This Is
+## What It Does
 
-A starting point for building AI agents spec-first. The repo ships with:
-
-- A working **baseline agent** in `src/` (FastAPI + LangGraph + SQLite, provider-agnostic LLM — Anthropic or Gemini, `transform_text` as the capability slot) — tests pass out of the box
-- A **spec template** in `spec/` covering roadmap, architecture, capabilities, data model, API, UI, and agent graph
-- Three **zero-shot skills** (`/zero-shot-build`, `/zero-shot-fix`, `/zero-shot-sync`)
-- A four-agent **team** — agent-builder orchestrates (plans, fans out, owns git/PR); spec-writer is the single design authority; code-generator implements one slice per instance (parallelised); qa-auditor reviews and gates
-- Engineering rules and patterns in `harness/` so every Claude Code session is consistent
-- **Human testing gate between phases** — autonomous within a phase, you test each increment before the next starts
+You open the web app, drop in a CSV, and type a question such as "What is the average salary?". The agent sends only the dataframe **schema + a small sample** to Google Gemini, asks it to write pandas code, then **executes that code locally** over your full dataset in a constrained environment. It returns a plain-language answer, the executed pandas code (so you can verify it references your real columns), and the intermediate steps / captured output. If the generated code errors, the agent feeds the error back to the model and retries (bounded) instead of surfacing a raw stack trace.
 
 ---
 
-## How to Use This
+## Prerequisites
 
-### Step 1 — Clone
+- **[`uv`](https://docs.astral.sh/uv/)** — Python environment & runner. Every Python command below is prefixed with `uv run`.
+- **[`pnpm`](https://pnpm.io/)** — to build the frontend (a Next.js static export served by the backend).
+- **A Google Gemini API key.** Copy the template and set the key:
+
+  ```bash
+  cp .env.example .env
+  ```
+
+  Then edit `.env` and set:
+
+  ```
+  AGENT_GEMINI_API_KEY=<your key>
+  ```
+
+  The default model is **`gemini-2.5-pro`**. To use a different model, set `AGENT_LLM_MODEL` in `.env` (e.g. `AGENT_LLM_MODEL=gemini-2.5-flash`).
+
+---
+
+## Run It
+
+Run these in order, all from the repo root:
 
 ```bash
-git clone https://github.com/smallTechOrg/zero-shot-sdd-harness.git my-agent
-cd my-agent
+# 1. Build the frontend (the only command that cd's, and it returns to the root)
+cd frontend && pnpm install && pnpm build && cd ..
+
+# 2. Create the local database tables
+uv run alembic upgrade head
+
+# 3. Verify the migration applied — this must print a revision (0002), not blank
+uv run alembic current
+
+# 4. Start the server
+uv run python -m src
 ```
 
-### Step 2 — Open in Claude Code
+Then open **http://localhost:8001/app/** in your browser (note the port `8001`, the `/app/`, and the **trailing slash**).
+
+`uv run alembic current` should print something containing `0002 (head)`. Blank output means no migration was applied — re-run step 2.
+
+---
+
+## How to Test It
+
+1. On the page at `http://localhost:8001/app/`, click the upload area and choose a CSV (a small employees or sales file works well).
+2. Type a question, e.g. **"What is the average salary?"** or **"How many rows are there per department?"**, and submit.
+3. Expect:
+   - a **plain-language answer**,
+   - below it, a panel showing the **pandas code that was run** (it references your real column names), and
+   - the **intermediate steps / captured output** of running that code.
+
+### Labelled "Coming soon" stubs (not bugs)
+
+The UI shows a few intentionally non-functional, greyed-out placeholders tagged **"Coming soon"** — these are roadmap markers, not broken features:
+
+- **Excel (`.xlsx`)** upload option — Phase 2.
+- **Visualize / charts** toggle — deferred (post-v1).
+- **History** panel — deferred (post-v1).
+
+### Later phases
+
+- **Phase 2** — Excel (`.xlsx`) upload: the same flow for spreadsheet files.
+- **Phase 3** — Large files (100k+ rows): bounded sampling, memory guards, and execution timeouts tuned for scale, with a progress indicator.
+
+---
+
+## Data Locality
+
+Your raw data never leaves the machine. The full file and parsed dataframe live only on the local filesystem (`data/uploads/`) and the local SQLite database. Only the dataframe **schema plus a small bounded sample/profile** is sent to the Gemini API — never your full rows. The executed code is always shown so every answer is auditable.
+
+---
+
+## Running the Tests (Gate)
 
 ```bash
-claude
+uv run pytest tests/phase1 -q
 ```
 
-### Step 3 — Build
+These tests run against the **real Gemini API** using the key in `.env` (`AGENT_GEMINI_API_KEY`). The integration test uploads a small fixture CSV, asks a question with a known numeric answer, and asserts the response contains a correct computed `result_value`, a non-empty `code` field referencing a real column name, and non-empty `steps`. If `AGENT_GEMINI_API_KEY` is unset the real-Gemini test is skipped — and a skip **blocks** the gate.
 
-```
-/zero-shot-build An agent that monitors my Shopify store for low-inventory products and drafts restock emails to suppliers
-```
-
-One intake round (scope, stack, API keys → fill `.env`), then the agent builds phase by phase and stops at each boundary for you to test.
-
----
-
-## What Happens (Intake → Phase by Phase)
-
-```
-Your idea
-    ↓
-INTAKE — scope, stack, LLM provider, constraints; fill .env with the required API key
-    ↓
-[spec-writer]  → Full spec: architecture + agent-graph + phased plan (self-reviewed)
-    ↓
-[agent-builder] → Feature branch + PR, scaffold
-    ↓
-per phase — all slices concurrently:
-    [code-generator: slice-a]  ──→  [qa-auditor: slice-a]  ─┐
-    [code-generator: slice-b]  ──→  [qa-auditor: slice-b]  ─┤→  commit + push
-    [code-generator: slice-c]  ──→  [qa-auditor: slice-c]  ─┘
-    ↓
-HUMAN TESTING GATE — exact run commands + expected result; you confirm before next phase
-    ↓
-(issue → qa-auditor classifies SPEC-vs-CODE → code-generator fixes → re-gate)
-    ↓
-repeat per phase → SHIP
-```
-
-Phase 1 is the smallest first-time-right win — real on the tested path, with labelled stubs for everything coming later. Each later phase wires one more stub into real functionality.
-
----
-
-## Repo Layout
-
-```
-src/                ← baseline agent (FastAPI + LangGraph + SQLite, Anthropic/Gemini)
-  api/              ← FastAPI routers (create_app, health, runs)
-  config/           ← Pydantic BaseSettings
-  db/               ← SQLAlchemy models + session
-  domain/           ← Pydantic request/response models
-  graph/            ← LangGraph nodes, edges, state, runner  ← CAPABILITY SLOT
-  llm/              ← LLM client + providers/ (anthropic, gemini)
-  prompts/          ← prompt templates (.md)
-  observability/
-frontend/           ← Next.js static export (served by FastAPI at /app)
-tests/
-  unit/             ← passes with no API key
-  integration/      ← requires real key in .env
-spec/               ← your spec: roadmap, architecture, capabilities/, data, api, ui, agent
-harness/
-  rules/            ← ai-agents, git, secret-hygiene
-  patterns/         ← spec-driven, phases, project-layout, tech-stack, code, test-driven, ui-ux, agentic-ai, engineering-practices
-.claude/
-  skills/           ← /zero-shot-build, /zero-shot-fix, /zero-shot-sync
-  agents/           ← agent-builder, spec-writer, code-generator, qa-auditor
-CLAUDE.md
-pyproject.toml
-alembic.ini        ← Alembic migrations (alembic/)
-agent.py            ← verify setup (default); --run to start the server
-.env.example
-```
-
-**Capability slot** — the three files to replace for your agent:
-- `src/graph/nodes.py` — replace `transform_text` with your logic
-- `src/prompts/transform.md` — replace with your system prompt
-- `frontend/src/app/page.tsx` — replace the transform form with your UI
-
-Everything else (graph wiring, API, DB, settings, tests) is already working.
-
----
-
-## Running the Baseline
+To run the whole suite (unit + integration + phase gates):
 
 ```bash
-cp .env.example .env
-# edit .env: set exactly ONE provider key —
-#   AGENT_ANTHROPIC_API_KEY=<your key>   or   AGENT_GEMINI_API_KEY=<your key>
-# the provider is auto-detected from whichever key is set
-uv sync
-python agent.py                        # verify tools, .env, deps, tests (default)
-python agent.py --run                  # migrations + frontend build + start server
-```
-
-Once running:
-
-| URL | What |
-|-----|------|
-| `http://localhost:8001/app/` | **UI** — transform form (the capability slot) |
-| `http://localhost:8001/health` | API health check |
-| `http://localhost:8001/docs` | Interactive API docs (Swagger) |
-
-Tests:
-
-```bash
-uv run pytest tests/unit/ -v          # no key needed
-uv run pytest tests/ -v               # requires real key in .env
+uv run pytest -q
 ```
 
 ---
 
-## Rules AI Agents Follow
+## Project Layout
 
-Full rules in `harness/rules/ai-agents.md`. Summary:
-
-- Read the full spec before writing any code
-- Never skip a phase; commit every logical unit
-- Tests run against the real LLM/API using keys from `.env` — stubbed runs do not count as passing
-- Each phase is tested by the human before the next phase starts
-- The build record is git history + the PR + the per-phase test-handoffs
-
----
-
-## FAQ
-
-**What if I already have a stack in mind?**
-State it in the idea: `/zero-shot-build [idea] — use Python + FastAPI + PostgreSQL`. Stack choices are binding.
-
-**What if something breaks?**
-Run `/zero-shot-fix [what's broken]` — qa-auditor classifies the problem (SPEC vs CODE), the right generator fixes it, qa-auditor re-gates.
-
-**What if spec and code drift?**
-Run `/zero-shot-sync` — qa-auditor classifies each divergence, generators fix, spec wins.
+```
+src/
+  api/            ← FastAPI routers (health, datasets, analyses) + static /app mount
+  config/         ← Pydantic settings (env prefix AGENT_)
+  datasets/       ← CSV parse, local storage, schema/profile extraction
+  db/             ← SQLAlchemy models (datasets, analyses) + session
+  domain/         ← Pydantic request/response models
+  execution/      ← local pandas code sandbox
+  graph/          ← LangGraph nodes/edges/state/runner (the analysis loop)
+  llm/            ← LLM client + Gemini provider
+  prompts/        ← analyze.md system prompt
+  observability/  ← structured logging
+frontend/         ← Next.js static export (served by FastAPI at /app)
+tests/            ← unit/ (no key) + integration/ + phase1/ (real Gemini via .env)
+alembic/          ← migrations (0001 baseline, 0002 datasets + analyses)
+```
