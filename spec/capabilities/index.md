@@ -13,11 +13,13 @@ A capability is a single, discrete action or behavior the agent performs. Exampl
 
 ## Capabilities in This Project
 
-<!-- FILL IN: List capabilities here as they are defined. Each entry links to its spec file (no number prefix). -->
+These are the Phase-1 (core-loop) capabilities. Later-phase features (conversation memory, auto-insights, live DB source, agentic resilience) become capabilities as their phases land — see [../roadmap.md](../roadmap.md).
 
-| Capability | File |
-|-----------|------|
-| <!-- name --> | [name.md](name.md) |
+| Capability | File | Phase |
+|-----------|------|-------|
+| Upload and Profile | [upload-and-profile.md](upload-and-profile.md) | 1 |
+| Ask a Question, Get an Answer | [ask-question-get-answer.md](ask-question-get-answer.md) | 1 |
+| Auto-Chart | [auto-chart.md](auto-chart.md) | 1 |
 
 ## How to Add a New Capability
 
