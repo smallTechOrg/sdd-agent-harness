@@ -1,0 +1,23 @@
+{# A "Load more" page: the next window of rows for one list + a fresh load-more button if more remain.
+   The client replaces the clicked button's outerHTML with this, so rows land at the list's end and the
+   new button follows them. ``kind`` selects the row macro; ``items`` is the window; ``next_url`` is the
+   following page (omitted when exhausted). #}
+{% import "_partials.html" as P %}
+{%- if kind == 'queries' -%}
+  {# Older turns load ABOVE existing ones: the fresh Load-older button stays at the top. #}
+  {%- if next_url %}{{ P.load_more(next_url, 'Load older messages', 'loadOlderQueries') }}{% endif -%}
+  {%- for it in items %}{{ P.query_turn(it) }}{% endfor -%}
+{%- else -%}
+  {%- if kind == 'sessions' -%}
+    {%- for it in items %}{{ P.session_row(it) }}{% endfor -%}
+  {%- elif kind == 'databases' -%}
+    {%- for it in items %}{{ P.database_row(it) }}{% endfor -%}
+  {%- elif kind == 'tools' -%}
+    {%- for it in items %}{{ P.tool_item(it) }}{% endfor -%}
+  {%- elif kind == 'resources' -%}
+    {%- for it in items %}{{ P.resource_item(it) }}{% endfor -%}
+  {%- elif kind == 'prompts' -%}
+    {%- for it in items %}{{ P.prompt_item(it) }}{% endfor -%}
+  {%- endif -%}
+  {%- if next_url %}{{ P.load_more(next_url) }}{% endif -%}
+{%- endif -%}

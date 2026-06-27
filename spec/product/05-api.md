@@ -3,7 +3,7 @@
 ## API Style
 
 REST (FastAPI) + server-rendered HTML (Jinja2) for the browser UI, **plus** an MCP **JSON-RPC 2.0**
-endpoint (`POST /mcpserver/{id}`) implementing the MCP 2025-06-18 tools/resources/prompts protocol.
+endpoint (`POST /database/{id}`) implementing the MCP 2025-06-18 tools/resources/prompts protocol.
 
 The three primary entities each own an `api/` module: `mcpserver.py`, `sessions.py`, `queries.py`
 (`home.py` + `health.py` are support routes).
@@ -12,58 +12,59 @@ The three primary entities each own an `api/` module: `mcpserver.py`, `sessions.
 
 ### `GET /`
 
-**Purpose:** Home page — lists all MCP servers (name, title, type, table count, version, last-sync
-status, credential-free URI) and all sessions, side by side.
+**Purpose:** Renders the **single-page shell** (`index.html`) on the **Analyse** tab with no active
+entity — the MCP-servers list, the upload card, the sessions sidebar, and the token-usage widget.
+`/`, `GET /sessions/{id}` and `GET /database/{id}` all render this same shell with different initial
+state (see 06-ui).
 **Response:** HTML
 
 ---
 
-### `POST /mcpserver/upload`  (auxiliary)
+### `POST /database/upload`  (auxiliary)
 
-**Purpose:** Convert a CSV to Parquet under a named dataset directory and return its data URI. Creates the
+**Purpose:** Convert a CSV to Parquet under a named database directory and return its data URI. Creates the
 directory if absent. **Creates no entity** — it is the file-staging step the UI calls before
-`POST /mcpserver` (new dataset) or, in Phase B, `resources/add` (existing dataset).
+`POST /database` (new database) or before `POST /database/{id}/sync` (adding a table to an existing one).
 
-**Request:** `multipart/form-data` — `dataset_name` (required), `file` (CSV/XLSX/JSON, required)
+**Request:** `multipart/form-data` — `database_name` (required), `file` (CSV/XLSX/JSON, required)
 **Response:** JSON `{"uri": "parquet:///{name}", "table": "<table_name>"}`
 
 | Status | Condition |
 |--------|-----------|
-| 400 | Missing `dataset_name` or `file`; unsupported type; parse/convert failed |
+| 400 | Missing `database_name` or `file`; unsupported type; parse/convert failed |
 | 500 | Disk write failed |
 
 ---
 
-### `POST /mcpserver`
+### `POST /database`
 
-**Purpose:** Create an MCP server from a dataset URI + type. Enforces **1:1 dataset↔server** (rejects a
-duplicate `uri` or `name`). Reads the dataset (parquet: the directory; external: introspection) to build
-`physical_tables_json`, runs **`connection_check()` before commit** (a broken server is never persisted),
-inserts the `McpServer` row (version 1), then runs the **sync pipeline** to generate its
-tools/resources/prompts.
+**Purpose:** Create a database from a URI + type. Enforces **1:1 dataset↔database** (rejects a duplicate
+`uri` or `name`), runs **`connection_check()` via the connector before commit** (a broken database is
+never persisted), inserts the `Database` row (version 1), then runs the **sync pipeline** — which inspects
+the tables and generates its tools/resources/prompts (no physical-table catalog is stored).
 
-- **Internal (parquet, default):** `dataset_uri = parquet:///{name}` (from a prior `/upload`). The
-  dataset directory's Parquet files become the physical tables.
-- **External (postgresql, BETA):** `dataset_uri = postgresql://…`. Gated by
-  `DATAANALYSIS_ENABLE_EXTERNAL_DATASETS` (default off → 501).
+- **Internal (parquet, default):** `database_uri = parquet:///{name}` (canonical, derived from the name;
+  a file is staged via a prior `/upload`, but a database with zero tables is valid).
+- **External (`postgresql` / `sqlite` / `mongodb` / `snowflake`):** `database_uri` is the connection URI
+  (always enabled — no feature flag).
 
-**Request:** `application/x-www-form-urlencoded` or JSON — `dataset_uri` (required), `dataset_type`
-(`parquet` (default) | `postgresql`), `name` (optional; defaults to the URI's database name)
-**Response:** Redirect to `GET /` (form) or JSON `{server}` (API)
+**Request:** `application/x-www-form-urlencoded` or JSON — `database_uri` (required for external),
+`database_type` (`parquet` default | `postgresql` | `sqlite` | `mongodb` | `snowflake`), `name` (optional;
+defaults to the URI's database name)
+**Response:** Redirect to `GET /` (form) or JSON `{database}` (API)
 
 | Status | Condition |
 |--------|-----------|
-| 400 | Missing/duplicate `name`/`uri`; dataset dir empty/unreadable; `connection_check()` failed (credential-free message) |
-| 501 | External `dataset_type` while the flag is off |
+| 400 | Missing/duplicate `name`/`uri`; unknown `database_type`; missing external URI; `connection_check()` failed (credential-free message) |
 | 500 | Unexpected error |
 
 ---
 
-### `POST /mcpserver/{id}/sync`
+### `POST /database/{id}/sync`
 
 **Purpose:** Re-run the 5-stage LLM sync pipeline against the dataset and the **existing** capabilities,
 then **transactionally apply** the result: match→update, new→insert, missing→**soft-delete** (never hard
-delete); bump `version`; set title/description/`dataset_schema_json`/`last_synced_at`/`last_sync_status`.
+delete); bump `version`; set title/description/`last_synced_at`/`last_sync_status` (the schema lives on the `kind='schema'` resource).
 Closes the pools of sessions attached to this server. *(The user originally specified `GET`; this is a
 mutation that bumps version, so it is `POST`.)*
 
@@ -76,7 +77,7 @@ mutation that bumps version, so it is `POST`.)*
 
 ---
 
-### `POST /mcpserver/{id}`  — MCP JSON-RPC 2.0 dispatch
+### `POST /database/{id}`  — MCP JSON-RPC 2.0 dispatch
 
 **Purpose:** The standards-compliant MCP surface over the server's stored capability rows. A single
 endpoint dispatching on `method`. Request: `{"jsonrpc":"2.0","id":…,"method":"…","params":{…}}`.
@@ -107,21 +108,24 @@ capability then runs an **additive** partial sync of the downstream capabilities
 prompts; tool → prompts; prompt → none) — additive means insert/update only, **never** soft-delete a
 sibling (unlike the full `/sync`). One transaction, one version bump; `add` rejects a duplicate-active
 key and `update` requires an existing one (`-32602`); `tools/add`/`update` reject a non-SELECT / multi-
-statement / forbidden `sql_template` or a `$param` not declared in `input_schema` (`-32602`); a failed
-mutation persists nothing; a successful one closes attached session pools (post-commit). Any other method
-(e.g. `tools/delete`) → `-32601`. See capability 4 for the full contract.
+statement / forbidden `execution.sql_template` or a `$param` not declared in `execution.parameters`
+(`-32602`); a failed mutation persists nothing; a successful one closes attached session pools
+(post-commit). `tools|prompts|resources/delete` **hard-delete** the targeted row (manual action) then run
+a pruning cascade; the schema resource is undeletable. Any unknown method → `-32601`. See capability 4 for
+the full contract.
 
 ---
 
-### `GET /mcpserver/{id}`
+### `GET /database/{id}`
 
-**Purpose:** Server detail page — metadata (title, type, credential-free URI, version, last-sync status),
-the dataset's physical tables/schema, and the active tools/resources/prompts lists, with a **Sync** button.
+**Purpose:** Renders the single-page shell on the **Database** tab with this server active — metadata
+(title, type, credential-free URI, version, last-sync status), the schema view (physical tables + typed
+columns + relationships), and the active tools/resources/prompts, with **Sync** / **+ Add table** actions.
 **Response:** HTML — 404 if not found.
 
 ---
 
-### `POST /mcpserver/{id}/delete`
+### `POST /database/{id}/delete`
 
 **Purpose:** Delete the server (unlinking sessions, cascading capability rows) and remove the dataset
 directory on disk.
@@ -132,7 +136,7 @@ directory on disk.
 ### `POST /sessions`
 
 **Purpose:** Create a session over one or more MCP servers.
-**Request:** `application/x-www-form-urlencoded` — `name` (optional), `mcp_server_ids` (≥1 required)
+**Request:** `application/x-www-form-urlencoded` — `name` (optional), `database_ids` (≥1 required)
 **Response:** Redirect to `GET /sessions/{session_id}`
 
 | Status | Condition |
@@ -144,8 +148,9 @@ directory on disk.
 
 ### `GET /sessions/{session_id}`
 
-**Purpose:** Session page — attached servers (name + table count), all past Q&A (newest first), the
-"Ask a question" form. Accepts `?new={query_record_id}` to highlight a new answer.
+**Purpose:** Renders the single-page shell on the **Analyse** tab with this session active — its
+conversation thread (newest first), attached-server chips, and the ask form. Accepts
+`?new={query_record_id}` to drive the run overlay + status polling. `Cache-Control: no-store`.
 **Response:** HTML — 404 if not found.
 
 ---
@@ -160,7 +165,9 @@ on a background daemon thread. Redirects to `GET /sessions/{session_id}?new={que
 |--------|-----------|
 | 400 | Empty question |
 | 404 | Session not found |
-| 500 | Pipeline error — renders error.html with detail |
+
+Pipeline errors are caught on the background thread and recorded on the QueryRecord (`status="failed"`);
+the failed turn renders inline (`⚠ Failed: …`) on the next render/poll — never a bare 500.
 
 ---
 
@@ -168,6 +175,16 @@ on a background daemon thread. Redirects to `GET /sessions/{session_id}?new={que
 
 **Purpose:** Close the session's pool, then delete the Session + its QueryRecords + AgentRuns.
 **Response:** Redirect to `GET /` — 404 if not found.
+
+---
+
+### `GET /stats/daily`
+
+**Purpose:** Token/cost usage for the sidebar widget — today's totals (input/output tokens, query count,
+summed `estimated_cost_usd`), the most recent completed query's tokens/cost, and storage (server count,
+total rows). Cost is computed server-side; the UI does no pricing.
+**Response:** JSON `{"data": { model, tokens_input, tokens_output, cost_usd, query_count, last_input,
+last_output, last_cost, server_count, total_rows }}`
 
 ---
 

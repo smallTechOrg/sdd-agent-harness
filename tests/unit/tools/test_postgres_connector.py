@@ -54,11 +54,11 @@ def fake_pg(monkeypatch):
 
 
 def test_connection_check_ok(fake_pg):
-    PostgresConnector(PG_DATASET, []).connection_check()  # no raise
+    PostgresConnector(PG_DATASET).connection_check()  # no raise
 
 
 def test_discover_tables(fake_pg):
-    tables = PostgresConnector(PG_DATASET, []).discover_tables()
+    tables = PostgresConnector(PG_DATASET).discover_tables()
     assert sorted(t["table_name"] for t in tables) == ["customers", "orders"]
     orders = next(t for t in tables if t["table_name"] == "orders")
     assert orders["column_names"] == ["id", "amount"]
@@ -70,21 +70,15 @@ def test_connection_failure_sanitizes_credentials(monkeypatch):
         raise Exception("FATAL: auth failed; conninfo postgresql://u:secret@h:5432/db password=secret")
     monkeypatch.setattr("psycopg2.connect", boom)
     with pytest.raises(DatasetConnectionError) as ei:
-        PostgresConnector(PG_DATASET, []).connection_check()
+        PostgresConnector(PG_DATASET).connection_check()
     msg = str(ei.value)
     assert "secret" not in msg                   # password scrubbed
     assert "postgresql://h:5432/db" in msg        # credential-free display present
 
 
-def test_get_connector_external_disabled_raises(monkeypatch):
-    monkeypatch.setenv("DATAANALYSIS_ENABLE_EXTERNAL_DATASETS", "false")
-    with pytest.raises(DatasetConnectionError):
-        get_connector(PG_DATASET, [])
-
-
-def test_get_connector_external_enabled_returns_connector(monkeypatch):
-    monkeypatch.setenv("DATAANALYSIS_ENABLE_EXTERNAL_DATASETS", "true")
-    assert isinstance(get_connector(PG_DATASET, []), PostgresConnector)  # no connection attempted
+def test_get_connector_dispatches_to_postgres():
+    # External databases are always enabled; dispatch attempts no connection.
+    assert isinstance(get_connector(PG_DATASET), PostgresConnector)
 
 
 @pytest.mark.external_db
@@ -92,6 +86,6 @@ def test_live_postgres_roundtrip():
     uri = os.environ.get("DATAANALYSIS_TEST_PG_URI")
     if not uri:
         pytest.skip("set DATAANALYSIS_TEST_PG_URI to run the live Postgres test (BETA)")
-    connector = PostgresConnector({"name": "live", "type": "postgresql", "uri": uri}, [])
+    connector = PostgresConnector({"name": "live", "type": "postgresql", "uri": uri})
     connector.connection_check()
     assert isinstance(connector.discover_tables(), list)

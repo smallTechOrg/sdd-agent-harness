@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     session_pool_idle_seconds: int = Field(default=1800)
     checkpoint_db: str = Field(default="checkpoints.db")  # separate from the metadata DB; *.db is gitignored
     datasets_dir: str = Field(default="uploads/datasets")  # internal parquet datasets: {datasets_dir}/{slug(name)}/{table}.parquet
-    enable_external_datasets: bool = Field(default=False)  # gates external DB datasets (Postgres BETA)
     mcp_list_page_size: int = Field(default=50)  # page size for JSON-RPC */list cursor pagination
+    ui_page_size: int = Field(default=5)  # page size for server-rendered UI lists + the chat thread "Load more"
 
     @property
     def resolved_llm_provider(self) -> str:

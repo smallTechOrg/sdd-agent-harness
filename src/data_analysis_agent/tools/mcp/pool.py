@@ -1,7 +1,8 @@
 """Session-scoped pool of in-process MCP servers — the agent's MCP client layer.
 
-A **session** owns one pool: one in-process MCP server **per attached MCP-server entity**, each
-exposing a generic read-only ``query`` tool over that server's tables. Built lazily on the session's
+A **session** owns one pool: one in-process MCP server **per attached database**, each exposing a
+generic read-only ``query`` tool over that database's tables (read from the **resources table** — the
+pool never inspects the underlying store; that happens only in sync). Built lazily on the session's
 first query and reused. This is the ONLY module that imports ``mcp.shared.memory`` (the in-memory
 transport).
 
@@ -26,10 +27,11 @@ from mcp.server.fastmcp import FastMCP
 from mcp.shared.memory import create_connected_server_and_client_session
 
 from data_analysis_agent.config.settings import get_settings
-from data_analysis_agent.db.models import McpServerRow, McpToolRow, SessionMcpServerRow
+from data_analysis_agent.db.models import DatabaseRow, McpToolRow, SessionDatabaseRow
 from data_analysis_agent.db.session import create_db_session
 from data_analysis_agent.tools.connectors.base import get_connector
 from data_analysis_agent.tools.mcp.server import RecoverableQueryError, _run_select_params, bind_params
+from data_analysis_agent.tools.sync import active_entity_tables
 
 log = structlog.get_logger()
 
@@ -60,7 +62,7 @@ class _GenTool:
 
 @dataclass
 class _Server:
-    """One attached MCP-server entity and its in-process FastMCP server (generic SQL tool)."""
+    """One attached database and its in-process FastMCP server (generic SQL tool over resource tables)."""
 
     name: str
     server: FastMCP
@@ -220,12 +222,12 @@ class SessionPoolManager:
         for pool in pools:
             pool.aclose()
 
-    def close_sessions_for_server(self, mcp_server_id: str) -> None:
+    def close_sessions_for_database(self, database_id: str) -> None:
         """Close the pools of every session attached to a given server (after a change)."""
         with create_db_session() as db:
             links = (
-                db.query(SessionMcpServerRow)
-                .filter(SessionMcpServerRow.mcp_server_id == mcp_server_id)
+                db.query(SessionDatabaseRow)
+                .filter(SessionDatabaseRow.database_id == database_id)
                 .all()
             )
             session_ids = [link.session_id for link in links]
@@ -235,14 +237,14 @@ class SessionPoolManager:
     # ---- internals -------------------------------------------------------
 
     async def _build(self, session_id: str) -> SessionPool:
-        loaded = _load_servers(session_id)
+        loaded = _load_databases(session_id)
         if not loaded:
-            raise NoServersError("No MCP servers attached to this session")
+            raise NoServersError("No databases attached to this session")
         max_rows = get_settings().mcp_max_result_rows
         servers: dict[str, _Server] = {}
         for server_dict, tables, gen_tools in loaded:
-            connector = get_connector(server_dict, tables)
-            fast = connector.build_server(max_rows)
+            # ``tables`` come from the resources table — the pool NEVER inspects the store (sync-only).
+            fast = get_connector(server_dict).build_server([t["table_name"] for t in tables], max_rows)
             await _verify_server(fast)
             servers[server_dict["name"]] = _Server(
                 name=server_dict["name"],
@@ -292,31 +294,32 @@ async def _verify_server(server: FastMCP) -> None:
         raise RuntimeError(f"MCP server is missing the '{_GENERIC_TOOL}' tool (has: {sorted(names)})")
 
 
-def _load_servers(session_id: str) -> list[tuple[dict, list[dict], list[dict]]]:
-    """Load a session's MCP servers + physical tables + active generated tools as plain dicts."""
+def _load_databases(session_id: str) -> list[tuple[dict, list[dict], list[dict]]]:
+    """Load a session's attached databases + their tables (**from resources**) + active generated tools.
+
+    Tables come from the resources table (``active_entity_tables``) — the pool never inspects the store.
+    """
     with create_db_session() as db:
         links = (
-            db.query(SessionMcpServerRow)
-            .filter(SessionMcpServerRow.session_id == session_id)
+            db.query(SessionDatabaseRow)
+            .filter(SessionDatabaseRow.session_id == session_id)
             .all()
         )
         loaded: list[tuple[dict, list[dict], list[dict]]] = []
         for link in links:
-            srv = db.get(McpServerRow, link.mcp_server_id)
+            srv = db.get(DatabaseRow, link.database_id)
             if srv is None:
                 continue
-            tables = srv.physical_tables
-            if not tables:
-                continue
-            loaded.append((_serialize_server(srv), tables, _load_gen_tools(db, srv.id)))
+            loaded.append((_serialize_database(srv), active_entity_tables(db, srv.id),
+                           _load_gen_tools(db, srv.id)))
         return loaded
 
 
-def _load_gen_tools(db, server_id: str) -> list[dict]:
+def _load_gen_tools(db, database_id: str) -> list[dict]:
     """Active generated GET-API tools for a server, projected to plain dicts (no detached ORM rows)."""
     rows = (
         db.query(McpToolRow)
-        .filter(McpToolRow.server_id == server_id, McpToolRow.deleted_at.is_(None))
+        .filter(McpToolRow.database_id == database_id, McpToolRow.deleted_at.is_(None))
         .order_by(McpToolRow.created_at, McpToolRow.id)
         .all()
     )
@@ -327,7 +330,7 @@ def _load_gen_tools(db, server_id: str) -> list[dict]:
     ]
 
 
-def _serialize_server(srv: McpServerRow) -> dict:
+def _serialize_database(srv: DatabaseRow) -> dict:
     return {
         "id": srv.id,
         "name": srv.name,

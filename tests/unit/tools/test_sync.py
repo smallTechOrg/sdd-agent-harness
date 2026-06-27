@@ -7,13 +7,16 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from data_analysis_agent.db.models import Base, McpPromptRow, McpResourceRow, McpServerRow, McpToolRow
+from data_analysis_agent.db.models import Base, McpPromptRow, McpResourceRow, DatabaseRow, McpToolRow
 from data_analysis_agent.tools.sync import (
     ValidationError,
     add_prompt,
     add_resource,
     add_tool,
     apply_sync_result,
+    delete_prompt,
+    delete_resource,
+    delete_tool,
     run_sync,
     update_resource,
     update_tool,
@@ -30,29 +33,36 @@ def db(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def _stub(monkeypatch):
+def _stub(monkeypatch, tmp_path):
     monkeypatch.setenv("DATAANALYSIS_OPENROUTER_API_KEY", "")
+    monkeypatch.setenv("DATAANALYSIS_DATASETS_DIR", str(tmp_path / "datasets"))
     import data_analysis_agent.llm.client as llm_module
     llm_module._client = None
     yield
     llm_module._client = None
 
 
-def _server(db, tmp_path, name="sales") -> McpServerRow:
-    pq = tmp_path / "orders.parquet"
-    pd.DataFrame({"id": [1, 2, 3], "amount": [5, 7, 3]}).to_parquet(pq)
-    srv = McpServerRow(name=name, type="parquet", uri=f"parquet:///{name}")
-    srv.physical_tables = [{"table_name": "orders", "parquet_path": str(pq),
-                            "column_names": ["id", "amount"],
-                            "schema": [{"name": "id", "dtype": "int64", "nullable": False}],
-                            "row_count": 3}]
+def _server(db, tmp_path, name="sales") -> DatabaseRow:
+    """Create a parquet database whose table the connector will discover from its datasets directory."""
+    from data_analysis_agent.tools.table_naming import sql_table_name
+    directory = tmp_path / "datasets" / sql_table_name(name)
+    directory.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"id": [1, 2, 3], "amount": [5, 7, 3]}).to_parquet(directory / "orders.parquet")
+    srv = DatabaseRow(name=name, type="parquet", uri=f"parquet:///{name}")
     db.add(srv)
     db.flush()
     return srv
 
 
-def _active(db, model, server_id):
-    return db.query(model).filter_by(server_id=server_id, deleted_at=None).all()
+def _discovered_tables(srv) -> list[str]:
+    """Table names the connector inspects from the database's directory."""
+    from data_analysis_agent.tools.connectors.base import get_connector
+    conn = get_connector({"id": srv.id, "name": srv.name, "type": srv.type, "uri": srv.uri})
+    return [t["table_name"] for t in conn.discover_tables()]
+
+
+def _active(db, model, database_id):
+    return db.query(model).filter_by(database_id=database_id, deleted_at=None).all()
 
 
 def test_run_sync_generates_capabilities(db, tmp_path):
@@ -75,8 +85,8 @@ def test_resync_soft_deletes_dropped_tool(db, tmp_path):
     apply_sync_result(db, srv, run_sync(db, srv))
     db.commit()
     # Inject an extra active tool the next sync won't propose; it must be SOFT-deleted, not removed.
-    orphan = McpToolRow(server_id=srv.id, name="orphan_tool", description="x",
-                        sql_template="SELECT 1", created_version=srv.version)
+    orphan = McpToolRow(database_id=srv.id, name="orphan_tool", description="x", created_version=srv.version)
+    orphan.execution = {"sql_template": "SELECT 1", "parameters": []}
     db.add(orphan)
     db.commit()
     apply_sync_result(db, srv, run_sync(db, srv))
@@ -93,8 +103,8 @@ def _synced(db, tmp_path):
     return srv
 
 
-def _tombstoned(db, model, server_id):
-    return db.query(model).filter(model.server_id == server_id, model.deleted_at.isnot(None)).count()
+def _tombstoned(db, model, database_id):
+    return db.query(model).filter(model.database_id == database_id, model.deleted_at.isnot(None)).count()
 
 
 _OK_TOOL = {"name": "top_orders", "description": "top",
@@ -213,15 +223,100 @@ def test_update_tool_is_patch_not_replace(db, tmp_path):
     assert refreshed.sql_template == original_sql        # omitted field preserved (patch, not replace)
 
 
-def test_schema_resource_is_protected(db, tmp_path):
+def test_schema_resource_cannot_be_added_or_deleted_but_can_be_updated(db, tmp_path):
     srv = _synced(db, tmp_path)
     schema_uri = f"dataset://{srv.name}/schema"
-    with pytest.raises(ValidationError):
-        update_resource(db, srv, {"uri": schema_uri, "description": "hijack"})
-    db.rollback()
+    # add of a schema-kind resource is rejected (tied to the server's existence)
     with pytest.raises(ValidationError):
         add_resource(db, srv, {"uri": "entity://x/y", "name": "y", "kind": "schema"})
     db.rollback()
+    # delete of the schema resource is rejected
+    with pytest.raises(ValidationError):
+        delete_resource(db, srv, schema_uri)
+    db.rollback()
+    # but manual update of its relationships IS allowed
+    update_resource(db, srv, {"uri": schema_uri,
+                              "content": {"relationships": [{"from": "orders", "to": "x", "on": "id"}]}})
+    db.commit()
+    schema_res = next(r for r in _active(db, McpResourceRow, srv.id) if r.kind == "schema")
+    rels = schema_res.content["relationships"]               # canonical FK-edge list on the schema resource
+    assert rels and rels[0]["from_table"] == "orders" and rels[0]["to_table"] == "x"
+    assert "tables" not in schema_res.content               # NOT per-table columns
+
+
+def test_delete_tool_hard_deletes_and_prunes_prompts(db, tmp_path):
+    srv = _synced(db, tmp_path)
+    add_tool(db, srv, _OK_TOOL)
+    db.commit()
+    assert "explore_top_orders" in {p.name for p in _active(db, McpPromptRow, srv.id)}
+    tool = next(t for t in _active(db, McpToolRow, srv.id) if t.name == "top_orders")
+    tool_id = tool.id
+    delete_tool(db, srv, "top_orders")
+    db.commit()
+    assert db.get(McpToolRow, tool_id) is None                       # HARD delete (manual) — row gone
+    assert "top_orders" not in {t.name for t in _active(db, McpToolRow, srv.id)}
+    assert "explore_top_orders" not in {p.name for p in _active(db, McpPromptRow, srv.id)}  # pruned cascade
+
+
+def test_delete_prompt_hard_deletes_no_cascade(db, tmp_path):
+    srv = _synced(db, tmp_path)
+    add_prompt(db, srv, {"name": "my_custom", "description": "mine"})
+    db.commit()
+    pid = next(p.id for p in _active(db, McpPromptRow, srv.id) if p.name == "my_custom")
+    tools_before = {t.name for t in _active(db, McpToolRow, srv.id)}
+    delete_prompt(db, srv, "my_custom")
+    db.commit()
+    assert db.get(McpPromptRow, pid) is None                         # hard delete
+    assert {t.name for t in _active(db, McpToolRow, srv.id)} == tools_before  # leaf — no cascade
+
+
+def test_delete_resource_drops_table_and_regenerates(db, tmp_path):
+    srv = _synced(db, tmp_path)
+    entity_uri = f"entity://{srv.name}/orders"
+    assert "orders" in _discovered_tables(srv)
+    delete_resource(db, srv, entity_uri)
+    db.commit()
+    # backing table file dropped (re-inspection finds nothing) + the entity resource gone
+    assert "orders" not in _discovered_tables(srv)
+    assert entity_uri not in {r.uri for r in _active(db, McpResourceRow, srv.id)}
+    # tools that referenced the dropped table are pruned (regenerated against remaining tables)
+    assert "list_orders" not in {t.name for t in _active(db, McpToolRow, srv.id)}
+    assert any(r.kind == "schema" for r in _active(db, McpResourceRow, srv.id))  # schema resource survives
+
+
+def test_tool_execution_object_is_stored_and_derived(db, tmp_path):
+    srv = _synced(db, tmp_path)
+    add_tool(db, srv, {
+        "name": "by_amount", "description": "filter",
+        "execution": {"sql_template": "SELECT * FROM orders WHERE amount > $min",
+                      "parameters": [{"name": "min", "type": "integer"}]},
+    })
+    db.commit()
+    tool = next(t for t in _active(db, McpToolRow, srv.id) if t.name == "by_amount")
+    assert tool.execution["sql_template"].startswith("SELECT")
+    assert tool.execution["parameters"][0] == {"name": "min", "type": "integer"}
+    assert tool.input_schema["properties"]["min"]["type"] == "integer"   # derived MCP inputSchema
+
+
+def test_entities_are_exactly_the_inspected_tables(db, tmp_path):
+    from data_analysis_agent.tools.table_naming import sql_table_name
+    srv = _server(db, tmp_path)  # writes orders.parquet
+    directory = tmp_path / "datasets" / sql_table_name(srv.name)
+    pd.DataFrame({"customer_id": [10, 20], "region": ["N", "S"]}).to_parquet(directory / "customers.parquet")
+    apply_sync_result(db, srv, run_sync(db, srv))
+    db.commit()
+    entity_names = sorted(r.name for r in _active(db, McpResourceRow, srv.id) if r.kind != "schema")
+    assert entity_names == sorted(_discovered_tables(srv)) == ["customers", "orders"]  # definite, 1 per table
+    orders = next(r for r in _active(db, McpResourceRow, srv.id) if r.name == "orders")
+    assert [c["name"] for c in orders.content["columns"]] == ["id", "amount"]  # columns from inspection
+
+
+def test_entity_resource_carries_columns_and_size(db, tmp_path):
+    srv = _synced(db, tmp_path)
+    entity = next(r for r in _active(db, McpResourceRow, srv.id) if r.kind != "schema")
+    assert entity.content["table"] == "orders"
+    assert any(c.get("name") == "id" for c in entity.content["columns"])  # per-table columns live here
+    assert entity.size and entity.size > 0                                # backing parquet file size
 
 
 def test_stub_handles_all_node_tags():

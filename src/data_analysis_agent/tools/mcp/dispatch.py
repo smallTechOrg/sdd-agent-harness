@@ -1,13 +1,15 @@
-"""DB-backed MCP JSON-RPC 2.0 dispatcher for ``POST /mcpserver/{id}``.
+"""DB-backed MCP JSON-RPC 2.0 dispatcher for ``POST /database/{id}``.
 
 Answers the MCP read surface (tools/list+call, resources/list+read, prompts/list+get) directly from
-the server's stored capability rows — it does NOT use FastMCP (which cannot represent custom
+the database's stored capability rows — it does NOT use FastMCP (which cannot represent custom
 inputSchema / resources / prompts). Canned tools execute via the shared DuckDB read-only path with
-parameter binding. This is a different surface from the agent's session pool (``tools/mcp/pool.py``).
+parameter binding, over views built from the **resources table** (no store inspection). This is a
+different surface from the agent's session pool (``tools/mcp/pool.py``).
 
-It also serves the Phase-B write surface — ``tools|prompts|resources add/update`` (``MUTATION_METHODS``)
-— each applying a client-supplied capability + an ADDITIVE downstream cascade in one transaction
-(``_mutate`` rolls back on any failure); the route bumps the version once and refreshes pools post-commit.
+It also serves the write surface (``MUTATION_METHODS``): ``tools|prompts|resources`` ``add``/``update``
+(LLM-driven additive cascade) and ``delete`` (manual hard-delete + pruning cascade) — each in one
+transaction (``_mutate``/``_delete`` roll back on any failure); the route bumps the version once and
+refreshes pools post-commit.
 """
 from __future__ import annotations
 
@@ -24,7 +26,7 @@ from data_analysis_agent.config.settings import get_settings
 from data_analysis_agent.db.models import (
     McpPromptRow,
     McpResourceRow,
-    McpServerRow,
+    DatabaseRow,
     McpToolRow,
 )
 from data_analysis_agent.tools.connectors.base import DatasetConnectionError, get_connector
@@ -35,13 +37,16 @@ log = structlog.get_logger()
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 
-# Non-standard Phase-B write methods (the route invalidates pools after these succeed).
+# Non-standard write methods (the route invalidates pools after these succeed). add/update apply an
+# LLM-driven additive cascade; delete is a MANUAL hard-delete + an LLM-driven pruning cascade.
 MUTATION_METHODS = frozenset({
-    "tools/add", "tools/update", "prompts/add", "prompts/update", "resources/add", "resources/update",
+    "tools/add", "tools/update", "tools/delete",
+    "prompts/add", "prompts/update", "prompts/delete",
+    "resources/add", "resources/update", "resources/delete",
 })
 
 
-def handle_jsonrpc(db: Session, server: McpServerRow, payload: dict) -> dict:
+def handle_jsonrpc(db: Session, server: DatabaseRow, payload: dict) -> dict:
     """Route a JSON-RPC request over a server's stored capabilities; return a JSON-RPC response."""
     req_id = payload.get("id") if isinstance(payload, dict) else None
     method = payload.get("method") if isinstance(payload, dict) else None
@@ -82,7 +87,8 @@ def _tools_call(db, server, params):
     if row is None:
         raise _RpcError(INVALID_PARAMS, f"Unknown tool: {name!r}")
     try:
-        text = _execute_canned(server, row, arguments)
+        table_names = [t["table_name"] for t in sync.active_entity_tables(db, server.id)]
+        text = _execute_canned(server, row, arguments, table_names)
         return {"content": [{"type": "text", "text": text}], "isError": False}
     except (RecoverableQueryError, DatasetConnectionError, Exception) as exc:
         return {"content": [{"type": "text", "text": f"Tool error: {exc}"}], "isError": True}
@@ -108,7 +114,7 @@ def _resources_read(db, server, params):
     row = _active_one(db, McpResourceRow, server.id, McpResourceRow.uri == uri)
     if row is None:
         raise _RpcError(INVALID_PARAMS, f"Unknown resource: {uri!r}")
-    content = server.dataset_schema if row.kind == "schema" else row.content
+    content = row.content  # schema resource stores its relationships/FKs in content (source of truth)
     text = json.dumps(content) if content is not None else (row.description or "")
     return {"contents": [{"uri": row.uri, "mimeType": row.mime_type or "application/json", "text": text}]}
 
@@ -180,6 +186,36 @@ def _resources_add(db, server, params):   return _mutate(db, server, params, syn
 def _resources_update(db, server, params): return _mutate(db, server, params, sync.update_resource, _need_uri)
 
 
+def _delete(db, server, params, op_fn, key_name):
+    """Manually hard-delete a capability by key, then run its pruning cascade; roll back on failure."""
+    key = params.get(key_name)
+    if not key:
+        raise _RpcError(INVALID_PARAMS, f"params.{key_name} is required.")
+    try:
+        result = op_fn(db, server, key)
+    except sync.ValidationError as exc:
+        db.rollback()
+        raise _RpcError(INVALID_PARAMS, str(exc))
+    except _RpcError:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise _RpcError(INVALID_PARAMS, str(exc))
+    return {
+        "ok": True,
+        "version": server.version,
+        "applied": {"child": result.child, "op": result.op, "key": result.key},
+        "cascade": {"tools": result.tools_changed, "prompts": result.prompts_changed},
+        "status": result.status,
+    }
+
+
+def _tools_delete(db, server, params):     return _delete(db, server, params, sync.delete_tool, "name")
+def _prompts_delete(db, server, params):   return _delete(db, server, params, sync.delete_prompt, "name")
+def _resources_delete(db, server, params): return _delete(db, server, params, sync.delete_resource, "uri")
+
+
 _METHODS = {
     "tools/list": _tools_list,
     "tools/call": _tools_call,
@@ -189,18 +225,21 @@ _METHODS = {
     "prompts/get": _prompts_get,
     "tools/add": _tools_add,
     "tools/update": _tools_update,
+    "tools/delete": _tools_delete,
     "prompts/add": _prompts_add,
     "prompts/update": _prompts_update,
+    "prompts/delete": _prompts_delete,
     "resources/add": _resources_add,
     "resources/update": _resources_update,
+    "resources/delete": _resources_delete,
 }
 
 
 # --- canned-query execution -------------------------------------------------
 
-def _execute_canned(server: McpServerRow, tool: McpToolRow, arguments: dict) -> str:
-    """Run a tool's ``sql_template`` with bound parameters over the server's tables."""
-    fast = get_connector(_server_dict(server), server.physical_tables).build_server()
+def _execute_canned(server: DatabaseRow, tool: McpToolRow, arguments: dict, table_names: list[str]) -> str:
+    """Run a tool's ``sql_template`` with bound parameters over the database's (resource-derived) tables."""
+    fast = get_connector(_server_dict(server)).build_server(table_names)
     conn = getattr(fast, "_duckdb_conn", None)
     try:
         params = bind_params(tool.input_schema, arguments)
@@ -211,16 +250,16 @@ def _execute_canned(server: McpServerRow, tool: McpToolRow, arguments: dict) -> 
             conn.close()
 
 
-def _server_dict(server: McpServerRow) -> dict:
+def _server_dict(server: DatabaseRow) -> dict:
     return {"id": server.id, "name": server.name, "type": server.type, "uri": server.uri}
 
 
 # --- pagination (opaque keyset cursor) --------------------------------------
 
-def _page(db, model, server_id, params):
+def _page(db, model, database_id, params):
     """Return ``(rows, next_cursor)`` for an active-row listing, keyset-paginated."""
     page_size = get_settings().mcp_list_page_size
-    q = db.query(model).filter(model.server_id == server_id, model.deleted_at.is_(None))
+    q = db.query(model).filter(model.database_id == database_id, model.deleted_at.is_(None))
     cursor = _decode_cursor(params.get("cursor"))
     if cursor is not None:
         c_created, c_id = cursor
@@ -256,10 +295,10 @@ def _with_cursor(result: dict, next_cursor: str | None) -> dict:
     return result
 
 
-def _active_one(db, model, server_id, predicate):
+def _active_one(db, model, database_id, predicate):
     return (
         db.query(model)
-        .filter(model.server_id == server_id, model.deleted_at.is_(None), predicate)
+        .filter(model.database_id == database_id, model.deleted_at.is_(None), predicate)
         .first()
     )
 

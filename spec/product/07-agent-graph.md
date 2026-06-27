@@ -24,7 +24,7 @@
 >    generated tool, fall back to the generic SQL tool.)*
 > 8. **Exact tool invocation format:** the single-level JSON above — `{"tool": "<server>", "arguments":
 >    {"query": "<SQL>"}}`.
-> 9. **What triggers tool registration:** `POST /mcpserver` creates the `McpServer` row (+ generated
+> 9. **What triggers tool registration:** `POST /database` creates the `Database` row (+ generated
 >    capability rows via sync); the agent's in-process server is built when the **session** pool is first
 >    acquired, with one DuckDB view per physical table.
 

@@ -22,8 +22,8 @@ the app shuts down. Memory persists across restarts.
 
 ### Create Session
 
-- **Input:** `POST /sessions` — optional `name` + `mcp_server_ids` (≥1 required; a session may attach many)
-- **Output:** new `Session` record + `SessionMcpServer` links; redirect to `GET /sessions/{session_id}`
+- **Input:** `POST /sessions` — optional `name` + `database_ids` (≥1 required; a session may attach many)
+- **Output:** new `Session` record + `SessionDatabase` links; redirect to `GET /sessions/{session_id}`
 - **Default name:** `"Session YYYY-MM-DD HH:MM"` (UTC)
 
 ### View Session
@@ -43,8 +43,8 @@ the app shuts down. Memory persists across restarts.
 
 | Error | Behaviour |
 |-------|-----------|
-| Server not found | 404 → error.html |
-| Session not found | 404 → error.html |
+| Server not found | 404 → structured `{code, message}` error |
+| Session not found | 404 → structured `{code, message}` error |
 | Delete while a query is in-flight | Best-effort: delete completes; the in-flight run eventually writes to a deleted record (no user-visible error in v0.1) |
 
 ## Success Criteria

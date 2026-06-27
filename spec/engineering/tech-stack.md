@@ -16,7 +16,7 @@
 
 **Model Context Protocol (MCP)** via the **official `mcp` SDK, pinned `==1.28.0`**
 
-**Why:** The primary entity is an **MCP server** (1:1 with a dataset). Per the MCP 2025-06-18 spec it has three kinds of children — **tools, resources, prompts** — which are **LLM-generated** (the sync pipeline) and **stored as rows**, served over a standards-compliant **JSON-RPC endpoint** (`POST /mcpserver/{id}`) for the UI and external MCP clients. Separately, the LangGraph agent acts as an in-process MCP **client**: the per-session pool wraps each attached server in a `FastMCP` server exposing a **generic read-only `query` tool** over its tables; the agent invokes it with `call_tool()`. The LLM↔agent ReAct protocol stays hand-rolled and uses a **single-level** call shape, `{"tool":"<server>","arguments":{"query":"SELECT …"}}`. *(Phase B also surfaces the server's generated GET-API tools to the agent — hybrid.)*
+**Why:** The primary entity is an **MCP server** (1:1 with a dataset). Per the MCP 2025-06-18 spec it has three kinds of children — **tools, resources, prompts** — which are **LLM-generated** (the sync pipeline) and **stored as rows**, served over a standards-compliant **JSON-RPC endpoint** (`POST /database/{id}`) for the UI and external MCP clients. Separately, the LangGraph agent acts as an in-process MCP **client**: the per-session pool wraps each attached server in a `FastMCP` server exposing a **generic read-only `query` tool** over its tables; the agent invokes it with `call_tool()`. The LLM↔agent ReAct protocol stays hand-rolled and uses a **single-level** call shape, `{"tool":"<server>","arguments":{"query":"SELECT …"}}`. *(Phase B also surfaces the server's generated GET-API tools to the agent — hybrid.)*
 
 **Two surfaces, kept separate:** the agent pool (`tools/mcp/pool.py` + `server.py`, generic SQL) and the public DB-backed JSON-RPC dispatcher (`tools/mcp/dispatch.py`, reads the stored capability rows). The dispatcher does **not** use FastMCP (which cannot represent custom `inputSchema`/resources/prompts).
 
@@ -37,17 +37,54 @@
 - **Internal (parquet):** DuckDB reads the dataset's Parquet files natively via `read_parquet(...)` (no load step) and ships native `STDDEV`/`VARIANCE`, so the old pandas→in-memory-SQLite copy and the custom SQLite aggregate functions are removed.
 - **External (postgresql, BETA, flag-gated):** DuckDB's **postgres extension** (`postgres_scanner`) attaches the database with `ATTACH … (TYPE postgres, READ_ONLY)` and creates one view per introspected table. The `READ_ONLY` attach means the agent cannot mutate, but it can read **any** table the credentials can reach (not only the introspected ones) — scope the DB user accordingly. Gated by `DATAANALYSIS_ENABLE_EXTERNAL_DATASETS` (default off).
 
-SQLite remains the **application metadata** store (below); DuckDB is only the **dataset query engine**.
+The **application metadata** store (PostgreSQL or SQLite, below) is separate from DuckDB, which is only
+the **dataset query engine**.
 
 ## Connector Seam
 
-**`tools/connectors/` package** abstracts dataset access behind a `DatasetConnector` Protocol.
+**`tools/connectors/` package** — every connector **inherits from the `BaseConnector` ABC** (`base.py`).
 
-**Why:** The query path must not branch on dataset type inline. A connector exposes `connection_check()`, `discover_tables()`, and `build_server(max_rows)`; `get_connector(server_row, tables)` dispatches on `type`. `ParquetConnector` is fully implemented; `PostgresConnector` (BETA, flag-gated) is the only place psycopg2 is used. `DatasetURI` (in `uri.py`, built on `urllib.parse`) parses the URI and exposes a `display()` that **strips credentials** — every log line, stored `connection_error`, template field, and surfaced exception uses `display()` only. Shared SQL helpers (`_run_select` SELECT-only guard + row cap, `_run_select_params` for parameter-bound canned queries, `build_server`, `DEFAULT_MAX_ROWS`) stay in `tools/mcp/server.py`. The SELECT guard rejects `;` stacking, `ATTACH`/`COPY`/`PRAGMA`/`INSTALL`/`LOAD`, and DuckDB file-reading table functions (`read_text`/`read_csv`/`read_parquet`/`read_blob`/`glob`/…), and allows a leading `WITH` — so a query reaches only the dataset's registered views, never arbitrary host files.
+**Why:** The query/sync path must never branch on database type. `BaseConnector` fixes the contract —
+`connection_check()`, `discover_tables()`, `build_server(table_names, max_rows)` (abstract) plus
+`discover_relationships()` and `drop_table(name)` (sensible defaults) — with **identical signatures and
+return shapes** across all subclasses, so callers use any connector without checking its type.
+`get_connector(server)` is a **registry lookup** (no type branching), with each connector module imported
+lazily (avoids a base↔connector cycle; keeps drivers optional).
 
-**External connection-check / introspection:** **`psycopg2`** performs the real `connect` + `SELECT 1` + `information_schema` introspection for external datasets (with a hard timeout). This is independent of DuckDB's attach-based query path. Internal datasets are checked by confirming the directory and each Parquet file are readable. A broken server is **never persisted** — the check runs before commit on create and sync.
+**Inspection (`discover_tables`/`discover_relationships`) runs ONLY in the sync pipeline**, which
+materializes the tables (→ entity resources) and FK relationships (→ the schema resource) into the DB.
+Everywhere else — the agent pool, `tools/call`, write-time validation, the EER view — reads the
+**resources table** and calls `build_server(table_names)`, which only **builds query views over the named
+tables** (parquet: views by path; postgres/sqlite: `ATTACH` + views; mongo/snowflake: load → register).
+The serving path never re-inspects the store, and there is no stored `physical_tables` catalog.
+`discover_relationships` returns the canonical FK-edge list (`[{from_table, from_column, to_table,
+to_column}]`) — Postgres `information_schema`, SQLite `PRAGMA foreign_key_list`; the LLM backfills the
+same shape when the store has none.
 
-**Deferred database types:** **MySQL** (DuckDB extension not installed here) and **DocumentDB/Mongo** (non-SQL — does not fit the table/`SELECT` model, so not a drop-in) are explicitly deferred and are **not** trivial additions.
+**Database types (one connector each):**
+- **`parquet`** (internal) — `ParquetConnector`: a directory of Parquet files; inspects via pyarrow;
+  serves via DuckDB views. Zero tables is valid. The only type whose tables we create/drop (file ops).
+- **`postgresql`** (BETA) — `PostgresConnector`: psycopg2 connect + `information_schema`; DuckDB
+  `ATTACH … (TYPE postgres, READ_ONLY)`. Exposes FK relationships is possible (currently LLM-inferred).
+- **`sqlite`** — `SQLiteConnector`: stdlib `sqlite3` introspection (incl. `PRAGMA foreign_key_list` →
+  `discover_relationships`); DuckDB `sqlite_scanner` (`ATTACH … (TYPE sqlite)`).
+- **`mongodb`** (BETA) — `MongoDBConnector`: pymongo; collections are the tables; **loads** sampled
+  documents into DuckDB-registered DataFrames for the read-only SELECT path.
+- **`snowflake`** (BETA) — `SnowflakeConnector`: snowflake-connector-python; `information_schema`;
+  **loads** capped table reads into DuckDB DataFrames.
+
+External datasets are **always enabled** (no feature flag). `DatasetURI` (`uri.py`) exposes a `display()`
+that **strips credentials** — every log line, stored `connection_error`, and surfaced exception uses it.
+Shared SQL helpers (`_run_select`/`_run_select_params` guard + row cap, `build_server`,
+`register_parquet_view`, `register_dataframe_view`, `DEFAULT_MAX_ROWS`) live in `tools/mcp/server.py`. The
+SELECT guard rejects `;` stacking, `ATTACH`/`COPY`/`PRAGMA`/`INSTALL`/`LOAD`, and DuckDB file-reading
+table functions — so a query reaches only the database's registered views, never arbitrary host files.
+
+A broken database is **never persisted** — `connection_check()` runs before commit on create and sync.
+
+**Drivers:** `psycopg2-binary` is bundled; `pymongo` and `snowflake-connector-python` are **optional**
+(install to use those types — the connector raises a clear `DatasetConnectionError` if the driver is
+absent). **MySQL** remains deferred.
 
 ## Agent Memory
 
@@ -69,7 +106,14 @@ SQLite remains the **application metadata** store (below); DuckDB is only the **
 
 ## Database
 
-**SQLite** via **SQLAlchemy 2.0** (sync, declarative Mapped types)
+**PostgreSQL** (master metadata store) via **SQLAlchemy 2.0** (sync, declarative Mapped types), with
+**SQLite** fully supported as the configurable/default backend (and what the test suite uses).
+
+**Why:** The metadata store is selected by `DATAANALYSIS_DATABASE_URL`. The deployed master DB is
+PostgreSQL (`postgresql+psycopg2://…`, psycopg2 driver). The schema is backend-agnostic: partial-unique
+indexes (uniqueness over active, non-soft-deleted rows) declare **both** `sqlite_where` and
+`postgresql_where`; Alembic batch mode is enabled for SQLite only. This is independent of the external
+**Postgres dataset** connector (BETA) — that reads a user's *data*, this stores the app's *metadata*.
 
 **ORM/ODM:** SQLAlchemy 2.0 + Alembic for migrations
 
@@ -102,8 +146,9 @@ React/Vite frontend deferred to Phase 4.
 
 ## What to Avoid
 
-- PostgreSQL as the **application metadata** store — user chose SQLite; the metadata DB stays SQLite. (psycopg2 IS used, but **only** in `PostgresConnector` to query external Postgres *datasets*, BETA + flag-gated — not for app metadata.)
-- MySQL / DocumentDB (Mongo) datasets — deferred; do not add MySQL or Mongo drivers
+- ~~PostgreSQL as the application metadata store~~ — **superseded:** the master metadata DB is now PostgreSQL (configurable via `DATAANALYSIS_DATABASE_URL`; SQLite still supported + used by tests). psycopg2 is used both for the app metadata engine and (separately) in `PostgresConnector` for external Postgres *datasets* (BETA + flag-gated).
+- MySQL datasets — deferred (no DuckDB MySQL extension here). MongoDB + Snowflake ARE supported now
+  (BETA, optional drivers); SQLite is fully supported.
 - Async SQLAlchemy — use the sync engine; metadata DB calls run directly inside the async nodes (the pipeline owns a dedicated thread, so blocking is fine)
 - OpenAI SDK — Gemini only
 - `langchain-mcp-adapters` or any third-party MCP wrapper — official `mcp` SDK only
@@ -140,9 +185,11 @@ SQLite driver (`sqlite3`) is part of the Python standard library — no extra pa
 
 Two settings drive the dataset layer (via `pydantic-settings`, `DATAANALYSIS_` prefix):
 
-- `DATAANALYSIS_DATASETS_DIR` — root for internal Parquet datasets; physical files live at `{datasets_dir}/{slug(name)}/{table}.parquet` (keyed by the dataset name, which is unique). On Render this **must** point at the persistent `/data` disk, or new datasets are lost on redeploy. Lifespan ensures the directory exists.
-- `DATAANALYSIS_ENABLE_EXTERNAL_DATASETS` — default **off**; when off, the external-dataset create path returns HTTP 501 and the UI hides the external option. External Postgres is BETA.
+- `DATAANALYSIS_DATASETS_DIR` — root for internal Parquet databases; physical files live at `{datasets_dir}/{slug(name)}/{table}.parquet` (keyed by the database name, which is unique). On Render this **must** point at the persistent `/data` disk, or new databases are lost on redeploy. Lifespan ensures the directory exists.
 - `DATAANALYSIS_MCP_LIST_PAGE_SIZE` — page size for the JSON-RPC `*/list` cursor pagination (default 50).
+
+External databases (postgresql/sqlite/mongodb/snowflake) are **always enabled** — there is no
+feature flag; mongo/snowflake just need their optional drivers installed.
 
 ### Test Environment Rule
 

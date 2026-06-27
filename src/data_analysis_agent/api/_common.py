@@ -18,8 +18,15 @@ def api_error(code: str, message: str, status_code: int = 400) -> HTTPException:
 
 
 def render(request: Request, templates: Jinja2Templates, name: str, **ctx) -> HTMLResponse:
-    """Render a template, injecting the request and resolved LLM provider into context."""
+    """Render a template, injecting the request and resolved LLM provider into context.
+
+    The SPA shell is a live dashboard — its lists mutate on every create/delete/sync — so the response
+    is marked ``no-store``. Without it a browser may serve a cached copy after the post-delete 303
+    redirect, leaving a just-deleted session/database still in the list (clicking it then 404s).
+    """
     from data_analysis_agent.config.settings import get_settings
     ctx["llm_provider"] = get_settings().resolved_llm_provider
     ctx["request"] = request
-    return templates.TemplateResponse(request, name, ctx)
+    response = templates.TemplateResponse(request, name, ctx)
+    response.headers["Cache-Control"] = "no-store"
+    return response

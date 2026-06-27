@@ -4,16 +4,16 @@ from sqlalchemy.orm import Session
 
 from data_analysis_agent.api._common import api_error
 from data_analysis_agent.db.models import (
-    McpServerRow,
+    DatabaseRow,
     QueryRecordRow,
-    SessionMcpServerRow,
+    SessionDatabaseRow,
     SessionRow,
 )
 
 
-def get_mcp_server_or_404(db: Session, server_id: str) -> McpServerRow:
+def get_database_or_404(db: Session, database_id: str) -> DatabaseRow:
     """Return an MCP server by id or raise a 404 ``HTTPException``."""
-    server = db.get(McpServerRow, server_id)
+    server = db.get(DatabaseRow, database_id)
     if not server:
         raise api_error("NOT_FOUND", "MCP server not found.", status_code=404)
     return server
@@ -27,14 +27,14 @@ def get_session_or_404(db: Session, session_id: str) -> SessionRow:
     return sess
 
 
-def attached_servers(db: Session, session_id: str) -> list[McpServerRow]:
+def attached_databases(db: Session, session_id: str) -> list[DatabaseRow]:
     """Return all MCP servers linked to a session via the join table."""
     links = (
-        db.query(SessionMcpServerRow)
-        .filter(SessionMcpServerRow.session_id == session_id)
+        db.query(SessionDatabaseRow)
+        .filter(SessionDatabaseRow.session_id == session_id)
         .all()
     )
-    servers = [db.get(McpServerRow, link.mcp_server_id) for link in links]
+    servers = [db.get(DatabaseRow, link.database_id) for link in links]
     return [s for s in servers if s]
 
 

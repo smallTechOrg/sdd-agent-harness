@@ -36,7 +36,8 @@ src/data_analysis_agent/
 
 - Every external call (LLM, filesystem) wrapped in try/except
 - On fatal error: set `state["error"] = str(e)` and let conditional edges route to `handle_error`
-- Route handler: if pipeline sets `state["error"]`, render `error.html` — never raise HTTPException
+- Pipeline failures are caught on the background thread and recorded on the QueryRecord
+  (`status="failed"`, `error_message`); the failed turn renders inline — never a bare 500
 - Log every error with structlog including `run_id` and `dataset_id`
 
 ## Logging Pattern
@@ -90,4 +91,6 @@ Always set `extra="ignore"` in `model_config`.
 
 ### Pipeline errors
 
-Render `error.html`, never raise `HTTPException` for pipeline failures.
+Record pipeline failures on the QueryRecord (`status="failed"`, `error_message`) and render the failed
+turn inline — never a bare 500. API-level validation (`api_error`) raises `HTTPException` with a
+structured `{code, message}` detail.

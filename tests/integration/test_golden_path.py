@@ -51,11 +51,11 @@ def _make_csv() -> bytes:
 
 def _create_server(client, name: str, filename: str = "data.csv") -> str:
     """Run the upload → create two-step the UI performs; return the home HTML after create."""
-    up = client.post("/mcpserver/upload", data={"dataset_name": name},
+    up = client.post("/database/upload", data={"database_name": name},
                      files={"file": (filename, _make_csv(), "text/csv")})
     assert up.status_code == 200, up.text
     uri = up.json()["uri"]
-    r = client.post("/mcpserver", data={"name": name, "dataset_type": "parquet", "dataset_uri": uri},
+    r = client.post("/database", data={"name": name, "database_type": "parquet", "database_uri": uri},
                     follow_redirects=True)
     assert r.status_code == 200, r.text
     return r.text
@@ -64,7 +64,7 @@ def _create_server(client, name: str, filename: str = "data.csv") -> str:
 def test_home_page_loads(client):
     r = client.get("/")
     assert r.status_code == 200
-    assert "MCP Servers" in r.text
+    assert "Databases" in r.text
     assert "Sessions" in r.text
 
 
@@ -82,10 +82,10 @@ def test_golden_path_end_to_end(client):
     home = _create_server(client, "Test DB", "test_data.csv")
 
     # 2. Extract the server id from the session-create checkboxes, then create a session
-    m = re.search(r'name="mcp_server_ids" value="([^"]+)"', home)
-    assert m, "mcp_server_ids checkbox not found on home page"
-    server_id = m.group(1)
-    r2 = client.post("/sessions", data={"mcp_server_ids": server_id}, follow_redirects=True)
+    m = re.search(r'name="database_ids" value="([^"]+)"', home)
+    assert m, "database_ids checkbox not found on home page"
+    database_id = m.group(1)
+    r2 = client.post("/sessions", data={"database_ids": database_id}, follow_redirects=True)
     assert r2.status_code == 200
     session_id = str(r2.url).rstrip("/").split("/")[-1].split("?")[0]
 

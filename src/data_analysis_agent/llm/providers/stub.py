@@ -68,11 +68,8 @@ def _sync_title(prompt: str) -> str:
 
 
 def _sync_schema(prompt: str) -> str:
-    tables = _tables(prompt)
-    return json.dumps({
-        "tables": {t: {"type": "object"} for t in tables},
-        "relationships": [],
-    })
+    # Canonical FK-edge list; the offline stub infers no relationships (per-table columns live elsewhere).
+    return json.dumps({"relationships": []})
 
 
 def _sync_entities(prompt: str) -> str:
@@ -101,8 +98,7 @@ def _sync_tools(prompt: str) -> str:
             "name": f"list_{t}",
             "title": f"(stub) List {t}",
             "description": f"(stub) Return rows from '{t}'.",
-            "input_schema": {"type": "object", "properties": {}},
-            "sql_template": f"SELECT * FROM {t} LIMIT 100",
+            "execution": {"sql_template": f"SELECT * FROM {t} LIMIT 100", "parameters": []},
         }
         for t in tables
     ]

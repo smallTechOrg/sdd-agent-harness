@@ -1,0 +1,134 @@
+{# Shared row macros — rendered both inline (first page, index.html) and in "Load more" HTML
+   fragments (fragments.html), so a paged-in row is byte-identical to a server-rendered one. #}
+
+{% macro load_more(url, label='Load more', fn='loadMore') %}
+<button type="button" class="btn btn-ghost btn-xs load-more" data-url="{{ url }}"
+        onclick="{{ fn }}(this)" style="width:100%;margin-top:8px;">{{ label }}</button>
+{% endmacro %}
+
+{# ── Sidebar session row ─────────────────────────────────────────────────── #}
+{% macro session_row(sess) %}
+<div class="session-item {% if sess.is_active %}active{% endif %}">
+  <a class="sess-body" href="/sessions/{{ sess.id }}" onclick="showPageLoading('Loading session…')">
+    <span class="session-label">{{ sess.name }}</span>
+    <span class="session-meta">{{ sess.query_count }} question{{ 's' if sess.query_count != 1 }} · {{ sess.created_at.strftime('%b %d') }}</span>
+    {% if sess.server_names %}
+    <span class="session-chips">{% for n in sess.server_names %}<span class="session-chip">{{ n }}</span>{% endfor %}</span>
+    {% endif %}
+  </a>
+  <form method="post" action="/sessions/{{ sess.id }}/delete"
+        onsubmit="if(!confirm('Delete this session?')){return false;} showPageLoading('Deleting session…');">
+    <button type="submit" class="btn btn-ghost-danger btn-xs" title="Delete session">&#10005;</button>
+  </form>
+</div>
+{% endmacro %}
+
+{# ── Analyse · Databases card row ────────────────────────────────────────── #}
+{% macro database_row(s) %}
+<div class="srv-row">
+  <div class="srv-top">
+    <a class="srv-name" href="/database/{{ s.id }}" onclick="showPageLoading('Loading database…')">{{ s.name }}</a>
+    <span class="pill">{{ s.type|upper }}</span>
+    <span class="pill pill-muted">v{{ s.version }}</span>
+    {% if s.connection_error %}<span class="pill" style="background:#fef2f2;color:#b91c1c;border-color:#fca5a5;">⚠ error</span>{% endif %}
+  </div>
+  <div class="srv-meta">
+    {{ s.table_count }} table{{ 's' if s.table_count != 1 }}{% if s.total_rows %} · {{ "{:,}".format(s.total_rows) }} rows{% endif %}
+    · {{ s.tool_count }} tools · {{ s.resource_count }} resources · {{ s.prompt_count }} prompts
+  </div>
+  <div class="srv-uri">{{ s.uri_display }}</div>
+  <div class="srv-actions">
+    <a class="btn btn-ghost btn-xs" href="/database/{{ s.id }}" onclick="showPageLoading('Loading database…')">Inspect</a>
+    <form method="post" action="/database/{{ s.id }}/sync"
+          onsubmit="showPageLoading('Syncing database…');">
+      <button type="submit" class="btn btn-ghost btn-xs">Sync</button>
+    </form>
+    <form method="post" action="/database/{{ s.id }}/delete"
+          onsubmit="if(!confirm('Delete {{ s.name }} and its data?')){return false;} showPageLoading('Deleting database…');">
+      <button type="submit" class="btn btn-ghost-danger btn-xs">Delete</button>
+    </form>
+  </div>
+</div>
+{% endmacro %}
+
+{# ── Database tab · Tools ────────────────────────────────────────────────── #}
+{% macro tool_item(tool) %}
+<div class="cap-item">
+  <div class="cap-row">
+    <span class="cap-name">{{ tool.name }}</span>
+    <span class="cap-acts">
+      <button type="button" class="cap-btn" onclick='editTool({{ tool.name|tojson }}, {{ (tool.description or "")|tojson }}, {{ tool.execution|tojson }})'>Edit</button>
+      <button type="button" class="cap-btn del" onclick='delCap(this, "tools/delete", "name", {{ tool.name|tojson }})'>Delete</button>
+    </span>
+  </div>
+  {% if tool.description %}<div class="cap-desc">{{ tool.description }}</div>{% endif %}
+  <div class="cap-sql">{{ tool.sql_template }}</div>
+  {% if tool.parameters %}<div class="cap-params">params: {% for p in tool.parameters %}<span class="pill pill-muted">{{ p.name }}:{{ p.type }}</span> {% endfor %}</div>{% endif %}
+</div>
+{% endmacro %}
+
+{# ── Database tab · Resources ────────────────────────────────────────────── #}
+{% macro resource_item(res) %}
+<div class="cap-item">
+  <div class="cap-row">
+    <span style="display:flex;align-items:center;gap:6px;min-width:0;"><span class="pill">{{ res.kind }}</span><span class="cap-name" style="font-size:11px;overflow:hidden;text-overflow:ellipsis;">{{ res.uri }}</span></span>
+    <span class="cap-acts">
+      {% if res.kind == 'schema' %}
+      <button type="button" class="cap-btn" onclick='editSchema({{ res.uri|tojson }}, {{ (res.content or {})|tojson }})'>Edit relationships</button>
+      {% else %}
+      <button type="button" class="cap-btn" onclick='editResource({{ res.uri|tojson }}, {{ (res.title or "")|tojson }}, {{ (res.description or "")|tojson }}, {{ res.kind|tojson }})'>Edit</button>
+      <button type="button" class="cap-btn del" onclick='delCap(this, "resources/delete", "uri", {{ res.uri|tojson }})'>Delete</button>
+      {% endif %}
+    </span>
+  </div>
+  {% if res.description %}<div class="cap-desc">{{ res.description }}</div>{% endif %}
+  {% if res.size %}<div class="cap-params">size: {{ res.size }} bytes</div>{% endif %}
+</div>
+{% endmacro %}
+
+{# ── Database tab · Prompts ──────────────────────────────────────────────── #}
+{% macro prompt_item(p) %}
+<div class="cap-item">
+  <div class="cap-row">
+    <span class="cap-name">{{ p.name }}</span>
+    <span class="cap-acts">
+      <button type="button" class="cap-btn" onclick='editPrompt({{ p.name|tojson }}, {{ (p.description or "")|tojson }}, {{ (p.template or [])|tojson }})'>Edit</button>
+      <button type="button" class="cap-btn del" onclick='delCap(this, "prompts/delete", "name", {{ p.name|tojson }})'>Delete</button>
+    </span>
+  </div>
+  {% if p.description %}<div class="cap-desc">{{ p.description }}</div>{% endif %}
+</div>
+{% endmacro %}
+
+{# ── Conversation turn (chat thread) ─────────────────────────────────────── #}
+{% macro query_turn(r) %}
+<div class="turn {% if r.status=='failed' %}failed{% elif r.status not in ('completed','failed') %}pending{% endif %}"
+     id="q-{{ r.id }}">
+  <div class="turn-q">Q: {{ r.question }}</div>
+  {% if r.status == 'completed' and r.answer %}
+  <div class="answer-body">{{ r.answer }}</div>
+  <div class="turn-meta">
+    {% if r.iteration_count %}<span class="meta-pill"><span class="dot"></span>{{ r.iteration_count }} iteration{{ 's' if r.iteration_count != 1 }}</span>{% endif %}
+    {% if r.total_tokens %}<span class="meta-pill"><span class="dot"></span>{{ "{:,}".format(r.total_tokens) }} tokens</span>{% endif %}
+    {% if r.estimated_cost_usd %}<span class="meta-pill"><span class="dot" style="background:#16a34a;"></span>${{ "%.4f"|format(r.estimated_cost_usd) }}</span>{% endif %}
+    <span class="meta-pill"><span class="dot" style="background:#9ca3af;"></span>{{ r.created_at.strftime('%b %d %H:%M') }}</span>
+  </div>
+  {% if r.query_history %}
+  <button type="button" class="steps-toggle" onclick="_toggleSteps(this)">&#9654; Agent reasoning trace ({{ r.query_history|length }} step{{ 's' if r.query_history|length != 1 }})</button>
+  <div class="steps-panel" style="display:none;">
+    {% for step in r.query_history %}
+    <div class="step-block">
+      <div class="step-head">Step {{ loop.index }} · {{ step.tool }}{% if step.capability %} · {{ step.capability }}{% endif %}</div>
+      {% if step.arguments and step.arguments.get('query') %}<div class="step-code">{{ step.arguments.get('query') }}</div>{% endif %}
+      <div class="step-result {% if step.is_error %}err{% endif %}">{{ step.result }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% elif r.status == 'failed' %}
+  <div class="turn-err">⚠ Failed: {{ r.error_message or "Unknown error" }}</div>
+  {% else %}
+  <div class="answer-body" style="color:#92400e;">Processing…</div>
+  {% endif %}
+</div>
+{% endmacro %}

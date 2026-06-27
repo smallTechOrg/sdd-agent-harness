@@ -1,6 +1,6 @@
 """Unit tests for the session pool: flat snapshot, server routing, within-server JOINs, reuse, LRU
 eviction, cleanup, and Phase-B hybrid routing (generated GET-API tools via optional `capability`).
-Servers are stubbed (no DB) by patching ``_load_servers``; the in-process MCP servers + DuckDB are real."""
+Servers are stubbed (no DB) by patching ``_load_databases``; the in-process MCP servers + DuckDB are real."""
 import asyncio
 
 import pandas as pd
@@ -10,17 +10,26 @@ import data_analysis_agent.tools.mcp.pool as pool_module
 from data_analysis_agent.tools.mcp.pool import SessionPoolManager
 
 
+@pytest.fixture(autouse=True)
+def _datasets_dir(monkeypatch, tmp_path):
+    """Point the connector's inspection at this test's datasets directory."""
+    monkeypatch.setenv("DATAANALYSIS_DATASETS_DIR", str(tmp_path / "datasets"))
+
+
 def _server(tmp_path, name, tables_spec, gen_tools=None):
-    """Build a (server_dict, tables_dicts, gen_tools) triple with real Parquet files."""
+    """Build a ``(server_dict, tables, gen_tools)`` triple (tables in the resources/`discover` shape).
+
+    Writes the Parquet files at the canonical location so ``build_server(table_names)`` registers them.
+    ``tables`` stands in for what ``active_entity_tables`` would return from the resources table.
+    """
+    from data_analysis_agent.tools.table_naming import sql_table_name
+    directory = tmp_path / "datasets" / sql_table_name(name)
+    directory.mkdir(parents=True, exist_ok=True)
     tables = []
     for table_name, frame in tables_spec.items():
-        pq = tmp_path / f"{name}__{table_name}.parquet"
-        pd.DataFrame(frame).to_parquet(pq)
-        tables.append({
-            "table_name": table_name,
-            "parquet_path": str(pq),
-            "column_names": list(frame.keys()),
-        })
+        pd.DataFrame(frame).to_parquet(directory / f"{table_name}.parquet")
+        tables.append({"table_name": table_name, "column_names": list(frame.keys()),
+                       "schema": [{"name": c} for c in frame], "row_count": len(next(iter(frame.values())))})
     server = {"id": name, "name": name, "type": "parquet", "uri": f"parquet:///{name}",
               "description": f"Server {name}"}
     return server, tables, gen_tools or []
@@ -30,7 +39,7 @@ def _server(tmp_path, name, tables_spec, gen_tools=None):
 def patch_servers(monkeypatch):
     """Return a mutable {session_id: [(server, tables, gen_tools), ...]} map, bypassing the DB."""
     mapping: dict[str, list] = {}
-    monkeypatch.setattr(pool_module, "_load_servers", lambda sid: mapping.get(sid, []))
+    monkeypatch.setattr(pool_module, "_load_databases", lambda sid: mapping.get(sid, []))
     return mapping
 
 
@@ -66,6 +75,22 @@ def test_snapshot_carries_tables_and_columns(tmp_path, patch_servers):
     snap = mgr.snapshot("s1")[0]
     assert snap["description"] == "Server d"
     assert snap["tables"][0] == {"table": "orders", "columns": ["id", "total"]}
+
+
+def test_pool_never_inspects_the_store(tmp_path, patch_servers, monkeypatch):
+    """The pool builds + queries entirely from the resources table — it must NOT call discover_tables."""
+    import data_analysis_agent.tools.connectors.parquet as parquet_mod
+    monkeypatch.setattr(parquet_mod.ParquetConnector, "discover_tables",
+                        lambda self: (_ for _ in ()).throw(AssertionError("pool inspected the store!")))
+    patch_servers["s1"] = [_server(tmp_path, "shop", {"products": {"name": ["A", "B"], "n": [1, 2]}})]
+    mgr = SessionPoolManager(8, 1000)
+
+    async def body():
+        await mgr.acquire("s1")
+        return await mgr.call_tool("s1", "shop", {"query": "SELECT COUNT(*) AS c FROM products"})
+
+    text, is_error = asyncio.run(body())
+    assert is_error is False and text.strip() == "c\n2"   # built + queried with no discover_tables call
 
 
 def test_non_select_is_recoverable_error(tmp_path, patch_servers):

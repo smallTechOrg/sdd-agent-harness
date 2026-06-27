@@ -10,8 +10,8 @@ from alembic.config import Config
 
 _REPO = Path(__file__).resolve().parents[3]
 _TABLES = {
-    "mcp_servers", "mcp_tools", "mcp_resources", "mcp_prompts",
-    "sessions", "session_mcp_servers", "query_records", "agent_runs",
+    "databases", "mcp_tools", "mcp_resources", "mcp_prompts",
+    "sessions", "session_databases", "query_records", "agent_runs",
 }
 
 
@@ -47,20 +47,20 @@ def test_partial_unique_index_enforced(cfg_db):
     command.upgrade(cfg, "head")
     conn = sqlite3.connect(db_path)
     conn.execute(
-        "INSERT INTO mcp_servers (id,name,type,uri,version,created_at) "
+        "INSERT INTO databases (id,name,type,uri,version,created_at) "
         "VALUES ('s','s','parquet','parquet:///s',1,'2026-01-01 00:00:00')"
     )
     conn.execute(
-        "INSERT INTO mcp_tools (id,server_id,name,description,input_schema_json,sql_template,"
+        "INSERT INTO mcp_tools (id,database_id,name,description,execution_json,"
         "created_version,created_at,updated_at) "
-        "VALUES ('t1','s','dup','d','{}','SELECT 1',1,'2026-01-01 00:00:00','2026-01-01 00:00:00')"
+        "VALUES ('t1','s','dup','d','{}',1,'2026-01-01 00:00:00','2026-01-01 00:00:00')"
     )
     conn.commit()
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute(
-            "INSERT INTO mcp_tools (id,server_id,name,description,input_schema_json,sql_template,"
+            "INSERT INTO mcp_tools (id,database_id,name,description,execution_json,"
             "created_version,created_at,updated_at) "
-            "VALUES ('t2','s','dup','d','{}','SELECT 2',1,'2026-01-01 00:00:00','2026-01-01 00:00:00')"
+            "VALUES ('t2','s','dup','d','{}',1,'2026-01-01 00:00:00','2026-01-01 00:00:00')"
         )
         conn.commit()
     conn.close()

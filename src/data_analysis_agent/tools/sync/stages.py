@@ -100,32 +100,25 @@ def stage_title(name: str, tables: list[dict], existing: dict) -> dict:
 # --- Stage b: dataset JSONSchema --------------------------------------------
 
 def stage_schema(name: str, tables: list[dict], existing_schema: dict) -> dict:
-    """Return a JSONSchema-ish dict ``{"tables": {...}, "relationships": [...]}``."""
-    fallback = {
-        "tables": {
-            t["table_name"]: {
-                "type": "object",
-                "columns": [c.get("name") for c in (t.get("schema") or [])] or t.get("column_names") or [],
-            }
-            for t in tables
-        },
-        "relationships": [],
-    }
+    """Return the entity-relationship schema in the **canonical** shape — a single FK-edge list:
+
+    ``{"relationships": [{"from_table","from_column","to_table","to_column"}]}``. Relationships ONLY —
+    per-table columns live on the individual entity resources, not here. This is the one format the EER
+    diagram reads; the LLM must emit exactly this (used only when the connector can't supply FKs).
+    """
+    fallback = {"relationships": (existing_schema or {}).get("relationships") or []}
     prompt = "\n".join([
         TAG_SCHEMA,
-        "Produce a JSONSchema describing the dataset's tables and their entity relationships.",
+        "Infer the FOREIGN-KEY relationships between the dataset's tables (which column references which).",
+        "Do NOT list table columns — only how the tables relate.",
         f"Dataset name: {name}",
         *_table_block(tables),
-        f"Existing schema: {json.dumps(existing_schema) if existing_schema else '(none)'}",
-        'Respond with ONLY JSON: {"tables": {"<table>": {...}}, '
-        '"relationships": [{"from": "...", "to": "...", "on": "..."}]}',
+        f"Existing relationships: {json.dumps(existing_schema) if existing_schema else '(none)'}",
+        'Respond with ONLY JSON: {"relationships": [{"from_table": "<table>", "from_column": "<col>", '
+        '"to_table": "<table>", "to_column": "<col>"}]}',
     ])
     try:
-        parsed = _parse(_llm(prompt))
-        if not isinstance(parsed.get("tables"), dict):
-            return fallback
-        parsed.setdefault("relationships", [])
-        return parsed
+        return {"relationships": _parse(_llm(prompt)).get("relationships") or []}
     except Exception as exc:
         log.warning("sync.stage_schema.fallback", error=str(exc))
         return fallback
@@ -133,9 +126,9 @@ def stage_schema(name: str, tables: list[dict], existing_schema: dict) -> dict:
 
 # --- Stage c: entities → resources ------------------------------------------
 
-def stage_entities(name: str, schema: dict, existing_resources: list[dict]) -> list[dict]:
-    """Return entity resources ``[{name, title, description, kind, uri, mime_type}]``."""
-    table_names = list((schema.get("tables") or {}).keys())
+def stage_entities(name: str, tables: list[dict], existing_resources: list[dict]) -> list[dict]:
+    """Return entity resources ``[{name, title, description, kind, uri, mime_type}]`` (one per table)."""
+    table_names = [t["table_name"] for t in tables]
     fallback = [
         {
             "name": t,
@@ -150,12 +143,13 @@ def stage_entities(name: str, schema: dict, existing_resources: list[dict]) -> l
     existing_names = ", ".join(r.get("name", "") for r in existing_resources) or "(none)"
     prompt = "\n".join([
         TAG_ENTITIES,
-        "From the dataset schema, list the primary and secondary entities (one per logical table).",
+        "List the primary and secondary entities (one per physical table) backing this dataset.",
         f"Dataset name: {name}",
         f"Schema tables: {', '.join(table_names) or '(none)'}",
         f"Existing resources: {existing_names}",
         'Respond with ONLY JSON: {"entities": [{"name","title","description","kind","uri","mime_type"}]}',
-        'kind is "primary_entity" or "secondary_entity"; uri like "entity://<dataset>/<entity>".',
+        'name MUST be a physical table name; kind is "primary_entity" or "secondary_entity"; '
+        'uri like "entity://<dataset>/<entity>".',
     ])
     try:
         parsed = _parse(_llm(prompt))
@@ -176,8 +170,7 @@ def stage_tools(name: str, entities: list[dict], tables: list[dict], existing_to
             "name": f"list_{t}",
             "title": f"List {t}",
             "description": f"Return rows from the '{t}' table.",
-            "input_schema": {"type": "object", "properties": {}},
-            "sql_template": f"SELECT * FROM {t} LIMIT 100",
+            "execution": {"sql_template": f"SELECT * FROM {t} LIMIT 100", "parameters": []},
         }
         for t in table_names
     ]
@@ -190,9 +183,11 @@ def stage_tools(name: str, entities: list[dict], tables: list[dict], existing_to
         *entity_lines,
         f"Tables available: {', '.join(table_names) or '(none)'}",
         f"Existing tools: {existing_names}",
-        'Respond with ONLY JSON: {"tools": [{"name","title","description","input_schema",'
-        '"sql_template","output_schema"}]}',
-        "sql_template must be a single read-only SELECT; declare any $params in input_schema.",
+        'Respond with ONLY JSON: {"tools": [{"name","title","description","output_schema",'
+        '"execution": {"sql_template": "SELECT ... WHERE col > $param", '
+        '"parameters": [{"name": "param", "type": "integer", "description": "..."}]}}]}',
+        "execution.sql_template is a single read-only SELECT; every $param embedded in it MUST be "
+        "declared in execution.parameters with its type.",
     ])
     try:
         parsed = _parse(_llm(prompt))

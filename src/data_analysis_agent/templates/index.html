@@ -1,0 +1,815 @@
+{% extends "base.html" %}
+{% from "_partials.html" import session_row, database_row, tool_item, resource_item, prompt_item, query_turn, load_more %}
+{% block title %}DataAnalyst AI{% endblock %}
+
+{% block header_center %}
+<nav class="site-header__tabs" role="tablist" aria-label="Main sections">
+  <button type="button" class="hdr-tab {% if active_tab != 'database' %}active{% endif %}" data-tab="analyse"
+          onclick="switchTab('analyse')">Analyse</button>
+  <button type="button" class="hdr-tab {% if active_tab == 'database' %}active{% endif %}" data-tab="database"
+          onclick="switchTab('database')">Database</button>
+</nav>
+{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* ── Drop zone ─────────────────────────────────────────── */
+  #drop-zone {
+    border: 2px dashed #d1d5db; border-radius: 8px; padding: 22px; background: #fafafa;
+    cursor: pointer; transition: border-color .15s, background .15s;
+    display: flex; flex-direction: column; align-items: center; text-align: center; min-height: 130px; justify-content: center;
+  }
+  #drop-zone.drag-over { border-color: #3b82f6; background: #eff6ff; }
+  #drop-zone.has-file { border-style: solid; border-color: #bfdbfe; background: #eff6ff; }
+  .dz-icon { font-size: 26px; margin-bottom: 6px; color: #6b7280; }
+
+  /* ── Server list (Analyse · Databases card) ──────────── */
+  .srv-row { padding: 10px 0; border-bottom: 1px solid #f3f4f6; }
+  .srv-row:last-child { border-bottom: none; }
+  .srv-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .srv-name { font-size: 14px; font-weight: 600; color: #1e40af; text-decoration: none; }
+  .srv-name:hover { text-decoration: underline; }
+  .srv-meta { font-size: 12px; color: #6b7280; margin-top: 3px; }
+  .srv-uri { font-size: 11px; color: #9ca3af; font-family: ui-monospace, monospace; margin-top: 2px; word-break: break-all; }
+  .srv-actions { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; }
+
+  /* ── Session list (sidebar) ────────────────────────────── */
+  .session-item {
+    padding: 8px 10px; border-radius: 6px; border: 1px solid #e5e7eb; margin-bottom: 6px;
+    background: #fff; transition: background .12s, border-color .12s; display: flex; align-items: flex-start; gap: 8px;
+  }
+  .session-item:hover { background: #eff6ff; border-color: #bfdbfe; }
+  .session-item.active { background: #eff6ff; border-left: 3px solid #3b82f6; border-color: #3b82f6; }
+  .session-item a.sess-body { flex: 1; min-width: 0; text-decoration: none; color: inherit; }
+  .session-label { font-size: 13px; font-weight: 600; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .session-meta { font-size: 11px; color: #9ca3af; margin-top: 2px; display: block; }
+  .session-chips { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+  .session-chip { font-size: 10px; color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 999px; padding: 0 6px; }
+
+  /* ── Conversation thread ───────────────────────────────── */
+  .conv-card { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .conv-placeholder { text-align: center; color: #9ca3af; padding: 40px 20px; }
+  .conv-placeholder .big { font-size: 30px; margin-bottom: 8px; }
+  #thread { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; flex: 1; min-height: 0; overflow-y: auto; }
+  .turn { border-left: 3px solid #bfdbfe; padding: 11px 14px; background: #f8fafc; border-radius: 0 6px 6px 0; }
+  .turn.failed { border-left-color: #fca5a5; background: #fff7f7; }
+  .turn.pending { border-left-color: #fcd34d; background: #fffbeb; }
+  .turn-q { font-size: 13px; color: #1e40af; font-weight: 600; margin-bottom: 6px; }
+  .answer-body { font-size: 14px; line-height: 1.65; color: #1f2937; white-space: pre-wrap; word-break: break-word; }
+  .turn-err { font-size: 13px; color: #b91c1c; }
+  .turn-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+  .meta-pill { display: inline-flex; align-items: center; gap: 4px; background: #fff; border: 1px solid #e5e7eb; border-radius: 999px; font-size: 11px; color: #475569; padding: 2px 9px; font-variant-numeric: tabular-nums; }
+  .meta-pill .dot { width: 5px; height: 5px; border-radius: 50%; background: #3b82f6; }
+  .steps-toggle { background: none; color: #6b7280; border: none; font-size: 12px; cursor: pointer; padding: 6px 0 0; font-family: inherit; }
+  .steps-toggle:hover { color: #1e40af; }
+  .steps-panel { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .step-block { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 11px; }
+  .step-head { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: #9ca3af; margin-bottom: 4px; }
+  .step-code { background: #1e293b; color: #e2e8f0; padding: 7px 10px; border-radius: 4px; font-size: 12px; font-family: ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; margin-bottom: 4px; }
+  .step-result { background: #f3f4f6; color: #374151; padding: 6px 9px; border-radius: 4px; font-size: 12px; font-family: ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; max-height: 130px; overflow-y: auto; }
+  .step-result.err { background: #fff5f5; color: #b91c1c; }
+
+  /* ── Ask overlay ───────────────────────────────────────── */
+  #ask-overlay { display: none; position: absolute; inset: 0; background: rgba(255,255,255,.92); border-radius: 8px; z-index: 5; flex-direction: column; align-items: center; justify-content: center; }
+  .dot-anim { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #1e40af; animation: bounce .9s infinite; }
+  @keyframes bounce { 0%,80%,100% { transform: scale(0);} 40% { transform: scale(1);} }
+
+  /* ── Database tab ──────────────────────────────────────── */
+  .db-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 14px 18px; }
+  .db-body { display: flex; gap: 16px; align-items: flex-start; }
+  .db-left { flex: 2; min-width: 0; } .db-right { flex: 1.1; min-width: 240px; }
+  .schema-legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: #6b7280; margin-bottom: 12px; align-items: center; }
+  .schema-legend .lg { display: inline-flex; align-items: center; gap: 4px; }
+  .tdot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .tdot.num { background: #3b82f6; } .tdot.txt { background: #8b5cf6; } .tdot.date { background: #f59e0b; } .tdot.oth { background: #9ca3af; }
+  /* ── EER diagram ── */
+  .eer-canvas { position: relative; overflow: auto; padding: 4px; }
+  .eer-boxes { position: relative; display: flex; flex-wrap: wrap; gap: 36px 56px; z-index: 1; align-items: flex-start; }
+  .eer-svg { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: visible; }
+  .eer-box { width: 232px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.1); overflow: hidden; align-self: flex-start; }
+  .eer-box__head { background: #1e40af; color: #fff; font-weight: 700; font-size: 13px; padding: 7px 11px; }
+  .eer-row { display: flex; align-items: center; gap: 7px; padding: 4px 11px; font-size: 12px; border-top: 1px solid #f1f5f9; background: #fff; }
+  .eer-row .cn { color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .eer-row .ct { margin-left: auto; color: #9ca3af; font-family: ui-monospace, monospace; font-size: 11px; }
+  .eer-fk { color: #b45309; font-weight: 700; font-size: 9px; border: 1px solid #fcd34d; background: #fffbeb; border-radius: 3px; padding: 0 3px; }
+  .cap-section { margin-bottom: 14px; position: relative; }
+  .cap-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+  .cap-section h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; }
+  .cap-item { border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 11px; margin-bottom: 7px; }
+  .cap-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .cap-name { font-size: 12px; font-weight: 700; font-family: ui-monospace, monospace; color: #1e3a5f; }
+  .cap-acts { display: flex; gap: 4px; flex-shrink: 0; }
+  .cap-btn { background: none; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px; color: #374151; padding: 2px 8px; cursor: pointer; }
+  .cap-btn:hover { background: #f9fafb; }
+  .cap-btn.del { color: #dc2626; border-color: #fca5a5; }
+  .cap-btn.del:hover { background: #fff5f5; }
+  .cap-desc { font-size: 12px; color: #6b7280; margin-top: 4px; }
+  .cap-params { font-size: 11px; color: #6b7280; margin-top: 5px; }
+  .cap-sql { background: #1e293b; color: #e2e8f0; border-radius: 4px; padding: 6px 9px; font-size: 11px; font-family: ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; margin-top: 5px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- New-session modal -->
+<div id="new-session-modal" class="modal-overlay" role="dialog" aria-modal="true">
+  <div class="modal modal--md">
+    <button type="button" class="modal__close" onclick="closeModal('new-session-modal')" aria-label="Close">&#10005;</button>
+    <h3 class="modal__title">New session</h3>
+    <p class="modal__desc">A session is a conversation scoped to one or more databases, with durable memory.</p>
+    {% if servers %}
+    <form method="post" action="/sessions">
+      <label class="field-label" for="sess-name">Session name (optional)</label>
+      <input type="text" id="sess-name" name="name" placeholder="e.g. Q2 Sales analysis" style="margin-bottom:14px;">
+      <label class="field-label">databases</label>
+      <div style="display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto;margin-bottom:4px;">
+        {% for s in servers %}
+        <label style="display:flex;align-items:center;gap:9px;font-size:13px;border:1px solid #e5e7eb;border-radius:6px;padding:8px 11px;cursor:pointer;">
+          <input type="checkbox" name="database_ids" value="{{ s.id }}" {% if loop.first %}checked{% endif %}>
+          <span style="font-weight:600;">{{ s.name }}</span>
+          <span style="color:#9ca3af;margin-left:auto;">{{ s.table_count }} table{{ 's' if s.table_count != 1 }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <div id="sess-err" class="msg-error" style="display:none;margin-top:6px;">Select at least one database.</div>
+      <div class="modal__actions">
+        <button type="submit" class="btn btn-primary" onclick="return _validateSession()">Create session</button>
+        <button type="button" class="btn btn-ghost" onclick="closeModal('new-session-modal')">Cancel</button>
+      </div>
+    </form>
+    {% else %}
+    <p class="empty-msg">Create a database first (Analyse tab → Upload data files).</p>
+    <div class="modal__actions"><button type="button" class="btn btn-ghost" onclick="closeModal('new-session-modal')">Close</button></div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Tool add/edit modal -->
+<div id="tool-modal" class="modal-overlay" role="dialog" aria-modal="true">
+  <div class="modal modal--lg">
+    <button type="button" class="modal__close" onclick="closeModal('tool-modal')" aria-label="Close">&#10005;</button>
+    <h3 class="modal__title" id="tool-modal-title">Add tool</h3>
+    <p class="modal__desc">A canned read-only SELECT. Embed parameters as <code>$name</code> in the SQL and
+      declare each in <strong>parameters</strong> — together they form the tool's <strong>execution</strong>.</p>
+    <label class="field-label" for="tool-name">Name</label>
+    <input type="text" id="tool-name" placeholder="e.g. orders_by_region" style="margin-bottom:10px;">
+    <label class="field-label" for="tool-desc">Description</label>
+    <input type="text" id="tool-desc" placeholder="What this tool returns" style="margin-bottom:10px;">
+    <label class="field-label" for="tool-sql">execution.sql_template</label>
+    <textarea id="tool-sql" rows="3" style="font-family:ui-monospace,monospace;font-size:13px;margin-bottom:10px;" placeholder="SELECT * FROM orders WHERE region = $region"></textarea>
+    <label class="field-label" for="tool-params">execution.parameters (JSON array of {name, type})</label>
+    <textarea id="tool-params" rows="3" style="font-family:ui-monospace,monospace;font-size:13px;" placeholder='[{"name": "region", "type": "string"}]'>[]</textarea>
+    <div id="tool-err" class="msg-error" style="display:none;margin-top:8px;"></div>
+    <div class="modal__actions">
+      <button type="button" class="btn btn-primary" onclick="submitTool()">Save tool</button>
+      <button type="button" class="btn btn-ghost" onclick="closeModal('tool-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Prompt add/edit modal -->
+<div id="prompt-modal" class="modal-overlay" role="dialog" aria-modal="true">
+  <div class="modal modal--md">
+    <button type="button" class="modal__close" onclick="closeModal('prompt-modal')" aria-label="Close">&#10005;</button>
+    <h3 class="modal__title" id="prompt-modal-title">Add prompt</h3>
+    <label class="field-label" for="prompt-name">Name</label>
+    <input type="text" id="prompt-name" placeholder="e.g. explore_orders" style="margin-bottom:10px;">
+    <label class="field-label" for="prompt-desc">Description</label>
+    <input type="text" id="prompt-desc" placeholder="What this prompt helps with" style="margin-bottom:10px;">
+    <label class="field-label" for="prompt-template">Template (JSON messages array, optional)</label>
+    <textarea id="prompt-template" rows="3" style="font-family:ui-monospace,monospace;font-size:13px;" placeholder='[{"role": "user", "content": "Use the orders tool to…"}]'></textarea>
+    <div id="prompt-err" class="msg-error" style="display:none;margin-top:8px;"></div>
+    <div class="modal__actions">
+      <button type="button" class="btn btn-primary" onclick="submitPrompt()">Save prompt</button>
+      <button type="button" class="btn btn-ghost" onclick="closeModal('prompt-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Resource (entity) edit modal — only title + description are editable -->
+<div id="resource-modal" class="modal-overlay" role="dialog" aria-modal="true">
+  <div class="modal modal--md">
+    <button type="button" class="modal__close" onclick="closeModal('resource-modal')" aria-label="Close">&#10005;</button>
+    <h3 class="modal__title">Edit resource</h3>
+    <p class="modal__desc">The title, description, and entity kind of an entity resource can be edited
+      manually. Its backing table and columns change by adding/deleting tables.</p>
+    <input type="hidden" id="resource-uri">
+    <label class="field-label" for="resource-title">Title</label>
+    <input type="text" id="resource-title" style="margin-bottom:10px;">
+    <label class="field-label" for="resource-desc">Description</label>
+    <input type="text" id="resource-desc" style="margin-bottom:10px;">
+    <label class="field-label" for="resource-kind">Entity kind</label>
+    <select id="resource-kind">
+      <option value="primary_entity">Primary entity</option>
+      <option value="secondary_entity">Secondary entity</option>
+    </select>
+    <div id="resource-err" class="msg-error" style="display:none;margin-top:8px;"></div>
+    <div class="modal__actions">
+      <button type="button" class="btn btn-primary" onclick="submitResource()">Save</button>
+      <button type="button" class="btn btn-ghost" onclick="closeModal('resource-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Schema (entity-relationship) edit modal -->
+<div id="schema-modal" class="modal-overlay" role="dialog" aria-modal="true">
+  <div class="modal modal--lg">
+    <button type="button" class="modal__close" onclick="closeModal('schema-modal')" aria-label="Close">&#10005;</button>
+    <h3 class="modal__title">Edit entity relationships</h3>
+    <p class="modal__desc">The entity-relationship schema is the source of truth for how tables relate. It
+      holds relationships + foreign keys only (per-table columns live on each entity resource).</p>
+    <input type="hidden" id="schema-uri">
+    <label class="field-label" for="schema-rels">relationships (JSON array of {from, to, on})</label>
+    <textarea id="schema-rels" rows="4" style="font-family:ui-monospace,monospace;font-size:13px;margin-bottom:10px;" placeholder='[{"from": "orders", "to": "customers", "on": "customer_id"}]'>[]</textarea>
+    <label class="field-label" for="schema-fks">foreign_keys (JSON array, optional)</label>
+    <textarea id="schema-fks" rows="3" style="font-family:ui-monospace,monospace;font-size:13px;" placeholder='[{"from_table": "orders", "from_column": "customer_id", "to_table": "customers", "to_column": "id"}]'>[]</textarea>
+    <div id="schema-err" class="msg-error" style="display:none;margin-top:8px;"></div>
+    <div class="modal__actions">
+      <button type="button" class="btn btn-primary" onclick="submitSchema()">Save relationships</button>
+      <button type="button" class="btn btn-ghost" onclick="closeModal('schema-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="app-shell">
+
+  <!-- ── Sidebar ───────────────────────────────────────── -->
+  <aside class="sidebar" aria-label="Sessions and usage">
+    <div class="sidebar__sessions">
+      <div class="card-header" style="margin-bottom:10px;">
+        <span class="card-title">Sessions</span>
+        <button type="button" class="btn btn-primary btn-xs" onclick="openModal('new-session-modal')">+ New</button>
+      </div>
+      <div style="flex:1;overflow-y:auto;" id="sessions-list">
+        {% for sess in sessions %}{{ session_row(sess) }}{% else %}
+        <div class="empty-msg">No sessions yet. Click “+ New”.</div>
+        {% endfor %}
+        {% if sessions_has_more %}{{ load_more('/fragments/sessions?offset=' ~ page_size) }}{% endif %}
+      </div>
+    </div>
+
+    <div class="sidebar__usage">
+      <div id="tu-model-name" class="tu-model-name">{{ llm_model }}</div>
+      <div class="tu-cols">
+        <div class="tu-section">
+          <div class="tu-section-title">Last query</div>
+          <div class="tu-row"><span class="tu-key">In</span><span class="tu-val" id="ses-ti">—</span></div>
+          <div class="tu-row"><span class="tu-key">Out</span><span class="tu-val" id="ses-to">—</span></div>
+          <div class="tu-row"><span class="tu-key">Cost</span><span class="tu-val" id="ses-cost">—</span></div>
+        </div>
+        <div class="tu-section">
+          <div class="tu-section-title">Today</div>
+          <div class="tu-row"><span class="tu-key">In</span><span class="tu-val" id="day-ti">—</span></div>
+          <div class="tu-row"><span class="tu-key">Out</span><span class="tu-val" id="day-to">—</span></div>
+          <div class="tu-row"><span class="tu-key">Queries</span><span class="tu-val" id="day-qc">—</span></div>
+          <div class="tu-row"><span class="tu-key">Cost</span><span class="tu-val cost" id="day-cost">—</span></div>
+        </div>
+      </div>
+      <div class="tu-storage">
+        <span class="tu-key">Databases:</span><span class="tu-val" id="stor-ds">0</span>
+        <span class="tu-key" style="margin-left:6px;">Rows:</span><span class="tu-val" id="stor-rows">0</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Main ──────────────────────────────────────────── -->
+  <main class="main">
+
+    <!-- ════ ANALYSE TAB ════ -->
+    <div id="analyse-tab" style="display:{% if active_tab=='database' %}none{% else %}flex{% endif %};flex-direction:column;flex:1;min-height:0;gap:16px;">
+
+      <div class="card-row">
+        <!-- Databases card -->
+        <div class="card">
+          <div class="card-header"><span class="card-title">Databases</span>
+            <span class="pill pill-muted">{{ server_total }}</span></div>
+          <div style="max-height:240px;overflow-y:auto;" id="databases-list">
+            {% for s in servers %}{{ database_row(s) }}{% else %}
+            <div class="empty-msg">No databases yet. Upload a CSV to create one. →</div>
+            {% endfor %}
+            {% if servers_has_more %}{{ load_more('/fragments/databases?offset=' ~ page_size) }}{% endif %}
+          </div>
+        </div>
+
+        <!-- Upload card -->
+        <div class="card">
+          <div class="card-header"><span class="card-title">Upload data files</span></div>
+          <label class="field-label" for="ds-name">Database name</label>
+          <input type="text" id="ds-name" placeholder="e.g. Q2 Sales" style="margin-bottom:12px;">
+          <label class="field-label" for="ds-type">Source</label>
+          <select id="ds-type" onchange="_toggleSource()" style="margin-bottom:12px;">
+            {% for t in database_types %}
+            <option value="{{ t.value }}" data-external="{{ '1' if t.external else '0' }}" data-hint="{{ t.hint }}">{{ t.label }}</option>
+            {% endfor %}
+          </select>
+          <div id="csv-source">
+            <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+              <div class="dz-icon">&#8659;</div>
+              <div id="dz-text" style="font-size:14px;font-weight:600;color:#374151;">Drop a file or click to browse</div>
+              <div style="font-size:12px;color:#9ca3af;margin-top:3px;">.csv · .tsv · .json · .xlsx · .xls</div>
+              <input type="file" id="file-input" accept=".csv,.tsv,.txt,.json,.xlsx,.xls" style="display:none" onchange="_onFile()">
+            </div>
+          </div>
+          <div id="uri-source" style="display:none;">
+            <label class="field-label" for="uri-input">Connection URI</label>
+            <input type="text" id="uri-input" placeholder="">
+          </div>
+          <div id="upload-err" class="msg-error" style="display:none;margin-top:10px;"></div>
+          <button type="button" class="btn btn-primary" id="create-btn" style="margin-top:12px;width:100%;" onclick="submitCreate()">
+            Create database
+          </button>
+        </div>
+      </div>
+
+      <!-- Conversation card -->
+      <div class="card conv-card" style="position:relative;">
+        <div id="ask-overlay">
+          <div id="ask-step" style="font-weight:600;color:#1e40af;font-size:15px;margin-bottom:6px;">Working…</div>
+          <div style="font-size:13px;color:#6b7280;">The agent is analysing your data</div>
+          <div style="margin-top:14px;display:flex;gap:5px;">
+            <span class="dot-anim"></span><span class="dot-anim" style="animation-delay:.2s"></span><span class="dot-anim" style="animation-delay:.4s"></span>
+          </div>
+        </div>
+
+        {% if active_session %}
+        <div class="card-header">
+          <span class="card-title">{{ active_session.name }}</span>
+          <span style="display:flex;gap:4px;flex-wrap:wrap;">
+            {% for srv in active_session.servers %}<span class="session-chip">{{ srv.name }}</span>{% endfor %}
+          </span>
+        </div>
+
+        <div id="thread">
+          {% if active_session.older_has_more %}{{ load_more('/fragments/sessions/' ~ active_session.id ~ '/queries?offset=' ~ page_size, 'Load older messages', 'loadOlderQueries') }}{% endif %}
+          {% for r in active_session.records %}{{ query_turn(r) }}{% else %}
+          <div class="conv-placeholder"><div class="big">💡</div><p>Ask your first question below.</p></div>
+          {% endfor %}
+        </div>
+
+        <form method="post" action="/sessions/{{ active_session.id }}/query" id="ask-form" onsubmit="return _onAsk()" style="margin-top:auto;">
+          <label class="field-label" for="question">Your question</label>
+          <textarea id="question" name="question" rows="3" placeholder="e.g. What is the total revenue by region?"></textarea>
+          <div style="margin-top:10px;"><button type="submit" class="btn btn-primary" id="ask-btn">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Ask</button></div>
+        </form>
+        {% else %}
+        <div class="conv-placeholder" style="margin:auto;">
+          <div class="big">💬</div>
+          <p style="font-size:15px;font-weight:600;color:#374151;">Select a session to start a conversation</p>
+          <p style="margin-top:6px;">Pick a session on the left, or click <strong>+ New</strong> to create one
+          {% if not servers %}(after uploading a dataset){% endif %}.</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- ════ DATABASE TAB ════ -->
+    <div id="database-tab" style="display:{% if active_tab=='database' %}flex{% else %}none{% endif %};flex-direction:column;flex:1;min-height:0;gap:16px;">
+      {% if active_server %}
+      {% set srv = active_server %}
+      <div class="db-head">
+        <div style="min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span style="font-size:16px;font-weight:700;color:#1e3a5f;">{{ srv.name }}</span>
+            <span class="pill">{{ srv.type|upper }}</span>
+            <span class="pill pill-muted">v{{ srv.version }}</span>
+          </div>
+          {% if srv.title %}<div style="font-size:13px;color:#6b7280;margin-top:3px;">{{ srv.title }}</div>{% endif %}
+          <div class="srv-uri" style="margin-top:3px;">{{ srv.uri_display }}
+            {% if srv.last_sync_status %} · last sync: {{ srv.last_sync_status }}{% if srv.last_synced_at %} ({{ srv.last_synced_at.strftime('%b %d %H:%M') }}){% endif %}{% endif %}</div>
+        </div>
+        <div style="display:flex;gap:7px;">
+          <form method="post" action="/database/{{ srv.id }}/sync"
+                onsubmit="showPageLoading('Syncing database…');">
+            <button type="submit" class="btn btn-primary btn-sm">Sync</button>
+          </form>
+          {% if srv.is_parquet %}
+          <input type="file" accept=".csv,.tsv,.json,.xlsx,.xls" style="display:none" id="addcsv-input"
+                 onchange="addTable({{ srv.name|tojson }})">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('addcsv-input').click()">+ Add table</button>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if srv.connection_error %}<div class="msg-error">⚠ {{ srv.connection_error }}</div>{% endif %}
+
+      <div class="db-body">
+        <!-- EER diagram (rendered entirely from the resources table — no connector call) -->
+        <div class="db-left">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">EER diagram · {{ srv.tables|length }} table{{ 's' if srv.tables|length != 1 }}</span>
+              <span class="schema-legend">
+                <span class="lg"><span class="tdot num"></span>number</span>
+                <span class="lg"><span class="tdot txt"></span>text</span>
+                <span class="lg"><span class="tdot date"></span>date</span>
+                <span class="lg"><span class="tdot oth"></span>other</span>
+              </span>
+            </div>
+            <div id="eer" class="eer-canvas"></div>
+            <script>window.EER = {tables: {{ srv.tables|tojson }},
+              relationships: {{ (srv.dataset_schema.get('relationships') or [])|tojson }}};</script>
+          </div>
+        </div>
+
+        <!-- MCP capabilities -->
+        <div class="db-right">
+          <div class="card">
+            <div class="card-header"><span class="card-title">MCP capabilities</span></div>
+
+            <div class="cap-section">
+              <div class="section-loading"><span class="spinner"></span></div>
+              <div class="cap-head"><h3>Tools ({{ srv.tool_count }})</h3>
+                <button type="button" class="btn btn-ghost btn-xs" onclick="addTool()">+ Add tool</button></div>
+              {% for tool in srv.tools %}{{ tool_item(tool) }}{% else %}<div class="empty-msg">No tools.</div>{% endfor %}
+              {% if srv.tools_has_more %}{{ load_more('/fragments/database/' ~ srv.id ~ '/tools?offset=' ~ page_size) }}{% endif %}
+            </div>
+
+            <div class="cap-section">
+              <div class="section-loading"><span class="spinner"></span></div>
+              <div class="cap-head"><h3>Resources ({{ srv.resource_count }})</h3></div>
+              {% for res in srv.resources %}{{ resource_item(res) }}{% else %}<div class="empty-msg">No resources.</div>{% endfor %}
+              {% if srv.resources_has_more %}{{ load_more('/fragments/database/' ~ srv.id ~ '/resources?offset=' ~ page_size) }}{% endif %}
+            </div>
+
+            <div class="cap-section">
+              <div class="section-loading"><span class="spinner"></span></div>
+              <div class="cap-head"><h3>Prompts ({{ srv.prompt_count }})</h3>
+                <button type="button" class="btn btn-ghost btn-xs" onclick="addPrompt()">+ Add prompt</button></div>
+              {% for p in srv.prompts %}{{ prompt_item(p) }}{% else %}<div class="empty-msg">No prompts.</div>{% endfor %}
+              {% if srv.prompts_has_more %}{{ load_more('/fragments/database/' ~ srv.id ~ '/prompts?offset=' ~ page_size) }}{% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+      {% else %}
+      <div class="card" style="margin:auto;max-width:560px;width:100%;">
+        <div class="conv-placeholder">
+          <div class="big">🗄️</div>
+          <p style="font-size:15px;font-weight:600;color:#374151;">Inspect a database</p>
+          <p style="margin-top:6px;">Pick a server to view its schema, tools, resources, and prompts.</p>
+        </div>
+        {% if servers %}
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          {% for s in servers %}
+          <a class="btn btn-ghost" href="/database/{{ s.id }}" style="justify-content:space-between;"
+             onclick="showPageLoading('Loading database…')">
+            <span>{{ s.name }}</span><span style="color:#9ca3af;font-weight:400;">{{ s.table_count }} table{{ 's' if s.table_count != 1 }} · v{{ s.version }}</span>
+          </a>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+
+  </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // ── Tabs ──────────────────────────────────────────────────────────────
+  function switchTab(tab) {
+    document.querySelectorAll('.hdr-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    document.getElementById('analyse-tab').style.display = (tab === 'analyse') ? 'flex' : 'none';
+    document.getElementById('database-tab').style.display = (tab === 'database') ? 'flex' : 'none';
+    if (tab === 'database') renderEER();
+  }
+
+  // ── EER diagram (table boxes + FK edges) — built from window.EER (resources only) ──────
+  const _SVGNS = 'http://www.w3.org/2000/svg';
+  function _esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+  function _dtypeClass(d) {
+    d = (d || '').toLowerCase();
+    if (/(int|double|float|decimal|numeric|real|big)/.test(d)) return 'num';
+    if (/(char|text|string|varchar)/.test(d)) return 'txt';
+    if (/(date|time|timestamp)/.test(d)) return 'date';
+    return 'oth';
+  }
+  function renderEER() {
+    const root = document.getElementById('eer');
+    if (!root || !window.EER) return;
+    const tables = window.EER.tables || [], rels = window.EER.relationships || [];
+    root.innerHTML = '';
+    if (!tables.length) { root.innerHTML = '<div class="empty-msg">No tables yet — upload data and sync.</div>'; return; }
+    const fkCols = {};
+    rels.forEach(r => { (fkCols[r.from_table] = fkCols[r.from_table] || new Set()).add(r.from_column); });
+    const svg = document.createElementNS(_SVGNS, 'svg'); svg.setAttribute('class', 'eer-svg');
+    svg.innerHTML = '<defs><marker id="eer-arrow" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">'
+      + '<path d="M0,0 L8,3 L0,6 z" fill="#64748b"/></marker></defs>';
+    const wrap = document.createElement('div'); wrap.className = 'eer-boxes';
+    root.appendChild(svg); root.appendChild(wrap);
+    const boxes = {};
+    tables.forEach(t => {
+      const cols = (t.schema && t.schema.length) ? t.schema : (t.column_names || []).map(n => ({name: n, dtype: ''}));
+      const fk = fkCols[t.table_name] || new Set();
+      const box = document.createElement('div'); box.className = 'eer-box';
+      box.innerHTML = `<div class="eer-box__head">${_esc(t.table_name)}</div>` + cols.map(c =>
+        `<div class="eer-row"><span class="tdot ${_dtypeClass(c.dtype)}"></span>`
+        + `<span class="cn">${_esc(c.name)}</span>`
+        + (fk.has(c.name) ? '<span class="eer-fk">FK</span>' : '')
+        + `<span class="ct">${_esc(c.dtype || '')}</span></div>`).join('');
+      wrap.appendChild(box); boxes[t.table_name] = box;
+    });
+    requestAnimationFrame(() => {
+      svg.setAttribute('viewBox', `0 0 ${wrap.scrollWidth} ${wrap.scrollHeight}`);
+      svg.style.width = wrap.scrollWidth + 'px'; svg.style.height = wrap.scrollHeight + 'px';
+      rels.forEach(r => {
+        const a = boxes[r.from_table], b = boxes[r.to_table];
+        if (!a || !b || a === b) return;
+        const line = document.createElementNS(_SVGNS, 'line');
+        line.setAttribute('x1', a.offsetLeft + a.offsetWidth / 2); line.setAttribute('y1', a.offsetTop + a.offsetHeight / 2);
+        line.setAttribute('x2', b.offsetLeft + b.offsetWidth / 2); line.setAttribute('y2', b.offsetTop + b.offsetHeight / 2);
+        line.setAttribute('stroke', '#94a3b8'); line.setAttribute('stroke-width', '1.5');
+        line.setAttribute('marker-end', 'url(#eer-arrow)');
+        svg.appendChild(line);
+      });
+    });
+  }
+  document.addEventListener('DOMContentLoaded', () => { if (window.EER) renderEER(); });
+
+  // ── Steps trace toggle ────────────────────────────────────────────────
+  function _toggleSteps(btn) {
+    const panel = btn.nextElementSibling;
+    const open = panel.style.display === 'none';
+    panel.style.display = open ? 'flex' : 'none';
+    btn.innerHTML = (open ? '▼' : '▶') + btn.innerHTML.slice(1);
+  }
+
+  // ── New-session validation ────────────────────────────────────────────
+  function _validateSession() {
+    const checked = document.querySelectorAll('input[name="database_ids"]:checked');
+    const err = document.getElementById('sess-err');
+    if (!checked.length) { if (err) err.style.display = 'block'; return false; }
+    return true;
+  }
+
+  // ── Upload → create ───────────────────────────────────────────────────
+  function _isExternalSource() {
+    const sel = document.getElementById('ds-type');
+    return sel.options[sel.selectedIndex].getAttribute('data-external') === '1';
+  }
+  function _toggleSource() {
+    const sel = document.getElementById('ds-type');
+    const opt = sel.options[sel.selectedIndex];
+    const ext = opt.getAttribute('data-external') === '1';
+    document.getElementById('csv-source').style.display = ext ? 'none' : 'block';
+    const u = document.getElementById('uri-source'); if (u) u.style.display = ext ? 'block' : 'none';
+    // Show only the selected type's URI shape as the placeholder (data-hint per <option>).
+    const input = document.getElementById('uri-input');
+    if (input) input.placeholder = opt.getAttribute('data-hint') || '';
+  }
+  _toggleSource();  // sync the URI field + its type-specific hint to the initial selection
+  function _onFile() {
+    const f = document.getElementById('file-input').files[0];
+    const dz = document.getElementById('drop-zone'), txt = document.getElementById('dz-text');
+    if (f) { dz.classList.add('has-file'); txt.textContent = '📎 ' + f.name;
+      if (!document.getElementById('ds-name').value.trim())
+        document.getElementById('ds-name').value = f.name.replace(/\.[^.]+$/, ''); }
+  }
+  (function _dragWire() {
+    const dz = document.getElementById('drop-zone'); if (!dz) return;
+    ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('drag-over'); }));
+    ['dragleave','drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('drag-over'); }));
+    dz.addEventListener('drop', e => { if (e.dataTransfer.files.length) { document.getElementById('file-input').files = e.dataTransfer.files; _onFile(); } });
+  })();
+  function _uErr(msg) { const e = document.getElementById('upload-err'); e.textContent = msg; e.style.display = 'block'; }
+  async function _errMsg(r) { try { const j = await r.json(); return (j.detail && j.detail.message) || JSON.stringify(j); } catch { return 'Request failed (' + r.status + ').'; } }
+
+  async function submitCreate() {
+    const name = document.getElementById('ds-name').value.trim();
+    if (!name) { _uErr('Enter a database name.'); return; }
+    const typeEl = document.getElementById('ds-type');
+    const selectedType = typeEl.value;
+    const isExternal = _isExternalSource();
+    const btn = document.getElementById('create-btn');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Creating…';
+    try {
+      let uri, dtype;
+      if (isExternal) {
+        uri = document.getElementById('uri-input').value.trim();
+        if (!uri) { _uErr('Enter a database URI.'); return; }
+        dtype = selectedType;
+      } else {
+        const file = document.getElementById('file-input').files[0];
+        dtype = 'parquet'; uri = '';
+        if (file) {
+          const up = new FormData(); up.append('database_name', name); up.append('file', file);
+          const r1 = await fetch('/database/upload', { method: 'POST', body: up });
+          if (!r1.ok) { _uErr(await _errMsg(r1)); return; }
+          uri = (await r1.json()).uri;
+        }
+        // a parquet database with no file yet is valid — tables can be added later
+      }
+      const fd = new FormData(); fd.append('name', name); fd.append('database_type', dtype); fd.append('database_uri', uri);
+      const r2 = await fetch('/database', { method: 'POST', body: fd });
+      if (r2.redirected || r2.ok) { window.location = '/'; return; }
+      _uErr(await _errMsg(r2));
+    } catch (e) { _uErr('Network error: ' + e); }
+    finally { btn.disabled = false; btn.textContent = 'Create database'; }
+  }
+
+  // Add a table to an existing parquet database: upload the file, then sync (re-inspects + regenerates).
+  async function addTable(databaseName) {
+    const input = document.getElementById('addcsv-input');
+    const file = input.files[0];
+    if (!file) return;
+    try {
+      const up = new FormData(); up.append('database_name', databaseName); up.append('file', file);
+      const r1 = await fetch('/database/upload', { method: 'POST', body: up });
+      if (!r1.ok) { alert((await _errMsg(r1))); return; }
+      const r2 = await fetch('/database/' + window.MCP_SERVER_ID + '/sync', { method: 'POST' });
+      window.location = '/database/' + window.MCP_SERVER_ID;
+    } catch (e) { alert('Network error: ' + e); }
+  }
+
+  // ── Ask: overlay + poll ───────────────────────────────────────────────
+  const _STEPS = ['Loading data…', 'Planning query…', 'Executing SQL…', 'Analysing results…', 'Writing answer…'];
+  let _stepI = 0, _stepTimer = null, _asking = false;
+  function _showOverlay() {
+    const o = document.getElementById('ask-overlay'); if (!o) return;
+    o.style.display = 'flex'; _stepI = 0;
+    document.getElementById('ask-step').textContent = _STEPS[0];
+    _stepTimer = setInterval(() => { _stepI = (_stepI + 1) % _STEPS.length; document.getElementById('ask-step').textContent = _STEPS[_stepI]; }, 1800);
+  }
+  function _onAsk() {
+    if (_asking) return false;
+    const q = document.getElementById('question').value.trim();
+    if (!q) return false;
+    _asking = true; _showOverlay(); return true;
+  }
+  // ── Chat thread: latest turn at the bottom; load older above on demand ────
+  function _scrollThreadBottom() { const t = document.getElementById('thread'); if (t) t.scrollTop = t.scrollHeight; }
+  // Generic "Load more" (appends): replace the button with the next rows + a fresh button (or nothing).
+  async function loadMore(btn) {
+    const url = btn.dataset.url; btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Loading…';
+    try { btn.outerHTML = await (await fetch(url)).text(); }
+    catch (e) { btn.disabled = false; btn.textContent = orig; alert('Could not load more: ' + e); }
+  }
+  // Load OLDER turns (prepends): keep the viewport stable by re-anchoring scroll after taller content lands.
+  async function loadOlderQueries(btn) {
+    const thread = document.getElementById('thread');
+    const prevH = thread ? thread.scrollHeight : 0, prevTop = thread ? thread.scrollTop : 0;
+    btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Loading…';
+    try {
+      btn.outerHTML = await (await fetch(btn.dataset.url)).text();
+      if (thread) thread.scrollTop = prevTop + (thread.scrollHeight - prevH);
+    } catch (e) { btn.disabled = false; btn.textContent = orig; alert('Could not load older messages: ' + e); }
+  }
+
+  {% if active_session %}
+  window.addEventListener('DOMContentLoaded', () => {
+    _scrollThreadBottom();  // start on the newest turn
+    const thread = document.getElementById('thread');
+    if (thread) thread.addEventListener('scroll', () => {
+      if (thread.scrollTop <= 4) {                       // scrolled to the top → reveal older history
+        const b = thread.querySelector('.load-more');    // the load-older button, when present
+        if (b && !b.disabled) loadOlderQueries(b);
+      }
+    });
+  });
+  {% endif %}
+  {% if active_session and new_record_id and new_record_status not in ('completed','failed') %}
+  window.addEventListener('DOMContentLoaded', () => {
+    _showOverlay();
+    const poll = setInterval(async () => {
+      try {
+        const r = await fetch('/sessions/{{ active_session.id }}/query/{{ new_record_id }}/status');
+        const d = await r.json();
+        if (d.status === 'completed' || d.status === 'failed') { clearInterval(poll); window.location = '/sessions/{{ active_session.id }}'; }
+      } catch (_) {}
+    }, 1500);
+  });
+  {% endif %}
+
+  // ── Database tab: capability mutations (JSON-RPC over POST /database/{id}) ──
+  {% if active_server %}window.MCP_SERVER_ID = {{ active_server.id|tojson }};{% endif %}
+
+  async function mcpRpc(method, params) {
+    const r = await fetch('/database/' + window.MCP_SERVER_ID, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({jsonrpc: '2.0', id: 1, method: method, params: params || {}}),
+    });
+    return r.json();
+  }
+  function _capErr(id, msg) { const e = document.getElementById(id); if (e) { e.textContent = msg; e.style.display = 'block'; } }
+  // `overlay` (optional) is a .section-loading element shown for the duration of a delete; it is
+  // hidden again only on failure (on success the page reloads, replacing it).
+  async function _runMut(method, params, errId, overlay) {
+    if (errId) { const e = document.getElementById(errId); if (e) e.style.display = 'none'; }
+    try {
+      const resp = await mcpRpc(method, params);
+      if (resp.error) { if (overlay) overlay.classList.remove('open'); errId ? _capErr(errId, resp.error.message) : alert(resp.error.message); return; }
+      window.location = '/database/' + window.MCP_SERVER_ID;
+    } catch (e) { if (overlay) overlay.classList.remove('open'); errId ? _capErr(errId, 'Network error: ' + e) : alert('Network error: ' + e); }
+  }
+  function _parseJson(text, fallback) { const t = (text || '').trim(); return t ? JSON.parse(t) : fallback; }
+
+  // Tools (execution = sql_template + parameters)
+  function addTool() {
+    document.getElementById('tool-modal-title').textContent = 'Add tool';
+    document.getElementById('tool-name').value = ''; document.getElementById('tool-name').readOnly = false;
+    document.getElementById('tool-desc').value = '';
+    document.getElementById('tool-sql').value = '';
+    document.getElementById('tool-params').value = '[]';
+    document.getElementById('tool-err').style.display = 'none';
+    window._toolMode = 'tools/add'; openModal('tool-modal');
+  }
+  function editTool(name, desc, execution) {
+    document.getElementById('tool-modal-title').textContent = 'Edit tool';
+    document.getElementById('tool-name').value = name; document.getElementById('tool-name').readOnly = true;
+    document.getElementById('tool-desc').value = desc || '';
+    document.getElementById('tool-sql').value = (execution || {}).sql_template || '';
+    document.getElementById('tool-params').value = JSON.stringify((execution || {}).parameters || [], null, 2);
+    document.getElementById('tool-err').style.display = 'none';
+    window._toolMode = 'tools/update'; openModal('tool-modal');
+  }
+  function submitTool() {
+    let params;
+    try { params = _parseJson(document.getElementById('tool-params').value, []); }
+    catch (e) { return _capErr('tool-err', 'parameters must be valid JSON: ' + e); }
+    const def = {
+      name: document.getElementById('tool-name').value.trim(),
+      description: document.getElementById('tool-desc').value.trim(),
+      execution: { sql_template: document.getElementById('tool-sql').value.trim(), parameters: params },
+    };
+    if (!def.name) return _capErr('tool-err', 'Name is required.');
+    _runMut(window._toolMode, {definition: def}, 'tool-err');
+  }
+
+  // Prompts
+  function addPrompt() {
+    document.getElementById('prompt-modal-title').textContent = 'Add prompt';
+    document.getElementById('prompt-name').value = ''; document.getElementById('prompt-name').readOnly = false;
+    document.getElementById('prompt-desc').value = '';
+    document.getElementById('prompt-template').value = '';
+    document.getElementById('prompt-err').style.display = 'none';
+    window._promptMode = 'prompts/add'; openModal('prompt-modal');
+  }
+  function editPrompt(name, desc, template) {
+    document.getElementById('prompt-modal-title').textContent = 'Edit prompt';
+    document.getElementById('prompt-name').value = name; document.getElementById('prompt-name').readOnly = true;
+    document.getElementById('prompt-desc').value = desc || '';
+    document.getElementById('prompt-template').value = (template && template.length) ? JSON.stringify(template, null, 2) : '';
+    document.getElementById('prompt-err').style.display = 'none';
+    window._promptMode = 'prompts/update'; openModal('prompt-modal');
+  }
+  function submitPrompt() {
+    let template;
+    try { template = _parseJson(document.getElementById('prompt-template').value, null); }
+    catch (e) { return _capErr('prompt-err', 'template must be valid JSON: ' + e); }
+    const def = { name: document.getElementById('prompt-name').value.trim(),
+                  description: document.getElementById('prompt-desc').value.trim() };
+    if (template !== null) def.template = template;
+    if (!def.name) return _capErr('prompt-err', 'Name is required.');
+    _runMut(window._promptMode, {definition: def}, 'prompt-err');
+  }
+
+  // Resource (entity) — title + description + kind (primary/secondary entity) editable
+  function editResource(uri, title, desc, kind) {
+    document.getElementById('resource-uri').value = uri;
+    document.getElementById('resource-title').value = title || '';
+    document.getElementById('resource-desc').value = desc || '';
+    document.getElementById('resource-kind').value =
+      (kind === 'secondary_entity') ? 'secondary_entity' : 'primary_entity';
+    document.getElementById('resource-err').style.display = 'none';
+    openModal('resource-modal');
+  }
+  function submitResource() {
+    const def = { uri: document.getElementById('resource-uri').value,
+                  title: document.getElementById('resource-title').value,
+                  description: document.getElementById('resource-desc').value,
+                  kind: document.getElementById('resource-kind').value };
+    _runMut('resources/update', {definition: def}, 'resource-err');
+  }
+
+  // Schema (entity relationships) — update only
+  function editSchema(uri, content) {
+    document.getElementById('schema-uri').value = uri;
+    document.getElementById('schema-rels').value = JSON.stringify((content || {}).relationships || [], null, 2);
+    document.getElementById('schema-fks').value = JSON.stringify((content || {}).foreign_keys || [], null, 2);
+    document.getElementById('schema-err').style.display = 'none';
+    openModal('schema-modal');
+  }
+  function submitSchema() {
+    let rels, fks;
+    try { rels = _parseJson(document.getElementById('schema-rels').value, []);
+          fks = _parseJson(document.getElementById('schema-fks').value, []); }
+    catch (e) { return _capErr('schema-err', 'must be valid JSON: ' + e); }
+    const def = { uri: document.getElementById('schema-uri').value,
+                  content: {relationships: rels, foreign_keys: fks} };
+    _runMut('resources/update', {definition: def}, 'schema-err');
+  }
+
+  function delCap(btn, method, keyName, key) {
+    if (!confirm('Delete ' + key + '? This is a hard delete; related capabilities may be regenerated.')) return;
+    const sec = btn && btn.closest ? btn.closest('.cap-section') : null;
+    const overlay = sec ? sec.querySelector('.section-loading') : null;
+    if (overlay) overlay.classList.add('open');
+    const params = {}; params[keyName] = key;
+    _runMut(method, params, null, overlay);
+  }
+</script>
+{% endblock %}

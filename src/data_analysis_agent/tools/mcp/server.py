@@ -120,6 +120,15 @@ def register_parquet_view(conn: duckdb.DuckDBPyConnection, table_name: str, parq
     conn.execute(f'CREATE VIEW "{safe_table}" AS SELECT * FROM read_parquet(\'{safe_path}\')')
 
 
+def register_dataframe_view(conn: duckdb.DuckDBPyConnection, table_name: str, df) -> None:
+    """Register a pandas DataFrame as a queryable table named ``table_name`` on ``conn``.
+
+    Used by connectors that have no native DuckDB scanner (e.g. MongoDB, Snowflake): they load the
+    rows into DataFrames and register them so the generic read-only query path works unchanged.
+    """
+    conn.register(table_name, df)
+
+
 def build_server(
     server_name: str,
     conn: duckdb.DuckDBPyConnection,
@@ -137,7 +146,7 @@ def build_server(
     Returns:
         A :class:`FastMCP` server with the connection attached as ``server._duckdb_conn``.
     """
-    server = FastMCP(f"mcpserver::{server_name}")
+    server = FastMCP(f"database::{server_name}")
     table_names = [t["table_name"] for t in tables]
     server.add_tool(
         _make_query(conn, max_rows),

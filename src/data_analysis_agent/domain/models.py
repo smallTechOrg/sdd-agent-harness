@@ -8,7 +8,7 @@ def _uid() -> str:
     return str(uuid4())
 
 
-class McpServer(BaseModel):
+class Database(BaseModel):
     id: str = Field(default_factory=_uid)
     name: str
     title: str | None = None
@@ -22,7 +22,7 @@ class McpServer(BaseModel):
 class Session(BaseModel):
     id: str = Field(default_factory=_uid)
     name: str | None = None
-    mcp_server_ids: list[str] = Field(default_factory=list)
+    database_ids: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

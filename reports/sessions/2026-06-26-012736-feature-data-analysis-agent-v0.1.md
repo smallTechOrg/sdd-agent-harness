@@ -158,3 +158,181 @@ resource needs explicit confirmation).
   spec/README/render use SQLite; I built/verified against local SQLite and did **not** touch the remote.
   Pre-existing Gemini-vs-OpenRouter naming is now reconciled (OpenRouter). GitHub remote moved to
   `smallTechOrg/zero-shot-sdd-harness` (pushes succeed via redirect).
+
+---
+
+## Addendum — UI port + capability mutations + execution object + Postgres master
+
+- **Full single-page UI** matching the PM's demo (blue shell, Analyse/Database tabs, sidebar sessions +
+  token/cost widget, drag-drop upload, conversation thread, schema view). SSR shell rendered by `/`,
+  `/sessions/{id}`, `/mcpserver/{id}`; one new endpoint `GET /stats/daily`. `_view.py` view-models.
+- **Manual capability mutations (UI + JSON-RPC):** `tools|prompts|resources/delete` added to the
+  dispatcher — **hard delete** (manual ≠ the reversible LLM soft-delete) + an LLM-driven **prune** cascade
+  (tool→prompts; resource→tools→prompts; prompt→none). `resources/delete` of an entity drops its backing
+  Parquet table + cleans relationships; the `kind='schema'` resource is **undeletable/unaddable** but
+  **updatable** (relationships/FKs, cascades). Entity `resources/update` edits **title/description only**.
+  Database tab has Add/Edit/Delete for tools+prompts, Edit/Delete for entity resources, Edit-relationships
+  for schema.
+- **Tool `execution` object:** `mcp_tools.sql_template` + `input_schema_json` columns replaced by one
+  `execution_json` = `{sql_template (with $param embeddings), parameters:[{name,type,…}]}` — the executor's
+  source of truth. MCP `inputSchema` + bare `sql_template` are derived (read-only) properties.
+- **Schema vs entity split:** the entity-relationship (`kind='schema'`) resource holds relationships/FKs
+  **only**; per-table columns live on each entity resource (`content={table,columns,row_count}`). Together
+  they are the dataset-schema source of truth.
+- **Resource `uri` unique at DB level** (partial-unique on `uri` over active rows) + new **`size`** column
+  (schema→content_json bytes; entity→Parquet file bytes).
+- **Master DB is now PostgreSQL** (`master_pacb` on Render, from `.env`). Dropped the old test schema
+  (`data_sources`/`tools`/`tool_capabilities`/…, all this app's own test data) and migrated the fresh MCP
+  schema. Partial-unique indexes now declare **both** `sqlite_where` + `postgresql_where`; Alembic batch
+  mode is SQLite-only. SQLite still the default + used by tests.
+- **Gate:** `uv run pytest` = **91 passed, 1 skipped** (+9 new). Live smoke on Postgres (stub): create
+  2-table server → tools/add with execution param (bound `min=4`) → tools/delete (hard) → resources/update
+  schema relationships (read shows relationships/FKs only) → resources/delete drops the customers table +
+  file → resources/delete of schema → -32602. Server restarted on the `.env` config (Postgres + OpenRouter).
+- **Note:** with the offline stub, any *prune* cascade (delete / schema-update) regenerates tools from the
+  template generator, so a manually-added tool can be pruned by a later prune cascade; a real LLM
+  regenerates more faithfully. Interpretation chosen for `resources/delete`: drop the target entity + its
+  table + relationships referencing it (NOT transitive neighbor tables) — flagged for confirmation.
+
+---
+
+## Addendum — entity reframe: MCP server (type) → **Database** (instance)
+
+- Conceptual reframe (user): an **MCP server** is a *type* (parquet, postgres, …) with connector logic in
+  code (`tools/connectors/`); a **database** is an *instance* of that type = the primary entity.
+- **Rename everywhere:** `DatabaseRow`/`databases` (was `McpServerRow`/`mcp_servers`); FK
+  `database_id` (children + join); `SessionDatabaseRow`/`session_databases`; `api/database.py` + routes
+  `/database*` (JSON-RPC `POST /database/{id}`); domain model `Database`; UI labels "Databases" /
+  "Create database"; spec. **Kept** `mcp_tools`/`mcp_resources`/`mcp_prompts` (the MCP capability rows;
+  only their FK renamed) and the FastMCP "server" objects in `pool.py`/`server.py`.
+- **Bloat removed:** dropped the `dataset_schema_json` column — it duplicated the `kind='schema'`
+  resource's `content`, which is now the single **schema source of truth** (relationships/FKs);
+  `resources/read` + `server_detail_view` + sync read from that resource. All other columns kept (used).
+- **Postgres recreated** (user: "drop database"): dropped the old `mcp_servers` schema, migrated the fresh
+  `databases` schema (partial-unique indexes intact; no `dataset_schema_json`). Master stays Postgres.
+- **Gate:** `uv run pytest` = **91 passed, 1 skipped**. Live smoke on Postgres: create database →
+  `/database/{id}` tools/list → `resources/read` schema returns `{relationships, foreign_keys}` from the
+  resource. UI shows "Databases" / "Create database". Server restarted on `.env` (Postgres + OpenRouter).
+- Test file `test_mcpserver_api.py` → `test_database_api.py`. Migration filename kept (revision id is
+  what matters).
+
+---
+
+## Addendum — connector-owned inspection, new connectors, base ABC, api/database.py reshape
+
+- **No stored physical-table catalog.** Dropped `physical_tables_json` (column + property). The
+  **connector inspects tables live** (`discover_tables`) — single source of truth. Per-table columns live
+  on entity resources; relationships on the schema resource. `pool`/`dispatch`/`sync`/`_view` all call
+  `get_connector(db_dict).discover_tables()/build_server()`; `get_connector(server)` dropped its `tables`
+  arg.
+- **`api/database.py` reshape:** `upload_csv` param `dataset_name`→`database_name` (+ no `session` param);
+  `create_server` params `dataset_uri/type`→`database_uri/type`; `_create_parquet`+`_create_external`
+  **merged into one create path** (connector connection-check; zero tables valid); `_dataset_dir`→
+  `_database_dir`; **`add_csv` route removed** (= `upload` + `sync`); `server_detail`→`database_detail`,
+  `delete_server`→`delete_database`; `_introspect_parquet_dir` removed (moved into ParquetConnector).
+- **External always enabled** — removed `enable_external_datasets` setting + the get_connector gate +
+  the UI flag; the create UI's **Source** selector + URI field are always shown.
+- **New connectors (latest reqs):** `sqlite` (full — `sqlite3` introspect incl. FK relationships +
+  DuckDB `sqlite_scanner`), `mongodb` + `snowflake` (BETA — driver-gated lazy imports; load sampled/
+  capped rows into DuckDB-registered DataFrames). Registered in `DATABASE_TYPES` + `get_connector`; the
+  UI dropdown renders all five.
+- **`BaseConnector` ABC** (`connectors/base.py`): all connectors inherit it; abstract `connection_check`/
+  `discover_tables`/`build_server` + default `discover_relationships`/`drop_table` — uniform signatures +
+  return shapes so callers never branch on type.
+- **Sync refinement:** entities are now **definite from inspection** (exactly one per discovered table —
+  the LLM only backfills title/description, never invents/drops a table); relationships come from the
+  connector when it exposes FKs (sqlite), else LLM backfill.
+- **Gate:** `uv run pytest` = **90 passed, 1 skipped**. Live smoke on Postgres: created parquet (1 table),
+  **empty parquet (0 tables, valid)**, **postgres** (9 tables discovered), and **sqlite** (`list_products`
+  returns live rows). Server restarted on `.env` (Postgres + OpenRouter).
+- **Notes:** mongo/snowflake need their optional drivers installed to use (clear error otherwise);
+  add-table is now upload→sync; spec updated (tech-stack connector seam, data-model type field).
+
+---
+
+## Addendum — EER diagram + connector-inspection-only-in-sync + clean pass
+
+- **EER diagram re-enabled** (Database tab): client-side SVG of table boxes (columns + type dots + **FK**
+  badges) with **edges drawn between foreign-key relationships**. Rendered **entirely from the resources
+  table** (entity columns + the schema resource's relationships) — never calls the connector to view.
+- **Canonical relationship format** (one shape for all DB types + the LLM):
+  `{relationships: [{from_table, from_column, to_table, to_column}]}` on the `kind='schema'` resource.
+  FKs come from the **connector** when it exposes them — `PostgresConnector.discover_relationships`
+  (`information_schema`), `SQLiteConnector` (`PRAGMA foreign_key_list`) — else the LLM (`stage_schema`)
+  backfills the same shape.
+- **Inspection only in sync.** `discover_tables`/`discover_relationships` (which hit the store) run ONLY
+  in `run_sync`, materialized into resources. `build_server` was **decoupled from inspection** —
+  `build_server(table_names)` builds query views over given names; pool/dispatch/write-time-validate pass
+  **resource-derived** names (`sync.active_entity_tables`), sync passes freshly-discovered names. **pool.py
+  no longer inspects** (test `test_pool_never_inspects_the_store` guards it).
+- **Clean pass:** `get_connector` is now a **registry** (no if/else chain); removed dead code (the
+  `coltype` macro + `.tbl-card/.tbl-col/.rel-line` CSS replaced by the EER; 3 unused imports →
+  **pyflakes clean**); simplified `create_database`'s type branch (dropped the postgres-alias edge case);
+  refreshed stale pydocs (pool/dispatch/pipeline). Connectors already share `BaseConnector`.
+- **Gate:** `uv run pytest` = **92 passed, 1 skipped** (+ pool-no-inspect, sqlite-FK, relationship-format).
+  Live smoke: created a sqlite DB with a real FK → FK discovered + stored canonically → **EER renders the
+  orders→customers edge** from resources. Server restarted on `.env` (Postgres + OpenRouter).
+- **Known remaining drift (not done):** `02-architecture.md` prose still uses older "MCP server entity"
+  language + `DatasetConnector` Protocol naming, and a few scattered external-flag/BETA mentions
+  (01-vision, secret-hygiene) predate external-always-on — a dedicated spec sweep can reconcile these.
+
+---
+
+## Addendum — UI loading overlays, entity-kind toggle, list/chat pagination (2026-06-28)
+
+User-reported UI gaps, fixed without altering the server-rendered + progressive-enhancement model
+(mutations stay form POSTs that redirect; new lists page in via HTML fragments, no JS render-duplication).
+
+- **Loading overlays.** New reusable overlays in `base.html`: a **full-page** overlay
+  (`showPageLoading(label)`) for whole-app blocking actions and a **section-scoped** overlay
+  (`.section-loading`) for one MCP-capability section.
+  - Home **delete database / delete session** and **Sync** (both Analyse card + Database header) now show
+    the full-page overlay on submit; the existing redirect refreshes the list underneath.
+  - Database tab **tool/resource/prompt delete** shows a spinner over *only that section* (Tools/Resources/
+    Prompts) for the duration of the JSON-RPC call (`delCap(btn,…)` → `_runMut(…, overlay)`); the overlay
+    clears on error, persists into the reload on success. **Edit stays atomic — no overlay** (per ask).
+- **Entity-kind toggle (primary ↔ secondary).** `update_resource` now accepts `kind` for an entity
+  resource (rejects anything but `primary_entity`/`secondary_entity`; schema resource still can't be
+  re-kinded); PATCH-merge already preserves it on title-only edits. UI: a **Entity kind** select in the
+  resource edit modal; the kind pill on each resource row reflects the change after reload.
+- **Pagination (offset windows, `ui_page_size`=20).** `api/_pagination.py::page_window`; shared row macros
+  in `_partials.html`; one `fragments.html` + `api/fragments.py` (`/fragments/{sessions,databases,
+  database/{id}/{tools|resources|prompts},sessions/{id}/queries}`). First page renders inline + a
+  **Load-more** button; the button's `outerHTML` is replaced by the next window (+ a fresh button) so a
+  paged-in row is byte-identical to a server-rendered one. EER diagram still consumes **all** entity
+  tables (never paginated); capability section headers show **totals**, not page counts.
+- **Chat thread = chat UX.** `paged_queries` returns the latest window **chronological** (newest at the
+  bottom by the ask form); `#thread` is the scroll area and starts pinned to the bottom. **Load older**
+  prepends above with scroll re-anchoring, and auto-fires on scroll-to-top ("scroll up for history").
+- **Gate:** `uv run pytest` = **92 passed, 1 skipped** (70 unit + 22 integration). Browser-driven
+  (Playwright) verification of every state — load-more (2→4 rows), chat newest-at-bottom + older-prepend
+  (Q4,Q5 → Q2,Q3,Q4,Q5), section + full-page overlays, kind select (Primary/Secondary) — **zero console
+  errors**. (One `GET /` 500 seen mid-run was a transient Render-Postgres connection timeout, not code.)
+
+---
+
+## Addendum — 2026-06-28 · UI fix round (4 reported issues)
+
+User re-tested and reported four issues; all fixed and verified live (Playwright, system py3.12).
+
+1. **Delete session left a stale list (clicking the just-deleted row → 404).** Root cause: the SPA shell
+   was browser-cacheable, so the post-delete `303 → GET /` could serve a cached page still listing the
+   row. Fix: `api/_common.py::render` now sets **`Cache-Control: no-store`** on every shell render (the
+   single chokepoint for `/`, `/sessions/{id}`, `/database/{id}`); removed the now-redundant per-route
+   header in `session_detail`. Verified: `curl -D-` shows `cache-control: no-store`; delete → refreshed
+   list no longer contains the deleted session.
+2. **Opening a session showed nothing while the page rendered.** Added `showPageLoading('Loading session…')`
+   to the sidebar session links (and, for consistency, the database name/Inspect/quick-pick links →
+   `'Loading database…'`). The existing full-page overlay now covers the navigation gap.
+3. **Connection-URI hint was one combined string for all types.** Each `DATABASE_TYPES` entry now carries
+   a `uri_hint` (4th tuple field); it's rendered as `data-hint` on each `<option>`, and `_toggleSource()`
+   sets the `#uri-input` placeholder to the selected type's hint (called once on load too). Verified all
+   four: postgresql/sqlite/mongodb/snowflake each show only their own URI shape.
+4. **Pagination "not visible".** It was working, but `ui_page_size` was **20** and no list exceeded it
+   (pg_meta has 10 resources → all shown, no control). Lowered the default to **5** (settings). Verified:
+   sessions 5+**Load more**→6; **RESOURCES (10)** shows 5 + Load-more → 10; tools/prompts (3) and databases
+   (2) correctly show no control.
+
+- **Gate:** `uv run pytest` = **92 passed, 1 skipped**. Browser drive: **zero console errors**. Seeded 3
+  temp sessions to exercise sessions-pagination/delete, then **removed them** — DB back to its prior state
+  (3 sessions, 2 databases). Server restarted on :8001 with the new code. Spec `06-ui.md` updated.

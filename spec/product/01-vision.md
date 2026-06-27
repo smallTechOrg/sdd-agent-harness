@@ -27,7 +27,7 @@ all live in the MCP server's metadata. The server is bound 1:1 to a dataset URI 
 
 The agent answers a question with a **single-level** call `{"tool":"<server>","arguments":{"query":"SELECT
 …"}}` against a generic read-only-SQL tool (Phase A). The generated GET-API tools, resources, and prompts
-are exposed over an **MCP JSON-RPC endpoint** (`POST /mcpserver/{id}`) for the UI and external MCP
+are exposed over an **MCP JSON-RPC endpoint** (`POST /database/{id}`) for the UI and external MCP
 clients. Wiring the generated tools into the agent itself (**hybrid**: prefer a matching generated tool,
 fall back to arbitrary SQL) is the near-term follow-up (Phase B).
 
@@ -49,7 +49,7 @@ rebuilding the agent.
 
 | Entity | What it is | API module |
 |--------|------------|------------|
-| **MCP server** | A dataset wrapped 1:1, with LLM-generated tools/resources/prompts | `api/mcpserver.py` |
+| **MCP server** | A dataset wrapped 1:1, with LLM-generated tools/resources/prompts | `api/database.py` |
 | **Session** | A long-lived conversation over one or more MCP servers (pool + memory) | `api/sessions.py` |
 | **Query** | One NL question answered by a ReAct run within a session | `api/queries.py` |
 
@@ -58,7 +58,7 @@ rebuilding the agent.
 - [ ] User uploads a CSV under a named dataset and an MCP server is created for it
 - [ ] On create, the sync pipeline generates the server's tools, resources, and prompts (LLM, with deterministic stub offline)
 - [ ] Re-syncing a server regenerates capabilities **incrementally**, bumps the version, and only **soft-deletes**
-- [ ] `POST /mcpserver/{id}` answers MCP JSON-RPC `tools/list` · `tools/call` · `resources/list` · `resources/read` · `prompts/list` · `prompts/get` (with cursor pagination)
+- [ ] `POST /database/{id}` answers MCP JSON-RPC `tools/list` · `tools/call` · `resources/list` · `resources/read` · `prompts/list` · `prompts/get` (with cursor pagination)
 - [ ] Creating a server connection-checks the URI and fails loudly — a broken server is never persisted; the dataset↔server URI is unique (1:1)
 - [ ] User starts a session over one or more servers and asks questions; the agent runs read-only SQL in a ReAct loop and self-corrects on SQL errors
 - [ ] Each query is stored with question, answer, SQL trace, token usage, and cost

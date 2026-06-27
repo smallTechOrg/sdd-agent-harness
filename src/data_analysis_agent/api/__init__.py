@@ -2,7 +2,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 
@@ -39,8 +38,8 @@ def create_app() -> FastAPI:
         lifespan=_lifespan,
     )
 
-    from data_analysis_agent.api import health, home, mcpserver, queries, sessions
-    for module in (health, home, mcpserver, sessions, queries):
+    from data_analysis_agent.api import database, fragments, health, home, queries, sessions, stats
+    for module in (health, home, database, sessions, queries, stats, fragments):
         app.include_router(module.router)
 
     return app

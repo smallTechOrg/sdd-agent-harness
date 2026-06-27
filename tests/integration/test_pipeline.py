@@ -7,9 +7,9 @@ import data_analysis_agent.db.session as session_module
 from data_analysis_agent.db.database import Database
 from data_analysis_agent.db.models import (
     AgentRunRow,
-    McpServerRow,
+    DatabaseRow,
     QueryRecordRow,
-    SessionMcpServerRow,
+    SessionDatabaseRow,
     SessionRow,
 )
 from data_analysis_agent.tools.ingester import FileIngester
@@ -28,6 +28,7 @@ def _use_sqlite(tmp_path, monkeypatch):
     monkeypatch.setattr(session_module, "_db", db)
     monkeypatch.setattr(session_module, "init_db", lambda: None)
     monkeypatch.setenv("DATAANALYSIS_CHECKPOINT_DB", str(tmp_path / "ckpt.db"))
+    monkeypatch.setenv("DATAANALYSIS_DATASETS_DIR", str(tmp_path / "datasets"))
     yield
     db._dispose()
     monkeypatch.setattr(session_module, "_db", None)
@@ -47,22 +48,18 @@ def csv_file(tmp_path):
 
 @pytest.fixture
 def session_and_query(csv_file, tmp_path):
-    result = FileIngester().ingest(csv_file, tmp_path / "parquet", "sample")
+    # Ingest into the database's datasets directory so the connector discovers the table live.
+    from data_analysis_agent.tools.table_naming import sql_table_name
+    FileIngester().ingest(csv_file, tmp_path / "datasets" / sql_table_name("sample_db"), "sample")
     with session_module.create_db_session() as db:
-        srv = McpServerRow(name="sample_db", type="parquet", uri="parquet:///sample_db",
+        srv = DatabaseRow(name="sample_db", type="parquet", uri="parquet:///sample_db",
                            description="Execute SQL SELECT queries against the dataset.")
-        srv.physical_tables = [{
-            "table_name": "sample",
-            "parquet_path": result.parquet_path,
-            "column_names": result.column_names,
-            "row_count": result.row_count,
-        }]
         db.add(srv)
         db.flush()
         sess = SessionRow(name="Test session")
         db.add(sess)
         db.flush()
-        db.add(SessionMcpServerRow(session_id=sess.id, mcp_server_id=srv.id))
+        db.add(SessionDatabaseRow(session_id=sess.id, database_id=srv.id))
         qr = QueryRecordRow(session_id=sess.id, question="What is the total sales?")
         db.add(qr)
         db.flush()

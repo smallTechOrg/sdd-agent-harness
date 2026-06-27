@@ -1,18 +1,18 @@
-from data_analysis_agent.domain.models import McpServer, Session, QueryRecord, AgentRunRecord
+from data_analysis_agent.domain.models import Database, Session, QueryRecord, AgentRunRecord
 
 
-def test_mcp_server_defaults():
-    s = McpServer(name="sales")
+def test_database_defaults():
+    s = Database(name="sales")
     assert s.id is not None
     assert s.type == "parquet"
     assert s.version == 1
 
 
 def test_session_defaults():
-    s = Session(mcp_server_ids=["s1", "s2"])
+    s = Session(database_ids=["s1", "s2"])
     assert s.id is not None
     assert s.name is None
-    assert s.mcp_server_ids == ["s1", "s2"]
+    assert s.database_ids == ["s1", "s2"]
 
 
 def test_query_record_defaults():
