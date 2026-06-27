@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="")
     gemini_api_key: str = Field(default="")
 
+    # Local directory for uploaded files before they are loaded into DuckDB
+    upload_dir: str = Field(default="./data/uploads")
+
 
 _settings: Settings | None = None
 

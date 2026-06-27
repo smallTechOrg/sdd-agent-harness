@@ -1,49 +1,84 @@
-"""Integration tests — require real LLM key (Anthropic or Gemini)."""
+"""Integration test — the real DataChat pipeline end-to-end via run_agent.
+
+Requires a real LLM key (Gemini). Loads the sales fixture into the local DuckDB
+store, registers the DatasetRow, then runs the agent graph for real and asserts
+the persisted QuestionRow is completed with a real answer + chart spec.
+"""
+
+import json
+from pathlib import Path
+
 import pytest
 from sqlalchemy.orm import Session
 
-from graph.runner import run_agent
-from db import session as session_module
-from db.models import RunRow
+from db.models import DatasetRow, QuestionRow
+
+FIXTURE = Path(__file__).resolve().parent.parent / "phase1" / "fixtures" / "sales.csv"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_duckdb(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATACHAT_DUCKDB_PATH", str(tmp_path / "working.duckdb"))
+    import tools.duckdb_store as ds
+    ds._conn = None
+    ds._conn_path = None
+    yield
+    ds._conn = None
+    ds._conn_path = None
+
+
+def _seed_dataset(engine, dataset_id: str) -> None:
+    from tools.duckdb_store import load_csv
+    from tools.profile import build_schema_summary
+
+    row_count = load_csv(str(FIXTURE), dataset_id)
+    summary = build_schema_summary(dataset_id)
+    with Session(engine) as s:
+        s.add(
+            DatasetRow(
+                id=dataset_id,
+                name="sales.csv",
+                source_type="csv",
+                row_count=row_count,
+                schema_summary=json.dumps(summary),
+            )
+        )
+        s.commit()
 
 
 @pytest.mark.usefixtures("_require_llm_key")
 def test_pipeline_runs_end_to_end(_isolated_db):
-    run_id = run_agent("Explain why the sky is blue in one sentence.")
-    assert run_id is not None
-    with Session(session_module._engine) as s:
-        run = s.get(RunRow, run_id)
-    assert run is not None
-    assert run.status == "completed"
-    assert run.output_text and len(run.output_text) > 10
-    assert run.error_message is None
+    from graph.runner import run_agent
+
+    dataset_id = "ds-integration-1"
+    _seed_dataset(_isolated_db, dataset_id)
+
+    question_id = run_agent(dataset_id, "total revenue by region")
+    assert question_id
+
+    with Session(_isolated_db) as s:
+        q = s.get(QuestionRow, question_id)
+
+    assert q is not None
+    assert q.status == "completed", f"failed: {q.error_message}"
+    assert q.answer_text and len(q.answer_text) > 5
+    assert q.chart_spec
+    chart = json.loads(q.chart_spec)
+    assert isinstance(chart, dict) and chart.get("type")
+    assert q.error_message is None
 
 
 @pytest.mark.usefixtures("_require_llm_key")
-def test_pipeline_stores_input(_isolated_db):
-    input_text = "The quick brown fox."
-    run_id = run_agent(input_text)
-    with Session(session_module._engine) as s:
-        run = s.get(RunRow, run_id)
-    assert run.input_text == input_text
+def test_pipeline_persists_question_text(_isolated_db):
+    from graph.runner import run_agent
 
+    dataset_id = "ds-integration-2"
+    _seed_dataset(_isolated_db, dataset_id)
 
-@pytest.mark.usefixtures("_require_llm_key")
-def test_pipeline_via_api(api_client):
-    """Full HTTP round-trip: POST /runs -> 200 with output_text."""
-    r = api_client.post("/runs", json={"input_text": "Say hello in three words."})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["data"]["status"] == "completed"
-    assert body["data"]["output_text"]
-    assert not body["data"].get("error")
+    question = "total revenue by region"
+    question_id = run_agent(dataset_id, question)
 
-
-@pytest.mark.usefixtures("_require_llm_key")
-def test_pipeline_error_surfaces_in_api(api_client):
-    """Error must appear in response body, never silently swallowed."""
-    r = api_client.post("/runs", json={"input_text": "x"})
-    assert r.status_code == 200
-    body = r.json()
-    # Either output or error must be set
-    assert body["data"]["output_text"] or body["data"].get("error")
+    with Session(_isolated_db) as s:
+        q = s.get(QuestionRow, question_id)
+    assert q.question == question
+    assert q.dataset_id == dataset_id
