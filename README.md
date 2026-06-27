@@ -17,6 +17,59 @@ Six convictions the whole repo is built around:
 5. **A human gates every phase.** The build is autonomous *within* a phase and stops at each boundary for you to test the increment. You stay in control of what "done" means.
 6. **Real LLM/API or it doesn't count.** Gates, tests, and evals run against the real model with keys from `.env`. A stubbed pass is not a pass.
 
+## This Build — Local NL→SQL Data Analysis Agent
+
+> This branch (`feature/nl-sql-analyst-v0.1`) is a built agent on top of the harness, not the bare template. Spec under `spec/`.
+
+A **privacy-first** data-analysis agent. Ask a plain-English question over tabular data; the agent generates a single read-only SQL `SELECT`, runs it **locally** against an in-process **DuckDB** engine, and returns the answer as **both a table and a chart**. Only the schema (column names + types) and a handful of sample rows ever reach the LLM (Gemini `gemini-2.5-flash`) — the full dataset never leaves the machine.
+
+**Stack:** Python 3.12 / FastAPI / LangGraph / SQLite+SQLAlchemy (app-run state) / **DuckDB in-process** (user-data analytical engine) / Gemini `gemini-2.5-flash` / Next.js static export + Recharts.
+
+**Graph:** `plan_sql` (NL + schema + sample → SQL + chart spec via Gemini) → `execute_sql` (guarded read-only SELECT on DuckDB) → `finalize`, with a conditional `handle_error` branch. See `spec/agent.md`.
+
+### Run this agent
+
+```bash
+# from the repo root
+cp .env.example .env          # set AGENT_GEMINI_API_KEY=<your Gemini key>
+uv sync
+cd frontend && pnpm install && cd ..
+python agent.py --run         # migrations + frontend build + start server on :8001
+```
+
+Then open **`http://localhost:8001/app/`**, type a question (e.g. *"What were total sales by region?"*) and submit. You get the generated SQL, a result table, and a chart over the seeded sample `sales` dataset (loaded into DuckDB on startup — no CSV needed to test).
+
+| URL | What |
+|-----|------|
+| `http://localhost:8001/app/` | **Analysis Console** — question box → SQL + table + chart |
+| `http://localhost:8001/health` | API health check |
+| `http://localhost:8001/docs` | Interactive API docs (Swagger) |
+
+**Phase status:** Phase 1 (ask one question over the seeded dataset → SQL + table + chart) is real and tested. CSV upload, the dataset switcher, saved dashboards, and drill-down are visible **"Coming soon"** stubs in the UI (Phases 2–3) — intentional, not bugs.
+
+### Settings (env, prefix `AGENT_`)
+
+| Var | Default | Meaning |
+|-----|---------|---------|
+| `AGENT_GEMINI_API_KEY` | — | Gemini key (required) |
+| `AGENT_LLM_MODEL` | `gemini-2.5-flash` | LLM model |
+| `AGENT_LLM_TIMEOUT_SECONDS` | `30` | Gemini call timeout |
+| `AGENT_DUCKDB_PATH` | `./data/analytics.duckdb` | Local DuckDB file (user data) |
+| `AGENT_SAMPLE_ROW_COUNT` | `5` | Sample rows sent to the LLM |
+| `AGENT_RESULT_ROW_CAP` | `1000` | Max rows returned per query |
+
+### Test this agent
+
+```bash
+# from the repo root, with AGENT_GEMINI_API_KEY set in .env
+uv run pytest tests/unit/ -q                          # guard + DuckDB engine + timeout (no key needed)
+uv run pytest tests/integration/test_nl_sql.py -q     # Phase-1 gate — real Gemini + real DuckDB
+```
+
+The `POST /runs` response carries the analysis as a JSON string in `output_text`: `{sql, columns, rows, chart_spec, error}` (see `spec/api.md`). The UI decodes and renders it.
+
+---
+
 ---
 
 ## What This Is

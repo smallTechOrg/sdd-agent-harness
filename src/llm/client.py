@@ -22,7 +22,11 @@ def _make_provider():
         return AnthropicProvider(api_key=s.anthropic_api_key, model=s.llm_model)
     if provider == "gemini":
         from llm.providers.gemini import GeminiProvider
-        return GeminiProvider(api_key=s.gemini_api_key, model=s.llm_model)
+        return GeminiProvider(
+            api_key=s.gemini_api_key,
+            model=s.llm_model,
+            timeout_seconds=s.llm_timeout_seconds,
+        )
 
     raise RuntimeError(f"Unknown LLM provider: {provider!r}. Supported: anthropic, gemini")
 

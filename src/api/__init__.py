@@ -9,6 +9,16 @@ from fastapi.staticfiles import StaticFiles
 async def _lifespan(app: FastAPI):
     from db.session import init_db
     init_db()
+
+    # Seed the DuckDB sample dataset so the live server has the `sales` table.
+    # Idempotent and non-fatal: a seed failure must not crash startup.
+    try:
+        from analytics.seed import seed_sales
+        seed_sales()
+    except Exception as exc:  # pragma: no cover - defensive startup guard
+        from observability.events import get_logger
+        get_logger("api.startup").error("seed_sales_startup_failed", error=str(exc))
+
     yield
 
 

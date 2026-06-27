@@ -13,7 +13,12 @@ def run_agent(input_text: str) -> str:
         session.flush()
         run_id = run.id
 
-    initial: AgentState = {"run_id": run_id, "input_text": input_text, "error": None}
+    initial: AgentState = {
+        "run_id": run_id,
+        "input_text": input_text,
+        "dataset_id": None,
+        "error": None,
+    }
     final = agentic_ai.invoke(initial)
 
     with create_db_session() as session:

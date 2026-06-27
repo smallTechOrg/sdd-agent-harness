@@ -1,4 +1,10 @@
-"""Integration tests — require real LLM key (Anthropic or Gemini)."""
+"""Integration tests for the runner + API surface (NL -> SQL capability).
+
+Require a real LLM key (Gemini) and the seeded DuckDB `sales` table (provided by
+the autouse fixture in tests/integration/conftest.py).
+"""
+import json
+
 import pytest
 from sqlalchemy.orm import Session
 
@@ -9,19 +15,23 @@ from db.models import RunRow
 
 @pytest.mark.usefixtures("_require_llm_key")
 def test_pipeline_runs_end_to_end(_isolated_db):
-    run_id = run_agent("Explain why the sky is blue in one sentence.")
+    run_id = run_agent("What were total sales by region?")
     assert run_id is not None
     with Session(session_module._engine) as s:
         run = s.get(RunRow, run_id)
     assert run is not None
     assert run.status == "completed"
-    assert run.output_text and len(run.output_text) > 10
-    assert run.error_message is None
+    # output_text is the JSON analysis payload.
+    payload = json.loads(run.output_text)
+    assert payload["sql"]
+    assert payload["columns"]
+    assert payload["rows"]
+    assert payload["error"] is None
 
 
 @pytest.mark.usefixtures("_require_llm_key")
 def test_pipeline_stores_input(_isolated_db):
-    input_text = "The quick brown fox."
+    input_text = "How many orders are there in total?"
     run_id = run_agent(input_text)
     with Session(session_module._engine) as s:
         run = s.get(RunRow, run_id)
@@ -30,20 +40,22 @@ def test_pipeline_stores_input(_isolated_db):
 
 @pytest.mark.usefixtures("_require_llm_key")
 def test_pipeline_via_api(api_client):
-    """Full HTTP round-trip: POST /runs -> 200 with output_text."""
-    r = api_client.post("/runs", json={"input_text": "Say hello in three words."})
+    """Full HTTP round-trip: POST /runs -> 200 with a JSON output_text payload."""
+    r = api_client.post("/runs", json={"input_text": "Total sales by product?"})
     assert r.status_code == 200
     body = r.json()
     assert body["data"]["status"] == "completed"
-    assert body["data"]["output_text"]
+    payload = json.loads(body["data"]["output_text"])
+    assert payload["sql"]
     assert not body["data"].get("error")
 
 
 @pytest.mark.usefixtures("_require_llm_key")
 def test_pipeline_error_surfaces_in_api(api_client):
-    """Error must appear in response body, never silently swallowed."""
+    """A run must always surface a consistent JSON payload (output_text), never crash."""
     r = api_client.post("/runs", json={"input_text": "x"})
     assert r.status_code == 200
     body = r.json()
-    # Either output or error must be set
-    assert body["data"]["output_text"] or body["data"].get("error")
+    # output_text is always present and JSON-decodable (success or graceful failure).
+    payload = json.loads(body["data"]["output_text"])
+    assert "error" in payload
