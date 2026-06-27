@@ -31,8 +31,10 @@ Phase 1 is the **smallest user-testable win** — the one core path of the main 
   4. Primary user journey works end-to-end against the real LLM/API; tests pass
   5. **Agentic stack gate:** graph compiles, state flows through nodes, agent is invocable — confirmed by the Phase 1 test
   6. **Styled-render (any static-export UI):** after `pnpm build`, the served page at the single-origin path (`:8001/app/`) is rendered AND styled — the built CSS bundle contains real utility selectors and no unexpanded `@tailwind`/`@source` remains. An unstyled 200 fails the gate.
-  7. Working tree is clean and committed
-  8. Phase test-handoff published; the human has tested and approved (see Human Testing Gate)
+  7. **Headless E2E (any project with a frontend):** Playwright smoke runs against the live app (`http://localhost:8001/app/`) and asserts the primary user journey renders correctly, is interactive, and shows real output — not just a 200. A CSS-grep pass without a Playwright pass is not sufficient.
+  8. **Observability wired:** LangSmith tracing enabled (LangGraph builds) and/or structured request/response logging to stdout confirmed working — a log line or trace appears for the Phase 1 end-to-end run. Observability is never deferred.
+  9. Working tree is clean and committed
+  10. Phase test-handoff published; the human has tested and approved (see Human Testing Gate)
 
 ---
 
@@ -77,7 +79,7 @@ These phases exist only when the spec explicitly calls for them — never as def
 
 - **API / CLI Surface** — only if `spec/api.md` calls for an external API or CLI
 - **UI Polish** — only if `spec/ui.md` calls for further UI work beyond Phase 1
-- **Observability + Logging** — if the spec calls for structured logging or metrics beyond basic operation
+- **Advanced Observability** — dashboards, metrics, alerting beyond the basic LangSmith tracing + structured logging already wired in Phase 1
 - **Polish + Hand-off** — final drift audit; README verified end-to-end from a clean clone; user accepts hand-off
 
 ---

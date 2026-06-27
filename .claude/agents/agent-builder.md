@@ -60,10 +60,10 @@ SHIP (after the final phase passes its gate)
 
 ## Stage 2 — Scaffold (first invocation only — you own git)
 
-1. `base=$(git rev-parse --abbrev-ref HEAD)` to capture the current branch as `<base>` (this is the harness version you dogfood — do NOT switch to main first), then `git checkout -b feature/<slug>-v0.1` from it. Never build on `main`. Remember `<base>` — the PR targets it, not `main`.
+1. `git checkout main && git checkout -b feature/<slug>-v0.1` — always branch from main so the generated app is isolated from any in-progress harness changes. Never build on `main` directly.
 2. Create the project directories per `harness/patterns/project-layout.md`. Never write app code at the repo root.
 3. Create `.env.example` documenting every env var; the real values live in the user's `.env` (filled at intake) and tests/evals read from there. Never stage `.env`.
-4. First commit (scaffold) + push, then open the PR immediately — a PR must exist before the first feature commit (`harness/rules/git.md`). **Base it on `<base>`, not `main`**, so the PR shows only the generated app: `gh pr create --base "$base" --head feature/<slug>-v0.1`.
+4. First commit (scaffold) + push, then open the PR immediately — a PR must exist before the first feature commit (`harness/rules/git.md`). Base it on `main`: `gh pr create --base main --head feature/<slug>-v0.1`. App code is never merged to main; the PR is the dogfood record.
 
 ## Stage 3 — Build one phase (max parallelism)
 

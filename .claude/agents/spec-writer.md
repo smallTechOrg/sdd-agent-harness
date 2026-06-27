@@ -69,6 +69,8 @@ Defaults when intake is silent:
 - **Database:** honor the stated preference; else PostgreSQL for anything shared/production, SQLite only for an explicitly local / single-user tool.
 - **Backend:** REST → FastAPI. **Frontend:** web UI → Next.js 15 + React 19.
 - **Dependency management:** uv (Python) / pnpm (TypeScript).
+- **Observability (always include in Phase 1):** Every agentic build includes structured observability from day one — not a trailing concern. For LangGraph builds: enable LangSmith tracing (env vars `LANGCHAIN_TRACING_V2=true`, `LANGCHAIN_API_KEY`). For any build: structured request/response logging (input prompt, output, latency, error) to stdout or a log file. Include the LangSmith/logging setup in Phase 1 — it is never deferred to a trailing phase.
+- **E2E testing (any project with a frontend):** Playwright is the required headless E2E tool. Every frontend slice must include a `tests/e2e/` directory with at least one Playwright smoke test covering the primary user journey. The Phase 1 gate runs this suite against the real app before handoff.
 
 ## The phased plan (in `spec/roadmap.md` → `## Phases of Development`)
 
@@ -107,6 +109,8 @@ Be your own adversarial reviewer — there is no second pair of eyes, so catch t
 - **Testability** — every success criterion is something you could write a real test for; no vague "works well".
 - **Conversational memory** — if the output surface is a chat UI, does Phase 1 include conversation history (turn memory) as a capability? A chat agent that answers each question without context of prior turns is not fit for purpose. If it's absent, add it or write an explicit `> **Assumed:** deferred to Phase N because …` justification.
 - **Data-processing gates** — if any capability processes a dataset, does the gate test use data large enough that a sampled answer and a full-data answer are observably different? A gate that passes on a tiny fixture because sample == full is not a gate.
+- **Observability** — does Phase 1 include LangSmith tracing (LangGraph builds) and/or structured request/response logging? Observability is never deferred to a trailing phase — it must be wired from day one.
+- **E2E tests** — for any project with a frontend, does the spec include a `tests/e2e/` Playwright suite as a Phase 1 deliverable? A frontend gate that only checks HTTP 200 is not a gate.
 
 Fix anything that fails before returning.
 
