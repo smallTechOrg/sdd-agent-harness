@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -12,11 +14,43 @@ router = APIRouter()
 
 @router.post("/runs")
 def create_run(req: RunRequest, session: Session = Depends(get_session)) -> dict:
-    run_id = run_agent(req.input_text)
+    """Legacy endpoint — kept for backward compatibility. Use POST /sessions/{id}/analyze instead."""
+    from db.models import SessionRow
+    sess = SessionRow()
+    session.add(sess)
+    session.flush()
+    session_id = sess.id
+    session.commit()  # Commit the session row before run_agent opens its own session
+
+    run_id = run_agent(session_id=session_id, question=req.input_text)
     run = session.get(RunRow, run_id)
     if run is None:
         raise api_error("NOT_FOUND", "Run not found after creation", 500)
-    return ok(RunResponse(run_id=run.id, status=run.status, output_text=run.output_text, error=run.error_message).model_dump())
+
+    insight_json = None
+    if run.insight_json:
+        try:
+            insight_json = json.loads(run.insight_json)
+        except Exception:
+            insight_json = None
+
+    chart_specs = None
+    if run.chart_specs:
+        try:
+            chart_specs = json.loads(run.chart_specs)
+        except Exception:
+            chart_specs = []
+
+    return ok(RunResponse(
+        run_id=run.id,
+        status=run.status,
+        question=run.question,
+        sql_query=run.sql_query,
+        insight_json=insight_json,
+        output_text=run.output_text,
+        chart_specs=chart_specs,
+        error=run.error_message,
+    ).model_dump())
 
 
 @router.get("/runs/{run_id}")
@@ -24,4 +58,29 @@ def get_run(run_id: str, session: Session = Depends(get_session)) -> dict:
     run = session.get(RunRow, run_id)
     if run is None:
         raise api_error("NOT_FOUND", f"Run {run_id} not found", 404)
-    return ok(RunResponse(run_id=run.id, status=run.status, output_text=run.output_text, error=run.error_message).model_dump())
+
+    insight_json = None
+    if run.insight_json:
+        try:
+            insight_json = json.loads(run.insight_json)
+        except Exception:
+            insight_json = None
+
+    chart_specs = None
+    if run.chart_specs:
+        try:
+            chart_specs = json.loads(run.chart_specs)
+        except Exception:
+            chart_specs = []
+
+    return ok(RunResponse(
+        run_id=run.id,
+        status=run.status,
+        question=run.question,
+        sql_query=run.sql_query,
+        insight_json=insight_json,
+        output_text=run.output_text,
+        chart_specs=chart_specs,
+        error=run.error_message,
+        created_at=run.created_at.isoformat() if run.created_at else None,
+    ).model_dump())

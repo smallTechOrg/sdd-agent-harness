@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, Engine
+from sqlalchemy import create_engine, Engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
 _engine: Engine | None = None
@@ -13,7 +13,21 @@ def _get_engine() -> Engine:
     if _engine is None:
         from config.settings import get_settings
         _engine = create_engine(get_settings().database_url, echo=False)
+        # Enable WAL mode for SQLite (no-op for other DB engines)
+        _enable_wal(_engine)
     return _engine
+
+
+def _enable_wal(engine: Engine) -> None:
+    """Enable WAL journal mode for SQLite connections."""
+    if not engine.dialect.name == "sqlite":
+        return
+
+    @event.listens_for(engine, "connect")
+    def _set_wal_mode(dbapi_conn, connection_record):  # noqa: ARG001
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.close()
 
 
 def _get_session_factory() -> sessionmaker:
