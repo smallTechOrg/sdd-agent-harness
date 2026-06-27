@@ -248,11 +248,19 @@ def _stringify(result: Any) -> str:
         return "[Plotly figure captured]"
     try:
         if isinstance(result, (pd.DataFrame, pd.Series)):
-            return result.to_string()
+            n = len(result)
+            # Cap rows before calling to_string() — huge frames would OOM before truncation.
+            if isinstance(result, pd.DataFrame) and n > 100:
+                text = result.head(100).to_string()
+                text += f"\n... [{n - 100} more rows not shown]"
+            else:
+                text = result.to_string()
+            if len(text) > 6000:
+                text = text[:6000] + "\n... [truncated]"
+            return text
     except Exception:
         pass
     text = str(result)
-    # Keep the transcript from exploding on huge frames; the model only needs a view.
     if len(text) > 6000:
         text = text[:6000] + "\n... [truncated]"
     return text

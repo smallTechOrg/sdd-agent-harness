@@ -3,6 +3,36 @@
 import { useState } from 'react'
 import type { AskStep } from '@/lib/api'
 
+const RESULT_PREVIEW_CHARS = 3000
+
+function StepResult({ text, isError }: { text: string; isError: boolean }) {
+  const [expanded, setExpanded] = useState(false)
+  const isTruncated = text.length > RESULT_PREVIEW_CHARS
+  const display = isTruncated && !expanded ? text.slice(0, RESULT_PREVIEW_CHARS) : text
+
+  return (
+    <div>
+      <pre
+        className={`overflow-x-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-relaxed ${
+          isError ? 'text-red-700' : 'text-gray-600'
+        }`}
+      >
+        {display}
+        {isTruncated && !expanded && <span className="text-gray-400">…</span>}
+      </pre>
+      {isTruncated && (
+        <button
+          type="button"
+          onClick={() => setExpanded(e => !e)}
+          className="px-3 pb-2 text-[10px] font-medium text-blue-600 hover:text-blue-800"
+        >
+          {expanded ? 'Show less' : `Show full result (${text.length.toLocaleString()} chars)`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 /**
  * Agent steps inspector (C23) — collapsible.
  *
@@ -21,7 +51,7 @@ export function StepsInspector({ steps }: { steps: AskStep[] }) {
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        aria-expanded={open ? true : false}
+        aria-expanded={open}
         className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900"
       >
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>
@@ -51,15 +81,9 @@ export function StepsInspector({ steps }: { steps: AskStep[] }) {
                 <code>{step.action}</code>
               </pre>
 
-              {/* Result / error text */}
+              {/* Result / error text — guarded against large frame output */}
               {step.result && (
-                <pre
-                  className={`overflow-x-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-relaxed ${
-                    step.is_error ? 'text-red-700' : 'text-gray-600'
-                  }`}
-                >
-                  {step.result}
-                </pre>
+                <StepResult text={step.result} isError={!!step.is_error} />
               )}
             </li>
           ))}
