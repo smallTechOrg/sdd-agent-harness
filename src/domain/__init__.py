@@ -1,3 +1,3 @@
-from domain.run import RunRequest, RunResponse
+from domain.dataset import ColumnProfile, DatasetProfile
 
-__all__ = ["RunRequest", "RunResponse"]
+__all__ = ["ColumnProfile", "DatasetProfile"]

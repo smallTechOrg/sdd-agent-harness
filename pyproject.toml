@@ -13,6 +13,11 @@ dependencies = [
     "structlog>=24.1",
     "langgraph>=0.1",
     "google-genai>=2.9.0",
+    "pyarrow>=16",
+    "pandas>=2.2",
+    "openpyxl>=3.1",
+    "sse-starlette>=3.4.5",
+    "python-multipart>=0.0.32",
 ]
 
 [project.optional-dependencies]

@@ -18,3 +18,5 @@ build/
 data/
 frontend/out/
 .pytest_cache/
+frontend/test-results/
+frontend/playwright-report/
