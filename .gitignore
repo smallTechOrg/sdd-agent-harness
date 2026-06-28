@@ -16,3 +16,4 @@ build/
 *.db-shm
 *.db-wal
 data/
+uploads/
