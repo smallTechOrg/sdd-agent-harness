@@ -132,9 +132,13 @@ Relay only the hard blockers it escalates (e.g. a required key still missing fro
 
 ## Stage 3 — Human testing gate (you own the human channel)
 
-Phase 1 is the smallest working win: real on the one core path, with clearly-labelled non-functional stubs for everything coming later. **Spoon-feed the user: the ONLY things they should ever do by hand are (a) put secrets in `.env` and (b) interact with the running app (click / chat). They must never run a terminal command to test.** agent-builder launches and verifies the server before returning the handoff; you own the gate and re-invocation:
+Phase 1 is the smallest working win: real on the one core path, with clearly-labelled non-functional stubs for everything coming later. **Spoon-feed the user: the ONLY things they should ever do by hand are (a) put secrets in `.env` and (b) interact with the running app (click / chat). They must never run a terminal command to test.** You own the gate, the server lifecycle, and re-invocation:
 
-1. **The server is already running** — agent-builder launched and verified it (200 + styled) before returning the handoff. Nothing to start.
+1. **Launch the server** (you own this — agent-builder does NOT start it; sub-agent background processes are cleaned up on return). The handoff includes the project root path + run command. In order from the project root:
+   a. If the phase has a frontend slice: `cd frontend && pnpm build && cd ..`
+   b. If the phase has migrations: `uv run alembic upgrade head`
+   c. `uv run python -m src` with `run_in_background: true`
+   d. Health-check with retry: `for i in {1..10}; do curl -sf http://localhost:8001/health && break || sleep 2; done` — wait for the server before presenting the gate. If it never responds → route immediately to qa-auditor (boot failure), do not present the URL.
 2. Load the question tool: `ToolSearch` with query `select:AskUserQuestion` (before asking).
 3. Present the handoff as **phase release notes**: the live URL, what was built this phase, what to click / type / look at, the expected result, which parts are clearly-labelled stubs vs real (a stub must never read as a bug), and what the next phase adds. No run commands in the handoff — the app is already serving.
 4. Ask via `AskUserQuestion` (two questions in one call):

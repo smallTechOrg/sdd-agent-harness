@@ -37,6 +37,8 @@ You are the **code-generator** — the maker of the code for **one independent s
 - **Production DB driver.** Tests run against the production driver — never SQLite as a substitute for PostgreSQL.
 - **`uv run` prefix** for every Python command, in code, tests, and docs.
 - **Test-first / regression-first.** New behaviour starts Red; a fix starts with a failing test that reproduces the bug, then goes Green.
+- **Three-scenario minimum per capability.** For every capability your slice implements, write at minimum: (1) a **happy-path** integration test — real LLM/API call, asserts response content AND DB state; (2) an **edge-case** test — empty input, boundary value, or malformed data; (3) an **error-path** test — missing required field, invalid data, or a business-rule violation. A capability with only a single happy-path test is INCOMPLETE and qa-auditor will BLOCK it. Stateful capabilities additionally need a multi-interaction + state-survival test on top of the three minimum (see `harness/patterns/test-driven.md`).
+- **Dialect-safe SQL.** Use SQLAlchemy ORM column expressions in all `filter()`/`where()` clauses — never raw SQL strings. Hybrid properties that are queried at the DB level MUST define an `@<prop>.expression` class method returning a `case()` or column expression; a Python-only hybrid used in `filter()` raises `CompileError` at query time, not at definition time. Test every filtered/ordered query path.
 - **Never mute a test to go green** — no skip/xfail/comment-out/assertion-loosening to dodge a real failure. Fix the cause.
 - **Do NOT commit or push.** agent-builder stages explicit files and commits+pushes. You leave the code on disk.
 

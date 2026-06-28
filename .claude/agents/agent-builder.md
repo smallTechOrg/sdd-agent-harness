@@ -77,8 +77,10 @@ For the phase named in your invocation (Phase 1 on the first invocation; the nex
 
 ## Stage 4 — Publish the test-handoff and STOP
 
-After the phase gate is VERIFIED and committed, **launch the server and return a PHASE TEST-HANDOFF to the skill and STOP** — do not start the next phase, do not ask the user. Launch sequence (single-origin model): build frontend (`cd frontend && pnpm build`), run migrations (`cd .. && uv run alembic upgrade head`), start server (`uv run python -m src` with `run_in_background: true`) — start from the **project root** (not `frontend/`). Verify it's up: curl the live URL and confirm 200 AND styled (CSS utilities present). The user must never run a terminal command to test. The handoff is the build record's user-facing artefact and is **phase release notes**, link-first:
+After the phase gate is VERIFIED and committed, **return a PHASE TEST-HANDOFF to the skill and STOP** — do NOT launch the server, do not start the next phase, do not ask the user. **A sub-agent's background processes are cleaned up when it returns** — any server launched here will be dead by the time the user clicks the URL. The skill (root session) owns the server lifecycle and launches it after receiving the handoff. The user must never run a terminal command to test. The handoff is the build record's user-facing artefact and is **phase release notes**, structured for the skill to act on:
 
+- the **absolute project root path** (e.g. `/path/to/exp1/my-agent/`) — the skill uses this to launch the server;
+- the **server run command** — always `uv run python -m src` (from the project root), plus `cd frontend && pnpm build` first if the phase has a frontend slice, plus `uv run alembic upgrade head` if the phase has migrations;
 - the **live URL** the user opens (e.g. `http://localhost:8001/app/`) — frame as "open this";
 - **what was built this phase** — one line per capability delivered;
 - what to click / type / look at, and the expected result;
