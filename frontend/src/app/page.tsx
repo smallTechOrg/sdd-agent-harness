@@ -1,77 +1,66 @@
 'use client'
-
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import FileList from '@/components/FileList'
+import ChatPanel from '@/components/ChatPanel'
+import { UploadedFileInfo } from '@/types'
 
 export default function Home() {
-  const [input, setInput] = useState('')
-  const [result, setResult] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [files, setFiles] = useState<UploadedFileInfo[]>([])
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!input.trim()) return
-    setLoading(true)
-    setError(null)
-    setResult(null)
-    try {
-      const res = await fetch('/runs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input_text: input }),
+  // Load existing files on mount
+  useEffect(() => {
+    fetch('/api/files')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.files) setFiles(data.files.map((f: {
+          file_id: string
+          original_filename: string
+          row_count: number
+          column_count: number
+          file_size_bytes?: number
+          created_at?: string
+        }) => ({
+          file_id: f.file_id,
+          original_filename: f.original_filename,
+          row_count: f.row_count,
+          column_count: f.column_count,
+          file_size_bytes: f.file_size_bytes,
+          created_at: f.created_at,
+        })))
       })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.detail?.message ?? `Request failed (${res.status})`)
-      } else if (data.data?.error) {
-        setError(data.data.error)
-      } else {
-        setResult(data.data.output_text)
-      }
-    } catch {
-      setError('Network error — is the server running?')
-    } finally {
-      setLoading(false)
-    }
+      .catch(() => {})
+  }, [])
+
+  const handleUploadComplete = (file: UploadedFileInfo) => {
+    setFiles((prev) => {
+      if (prev.find((f) => f.file_id === file.file_id)) return prev
+      return [file, ...prev]
+    })
   }
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-16">
-      <h1 className="mb-8 text-3xl font-bold tracking-tight">Agent</h1>
-
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <textarea
-          className="w-full rounded-lg border border-gray-300 p-3 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          rows={4}
-          placeholder="Enter text to transform…"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          disabled={loading}
-        />
-        <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {loading ? 'Running…' : 'Run'}
-        </button>
-      </form>
-
-      {error && (
-        <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
+    <div className="flex h-screen bg-gray-50">
+      {/* Left sidebar */}
+      <aside className="w-72 flex-shrink-0 bg-white border-r border-gray-200 flex flex-col">
+        <div className="p-4 border-b border-gray-200">
+          <h1 className="text-base font-bold text-gray-900">Data Analysis Agent</h1>
+          <p className="text-xs text-gray-500 mt-0.5">Upload CSVs and ask questions</p>
         </div>
-      )}
-
-      {result && (
-        <div className="mt-6 rounded-lg border border-gray-200 bg-white p-4 text-sm whitespace-pre-wrap shadow-sm">
-          {result}
+        <div className="flex-1 overflow-y-auto">
+          <FileList
+            files={files}
+            selectedFileId={selectedFileId}
+            onFileSelect={setSelectedFileId}
+            onUploadComplete={handleUploadComplete}
+          />
         </div>
-      )}
+      </aside>
 
-      {!result && !error && !loading && (
-        <p className="mt-10 text-center text-sm text-gray-400">Results will appear here.</p>
-      )}
-    </main>
+      {/* Main panel */}
+      <main className="flex-1 flex flex-col min-w-0">
+        <ChatPanel selectedFileId={selectedFileId} />
+      </main>
+    </div>
   )
 }

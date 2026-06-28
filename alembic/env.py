@@ -10,8 +10,8 @@ from alembic import context
 # Make src/ importable
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from config.settings import get_settings
-from db.models import Base
+from data_analysis.config.settings import get_settings
+from data_analysis.db.models import Base
 
 config = context.config
 
