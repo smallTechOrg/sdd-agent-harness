@@ -21,6 +21,23 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="")
     gemini_api_key: str = Field(default="")
 
+    # LLM pricing (USD per 1,000,000 tokens) — used to compute per-question cost
+    price_input_per_m: float = Field(default=0.10)
+    price_output_per_m: float = Field(default=0.40)
+
+    # ── Privacy / context budget ───────────────────────────────────────────
+    # Max sample rows sent to the LLM (full data NEVER leaves the machine).
+    sample_rows: int = Field(default=20)          # AGENT_SAMPLE_ROWS
+    # Conversation turns of history fed back into the prompt.
+    history_turns: int = Field(default=6)         # AGENT_HISTORY_TURNS
+
+    # ── Local code execution (sandbox) ─────────────────────────────────────
+    exec_timeout_s: int = Field(default=30)       # AGENT_EXEC_TIMEOUT_S
+    max_retries: int = Field(default=1)           # AGENT_MAX_RETRIES
+
+    # ── Uploads ────────────────────────────────────────────────────────────
+    max_upload_mb: int = Field(default=100)       # AGENT_MAX_UPLOAD_MB
+
 
 _settings: Settings | None = None
 

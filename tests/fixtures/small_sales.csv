@@ -1,0 +1,7 @@
+region,product,revenue,units
+North,A,100.0,1
+South,B,200.0,2
+East,A,,3
+West,C,400.0,4
+North,B,150.0,5
+,A,50.0,6

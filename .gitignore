@@ -16,3 +16,11 @@ build/
 *.db-shm
 *.db-wal
 data/
+
+# Playwright / E2E artifacts
+test-results/
+playwright-report/
+.playwright/
+
+# Next.js / TS build cache
+*.tsbuildinfo

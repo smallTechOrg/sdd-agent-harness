@@ -1,0 +1,12 @@
+{
+  "name": "datachat-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Root-level Playwright E2E harness for DataChat. Lets `npx playwright test tests/e2e/` resolve a local Playwright binary from the repo root (the Phase 1 gate command runs from here). The Next.js app and its own Playwright install live under frontend/.",
+  "scripts": {
+    "e2e": "playwright test tests/e2e/ --reporter=line"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1"
+  }
+}

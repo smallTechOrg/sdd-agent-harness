@@ -1,77 +1,121 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  getDataset,
+  getHistory,
+  ApiError,
+  NetworkError,
+  type DatasetProfile,
+  type ThreadMessage,
+  type HistoryItem,
+  type UploadResponse,
+} from '@/lib/api'
+import Header from './components/Header'
+import Sidebar from './components/Sidebar'
+import EmptyState from './components/EmptyState'
+import ChatPanel from './components/ChatPanel'
+import ProfilePanel from './components/ProfilePanel'
+
+interface ActiveDataset {
+  id: string
+  name: string
+  profile: DatasetProfile
+  messages: ThreadMessage[]
+}
 
 export default function Home() {
-  const [input, setInput] = useState('')
-  const [result, setResult] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [dataset, setDataset] = useState<ActiveDataset | null>(null)
+  const [history, setHistory] = useState<HistoryItem[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!input.trim()) return
-    setLoading(true)
-    setError(null)
-    setResult(null)
+  // After an upload, load the dataset (profile is already in the upload
+  // response; the thread starts empty) and fetch any existing history.
+  const handleUploaded = useCallback(async (result: UploadResponse) => {
+    setLoadError(null)
+    setDataset({
+      id: result.dataset_id,
+      name: result.name,
+      profile: result.profile,
+      messages: [],
+    })
     try {
-      const res = await fetch('/runs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input_text: input }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.detail?.message ?? `Request failed (${res.status})`)
-      } else if (data.data?.error) {
-        setError(data.data.error)
-      } else {
-        setResult(data.data.output_text)
-      }
+      const items = await getHistory(result.dataset_id)
+      setHistory(items)
     } catch {
-      setError('Network error — is the server running?')
-    } finally {
-      setLoading(false)
+      // History is non-fatal on first upload — it is simply empty.
+      setHistory([])
     }
-  }
+  }, [])
+
+  // Refresh the dataset thread + history after a run completes.
+  const refreshHistory = useCallback(async () => {
+    if (!dataset) return
+    try {
+      const [detail, items] = await Promise.all([
+        getDataset(dataset.id),
+        getHistory(dataset.id),
+      ])
+      setDataset((prev) =>
+        prev && prev.id === detail.dataset_id
+          ? { ...prev, profile: detail.profile, messages: detail.messages }
+          : prev,
+      )
+      setHistory(items)
+    } catch (err) {
+      // A failed refresh should not wipe the live thread; surface quietly.
+      if (err instanceof ApiError || err instanceof NetworkError) {
+        setLoadError(err.message)
+      }
+    }
+  }, [dataset])
+
+  // Clear a transient load error after a moment.
+  useEffect(() => {
+    if (!loadError) return
+    const t = setTimeout(() => setLoadError(null), 6000)
+    return () => clearTimeout(t)
+  }, [loadError])
+
+  const sampleRowCount = dataset?.profile.sample_rows.length ?? 0
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-16">
-      <h1 className="mb-8 text-3xl font-bold tracking-tight">Agent</h1>
+    <div className="flex h-screen flex-col overflow-hidden">
+      <Header datasetName={dataset?.name} />
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <textarea
-          className="w-full rounded-lg border border-gray-300 p-3 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          rows={4}
-          placeholder="Enter text to transform…"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          disabled={loading}
-        />
-        <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+      {!dataset ? (
+        <main className="flex flex-1 overflow-hidden">
+          <Sidebar />
+          <EmptyState onUploaded={(r) => void handleUploaded(r)} />
+        </main>
+      ) : (
+        <main className="flex flex-1 overflow-hidden">
+          <Sidebar datasetName={dataset.name} rowCount={dataset.profile.row_count} />
+
+          <ChatPanel
+            key={dataset.id}
+            datasetId={dataset.id}
+            profile={dataset.profile}
+            initialMessages={dataset.messages}
+            onRunComplete={() => void refreshHistory()}
+          />
+
+          <ProfilePanel
+            profile={dataset.profile}
+            history={history}
+            sampleRowCount={sampleRowCount}
+          />
+        </main>
+      )}
+
+      {loadError && (
+        <div
+          role="alert"
+          className="fixed bottom-4 right-4 z-50 max-w-sm rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 shadow-lg"
         >
-          {loading ? 'Running…' : 'Run'}
-        </button>
-      </form>
-
-      {error && (
-        <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
+          {loadError}
         </div>
       )}
-
-      {result && (
-        <div className="mt-6 rounded-lg border border-gray-200 bg-white p-4 text-sm whitespace-pre-wrap shadow-sm">
-          {result}
-        </div>
-      )}
-
-      {!result && !error && !loading && (
-        <p className="mt-10 text-center text-sm text-gray-400">Results will appear here.</p>
-      )}
-    </main>
+    </div>
   )
 }
