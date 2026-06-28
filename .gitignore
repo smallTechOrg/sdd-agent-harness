@@ -15,4 +15,6 @@ build/
 *.db
 *.db-shm
 *.db-wal
-data/
+# Runtime data is ignored, but keep the bundled sample dataset tracked.
+/data/*
+!/data/sample/
