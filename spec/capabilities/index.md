@@ -13,11 +13,16 @@ A capability is a single, discrete action or behavior the agent performs. Exampl
 
 ## Capabilities in This Project
 
-<!-- FILL IN: List capabilities here as they are defined. Each entry links to its spec file (no number prefix). -->
+| Capability | File | Phase |
+|-----------|------|-------|
+| Analyze Question (core) | [analyze_question.md](analyze_question.md) | 1 |
+| Profile Dataset | [profile_dataset.md](profile_dataset.md) | 2 |
+| Suggest Follow-ups | [suggest_followups.md](suggest_followups.md) | 2 |
+| Interactive Charts | [interactive_charts.md](interactive_charts.md) | 3 |
+| Persistent Library, History & Memory | [persistent_library_history.md](persistent_library_history.md) | 4 |
+| Multi-File Analysis | [multi_file_analysis.md](multi_file_analysis.md) | 4 |
 
-| Capability | File |
-|-----------|------|
-| <!-- name --> | [name.md](name.md) |
+The single core capability is **Analyze Question** (Phase 1); the rest are deferred and stubbed-and-labelled in Phase 1 (see [`../roadmap.md`](../roadmap.md#phases-of-development) and [`../ui.md`](../ui.md)).
 
 ## How to Add a New Capability
 
