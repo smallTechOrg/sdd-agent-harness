@@ -12,7 +12,9 @@ You orchestrate a targeted fix by calling worker agents directly — no full age
 
 ## Step 1 — Diagnose + classify (qa-auditor first)
 
-Invoke **qa-auditor** with the target. It:
+**Skip if already diagnosed:** if the caller has passed a qa-auditor verdict with exact `file:line` and SPEC/CODE classification, use that as the baseline and go straight to Step 2 — do not re-invoke qa-auditor.
+
+Otherwise, invoke **qa-auditor** with the target. It:
 - captures the current red state — the failing test output, the reproduced error, or the specific drift divergence + file — as your before/after baseline;
 - CLASSIFIES the root cause as **SPEC** (spec wrong/missing) vs **CODE** (code diverges from spec), and names **which surface** (frontend / backend) and file(s);
 - returns a routed verdict. It stays read-only and never spawns agents.
@@ -35,7 +37,24 @@ Done-when, by signal:
 
 Give the generator the precise target, the responsible files, and the spec sections defining correct behavior. It fixes toward spec intent and adds/updates a regression test (for an LLM/API bug, the regression test uses real keys from `.env`). It must not mute a test or delete an assertion to go green; if spec and test genuinely conflict, it stops and reports (likely a spec bug → re-run Step 1 as SPEC, or suggest `/zero-shot-sync`).
 
-## Step 3 — Verify (qa-auditor, gate mode)
+## Step 3 — Verify (tiered by fix scope)
+
+After the fix is applied, check the diff scope and pick a tier:
+
+### Express path — use when ALL hold
+- Root cause is **CODE**, not SPEC
+- `git diff --name-only HEAD` shows **≤ 3 files changed**
+- No DB migration added (`migrations/` untouched)
+- No API contract changed (`spec/api.md` untouched)
+
+Run directly — **no qa-auditor agent:**
+1. **Targeted tests** — identify test files covering the changed source files and run only those: `uv run pytest <test-file(s)> -x --tb=short -q`. If unsure which tests apply, run the unit suite only (skip E2E): `uv run pytest tests/unit -x --tb=short -q`.
+2. **Frontend build** (only if any frontend file changed): `cd frontend && pnpm build && cd ..` — zero errors required.
+3. **Smoke call** — one real-LLM/API call exercising the exact behavior that was broken, using keys from `.env`.
+
+All three pass → **VERIFIED** → go to Step 4. Any fail → fall back to Full gate.
+
+### Full gate — use when: SPEC root cause / migration added / API contract changed / > 3 files changed / express failed
 
 Invoke **qa-auditor** in gate mode (real-key tests from `.env`) against the Step 1 signal. Still BLOCKED → re-route per the verdict (re-invoke the responsible generator with the new detail); loop until VERIFIED. For a drift fix, also confirm qa-auditor (drift mode) reports CLEAN.
 
