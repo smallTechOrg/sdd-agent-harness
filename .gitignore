@@ -16,3 +16,9 @@ build/
 *.db-shm
 *.db-wal
 data/
+
+# build artefacts
+uploads/
+test-results/
+frontend/test-results/
+frontend/out/

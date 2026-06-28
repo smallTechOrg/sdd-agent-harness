@@ -1,38 +1,28 @@
 # Capabilities Index
 
-> **Boilerplate status:** The spec-writer sub-agent creates one file per capability in this directory. Each file describes exactly one discrete thing the agent can do.
-
----
-
-## What Is a Capability?
-
-A capability is a single, discrete action or behavior the agent performs. Examples:
-- "Search the web for companies matching criteria X"
-- "Draft a personalized email given a lead profile"
-- "Send a Slack notification when a threshold is crossed"
+> One file per discrete capability. Core set for v1 below; deferred capabilities land in later
+> phases per [../roadmap.md](../roadmap.md).
 
 ## Capabilities in This Project
 
-<!-- FILL IN: List capabilities here as they are defined. Each entry links to its spec file (no number prefix). -->
+| Capability | File | Phase |
+|-----------|------|-------|
+| Dataset ingestion (upload + auto-profile) | [dataset-ingestion.md](dataset-ingestion.md) | 1 |
+| Conversational analysis (plan → code → run → answer) | [conversational-analysis.md](conversational-analysis.md) | 1 |
+| Conversation memory (contextual follow-ups) | [conversation-memory.md](conversation-memory.md) | 1 |
+| Run history (persisted, browsable per dataset) | [run-history.md](run-history.md) | 1 persist / 2 browse |
 
-| Capability | File |
-|-----------|------|
-| <!-- name --> | [name.md](name.md) |
+### Deferred (later phases — see roadmap)
+
+- Interactive charts (P3)
+- Live streaming steps + elapsed timer (P3)
+- Cost tracking UI (P2; tokens captured from P1)
+- Dataset library management (P2)
+- Multi-file joins / Excel multi-sheet (P4)
+- Column notes & business rules (P4)
+- Clarify-vs-best-guess + deep iterative refinement (P4)
 
 ## How to Add a New Capability
 
-Run `/zero-shot-build [description]` on the existing spec. The spec-writer sub-agent will:
-1. Create a new file in this directory (`<name>.md`, no number prefix)
-2. Update this index
-3. Flag any dependencies on existing capabilities
-4. Self-review that it fits the architecture and data model before returning
-
-## Capability File Template
-
-Each capability file should answer:
-- **What it does** (one sentence)
-- **Inputs** (what data it receives)
-- **Outputs** (what it produces)
-- **External calls** (APIs, LLMs, databases it touches)
-- **Error cases** (what can go wrong and how it's handled)
-- **Success criteria** (how we test it)
+Run `/zero-shot-build [description]` on the existing spec. The spec-writer will add a
+`<name>.md` here, update this index, flag dependencies, and self-review fit before returning.
