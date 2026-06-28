@@ -16,3 +16,10 @@ build/
 *.db-shm
 *.db-wal
 data/
+
+# Data analysis agent
+uploads/*
+!uploads/.gitkeep
+data_analysis.db
+data_analysis.db-shm
+data_analysis.db-wal

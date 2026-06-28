@@ -1,23 +1,13 @@
 # Capabilities Index
 
-> **Boilerplate status:** The spec-writer sub-agent creates one file per capability in this directory. Each file describes exactly one discrete thing the agent can do.
-
----
-
-## What Is a Capability?
-
-A capability is a single, discrete action or behavior the agent performs. Examples:
-- "Search the web for companies matching criteria X"
-- "Draft a personalized email given a lead profile"
-- "Send a Slack notification when a threshold is crossed"
-
 ## Capabilities in This Project
 
-<!-- FILL IN: List capabilities here as they are defined. Each entry links to its spec file (no number prefix). -->
-
-| Capability | File |
-|-----------|------|
-| <!-- name --> | [name.md](name.md) |
+| Capability | Phase | File |
+|-----------|-------|------|
+| CSV Upload and Profile | Phase 1 (real) | [csv_upload_and_profile.md](csv_upload_and_profile.md) |
+| NL Query and Answer | Phase 1 (real) | [nl_query_and_answer.md](nl_query_and_answer.md) |
+| Multi-File Operations | Phase 2 (stub in Phase 1) | [multi_file_operations.md](multi_file_operations.md) |
+| Session and History | Phase 2 (stub in Phase 1) | [session_and_history.md](session_and_history.md) |
 
 ## How to Add a New Capability
 
@@ -27,12 +17,12 @@ Run `/zero-shot-build [description]` on the existing spec. The spec-writer sub-a
 3. Flag any dependencies on existing capabilities
 4. Self-review that it fits the architecture and data model before returning
 
-## Capability File Template
+## What a Capability File Contains
 
-Each capability file should answer:
+Each capability file answers:
 - **What it does** (one sentence)
-- **Inputs** (what data it receives)
-- **Outputs** (what it produces)
-- **External calls** (APIs, LLMs, databases it touches)
-- **Error cases** (what can go wrong and how it's handled)
-- **Success criteria** (how we test it)
+- **Inputs** (what data it receives, with source and required flag)
+- **Outputs** (what it produces and where it goes)
+- **External calls** (APIs, LLMs, databases it touches, and failure handling per call)
+- **Business rules** (precise, implementation-neutral rules)
+- **Success criteria** (testable assertions — each starts with a checkbox)
