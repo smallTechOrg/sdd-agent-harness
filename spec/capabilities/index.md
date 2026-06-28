@@ -13,15 +13,16 @@ A capability is a single, discrete action or behavior the agent performs. Exampl
 
 ## Capabilities in This Project
 
-Active (Phase 1 build):
+Active:
 
 | Capability | File | Phase |
 |-----------|------|-------|
 | Profile on Upload | [profile-on-upload.md](profile-on-upload.md) | 1 |
 | Ask a Question | [ask-question.md](ask-question.md) | 1 |
 | Show Its Work | [show-its-work.md](show-its-work.md) | 1 |
+| Persistent Dataset Browser | [persistent-dataset-browser.md](persistent-dataset-browser.md) | 2 |
 
-Deferred (later phases — see [`../roadmap.md`](../roadmap.md)): persistent-dataset-browser (2), conversation-memory (3), multi-file-join (4), excel-upload + column-notes (5), suggested-followups + clarifying-question gate + daily-cost-tally (6). These ship as labelled non-functional stubs in Phase 1.
+Deferred (later phases — see [`../roadmap.md`](../roadmap.md)): conversation-memory (3), multi-file-join (4), excel-upload + column-notes (5), suggested-followups + clarifying-question gate + daily-cost-tally (6). These ship as labelled non-functional stubs until their phase.
 
 ## How to Add a New Capability
 

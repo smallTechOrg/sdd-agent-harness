@@ -71,6 +71,25 @@ export interface AskResult {
   error_message?: string | null
 }
 
+// Lightweight summary returned by GET /datasets (the sidebar list). NOT the full
+// profile — the page fetches the full Dataset via getDataset(id) on selection.
+export interface DatasetSummary {
+  id: string
+  name: string
+  row_count: number
+  status: string
+  question_count: number
+  created_at: string
+}
+
+// A persisted question run, as returned by GET /datasets/{id}/runs. It is the
+// live AskResult superset PLUS the two history-only fields, so the existing
+// AnswerPanel renders a re-opened run with no new component.
+export type RunRecord = AskResult & {
+  question: string
+  created_at: string
+}
+
 // Thrown when the API returns an HTTP error envelope ({detail:{code,message}}).
 export class ApiError extends Error {
   code: string
@@ -147,4 +166,29 @@ export async function askQuestion(datasetId: string, question: string): Promise<
   // flow through parseEnvelope normally (not as ApiError). Only transport-level
   // HTTP errors (404/422) raise ApiError.
   return parseEnvelope<AskResult>(res)
+}
+
+// List every dataset for the sidebar, newest first. Pure DB read, no LLM call —
+// an empty list is a valid state (the API returns []).
+export async function getDatasets(): Promise<DatasetSummary[]> {
+  let res: Response
+  try {
+    res = await fetch('/datasets')
+  } catch {
+    throw new NetworkError()
+  }
+  return parseEnvelope<DatasetSummary[]>(res)
+}
+
+// The question/run history for one dataset, newest first. Pure DB read, no LLM
+// call — re-opening a past run is instant. Each record is the AskResult shape
+// plus question + created_at, so AnswerPanel renders it unchanged.
+export async function getDatasetRuns(id: string): Promise<RunRecord[]> {
+  let res: Response
+  try {
+    res = await fetch(`/datasets/${encodeURIComponent(id)}/runs`)
+  } catch {
+    throw new NetworkError()
+  }
+  return parseEnvelope<RunRecord[]>(res)
 }

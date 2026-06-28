@@ -92,6 +92,136 @@ def get_dataset_payload(dataset_id: str) -> dict | None:
         return _dataset_payload(row)
 
 
+def _iso(dt) -> str | None:
+    """Serialize a datetime to an ISO-8601 string (None-safe)."""
+    return dt.isoformat() if dt is not None else None
+
+
+def list_datasets() -> list[dict]:
+    """List all datasets newest-first with a per-dataset run COUNT.
+
+    Pure DB read (no LLM, no DuckDB). Returns lightweight summaries for the
+    sidebar — NOT the full profile. ``question_count`` is computed via a single
+    grouped COUNT (no N+1). Empty DB → ``[]``.
+    """
+    from sqlalchemy import func, select
+
+    with create_db_session() as session:
+        # One grouped COUNT of question_runs per dataset (no N+1).
+        counts = dict(
+            session.execute(
+                select(QuestionRunRow.dataset_id, func.count(QuestionRunRow.id)).group_by(
+                    QuestionRunRow.dataset_id
+                )
+            ).all()
+        )
+        rows = (
+            session.execute(
+                select(DatasetRow).order_by(DatasetRow.created_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            {
+                "id": r.id,
+                "name": r.name,
+                "row_count": r.row_count,
+                "status": r.status,
+                "question_count": int(counts.get(r.id, 0)),
+                "created_at": _iso(r.created_at),
+            }
+            for r in rows
+        ]
+
+
+def _run_record(run: QuestionRunRow) -> dict:
+    """Reconstruct one persisted run into the live ``AskResult`` shape.
+
+    Rebuilds ``chart.data`` and ``table`` from the bounded ``result_json`` using
+    the SAME ``_chart_data`` logic the live ``_ask_payload`` uses, so a re-opened
+    run renders pixel-identically through the existing ``AnswerPanel``. PURE DB
+    read — no LLM call, no DuckDB execution; ``result_json`` is the bounded,
+    privacy-safe summary the ``privacy_guard`` already produced.
+    """
+    result = json.loads(run.result_json) if run.result_json else None
+    chart_spec = json.loads(run.chart_json) if run.chart_json else None
+    trace = json.loads(run.trace_json) if run.trace_json else []
+    key_numbers = json.loads(run.key_numbers_json) if run.key_numbers_json else []
+
+    table = None
+    if result:
+        table = {"columns": result.get("columns", []), "rows": result.get("rows", [])}
+
+    chart = chart_spec
+    if (
+        run.status == "completed"
+        and chart_spec
+        and chart_spec.get("type") != "table"
+        and result
+    ):
+        chart = {**chart_spec, "data": _chart_data(chart_spec, result)}
+
+    if run.status != "completed":
+        # Mirror the live failed-ask body: answer/chart/table null, error set,
+        # trace still present so the user can see what was tried.
+        return {
+            "run_id": run.id,
+            "status": run.status,
+            "question": run.question,
+            "answer": None,
+            "key_numbers": [],
+            "chart": None,
+            "table": None,
+            "plan": run.plan,
+            "sql": run.sql,
+            "trace": trace,
+            "cost_usd": float(run.cost_usd or 0.0),
+            "error_message": run.error_message,
+            "created_at": _iso(run.created_at),
+        }
+
+    return {
+        "run_id": run.id,
+        "status": run.status,
+        "question": run.question,
+        "answer": run.answer,
+        "key_numbers": key_numbers,
+        "chart": chart,
+        "table": table,
+        "plan": run.plan,
+        "sql": run.sql,
+        "trace": trace,
+        "cost_usd": float(run.cost_usd or 0.0),
+        "error_message": run.error_message,
+        "created_at": _iso(run.created_at),
+    }
+
+
+def get_dataset_runs(dataset_id: str) -> list[dict] | None:
+    """Run history for a dataset, newest-first, each in the live ``AskResult`` shape.
+
+    Returns ``None`` if the dataset does not exist (router → 404). An existing
+    dataset with no runs returns ``[]``. PURE DB read — NO LLM call, NO DuckDB
+    execution; re-opening history never sends anything to the model.
+    """
+    from sqlalchemy import select
+
+    with create_db_session() as session:
+        if session.get(DatasetRow, dataset_id) is None:
+            return None
+        runs = (
+            session.execute(
+                select(QuestionRunRow)
+                .where(QuestionRunRow.dataset_id == dataset_id)
+                .order_by(QuestionRunRow.created_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+        return [_run_record(run) for run in runs]
+
+
 def _ask_payload(run_id: str, dataset_id: str, final: AnalystState) -> dict:
     """Shape the graph result into the POST /datasets/{id}/ask response data."""
     status = final.get("status", "completed")

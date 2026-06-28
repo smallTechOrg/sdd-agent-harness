@@ -62,6 +62,7 @@ One natural-language question answered over a dataset — the audit record.
 
 - **Dataset** created on upload (after successful ingest + profile). Persists across sessions (Phase 2 browses them). No auto-expiry in Phase 1; deletion is out of scope for Phase 1.
 - **QuestionRun** created per `ask`, finalized on completion/failure. Immutable audit record; persists for history (Phase 2).
+- **Phase 2 reads this history, no new schema.** The Phase-1 tables already hold everything the dataset browser needs: `GET /datasets` reads `Dataset` rows (id, name, row_count, status, created_at + a `COUNT` of related `QuestionRun`s), and `GET /datasets/{id}/runs` reads `QuestionRun` rows and reconstructs each answer from the already-persisted `result_json` / `chart_json` / `answer` / `key_numbers_json` / `trace_json`. `created_at` (descending) drives "newest first" for both the dataset list and the per-dataset run history. **No new table and no Alembic migration is required for Phase 2.**
 - **DuckDB / upload files** created on ingest, kept alongside the dataset row. Removed only if the dataset is deleted (later).
 
 ## Sensitive Data

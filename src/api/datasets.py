@@ -1,14 +1,22 @@
 """Datasets API router (see spec/api.md).
 
-POST /datasets          — upload a CSV, ingest into local DuckDB, profile (no LLM).
-GET  /datasets/{id}     — re-fetch the profile.
-POST /datasets/{id}/ask — run the agent; answer + chart + table + trace.
+POST /datasets               — upload a CSV, ingest into local DuckDB, profile (no LLM).
+GET  /datasets               — list datasets newest-first for the sidebar (no LLM).
+GET  /datasets/{id}          — re-fetch the profile.
+GET  /datasets/{id}/runs     — question/run history newest-first (no LLM — pure DB read).
+POST /datasets/{id}/ask      — run the agent; answer + chart + table + trace.
 """
 from fastapi import APIRouter, File, UploadFile
 
 from api._common import api_error, ok
 from domain.dataset import AskRequest
-from graph.runner import get_dataset_payload, ingest_dataset, run_question
+from graph.runner import (
+    get_dataset_payload,
+    get_dataset_runs,
+    ingest_dataset,
+    list_datasets,
+    run_question,
+)
 
 router = APIRouter()
 
@@ -38,12 +46,31 @@ async def create_dataset(file: UploadFile = File(...)) -> dict:
     return ok(payload)
 
 
+@router.get("/datasets")
+def list_all_datasets() -> dict:
+    """List datasets newest-first for the sidebar. Pure DB read — no LLM."""
+    return ok(list_datasets())
+
+
 @router.get("/datasets/{dataset_id}")
 def get_dataset(dataset_id: str) -> dict:
     payload = get_dataset_payload(dataset_id)
     if payload is None:
         raise api_error("NOT_FOUND", f"Dataset {dataset_id} not found.", 404)
     return ok(payload)
+
+
+@router.get("/datasets/{dataset_id}/runs")
+def get_runs(dataset_id: str) -> dict:
+    """Question/run history newest-first. Pure DB read — no LLM, no DuckDB.
+
+    Each record reconstructs the live ``AskResult`` shape from the persisted
+    bounded record so a re-opened run renders identically to a live ask.
+    """
+    runs = get_dataset_runs(dataset_id)
+    if runs is None:
+        raise api_error("NOT_FOUND", f"Dataset {dataset_id} not found.", 404)
+    return ok(runs)
 
 
 @router.post("/datasets/{dataset_id}/ask")

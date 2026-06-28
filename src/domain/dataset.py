@@ -38,3 +38,27 @@ class AskResponse(BaseModel):
     trace: list[dict[str, Any]] = []
     cost_usd: float = 0.0
     error_message: str | None = None
+
+
+class DatasetSummary(BaseModel):
+    """Lightweight summary returned by GET /datasets (sidebar list)."""
+
+    id: str
+    name: str
+    row_count: int
+    status: str
+    question_count: int
+    created_at: str | None = None
+
+
+class RunRecord(AskResponse):
+    """One persisted run returned by GET /datasets/{id}/runs.
+
+    The live ``AskResponse`` shape plus the two fields history needs: the
+    ``question`` (to label each run) and ``created_at`` (to order/timestamp it).
+    Re-opened runs render through the existing ``AnswerPanel`` with no new
+    component.
+    """
+
+    question: str
+    created_at: str | None = None

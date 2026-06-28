@@ -98,14 +98,16 @@ Then open **`http://localhost:8001/app/`** in your browser.
    - the **per-question cost** (computed from real Gemini token usage).
 3. **Expand "Show its work"** to see the plan, the step trace (any failed-then-retried SQL is shown), and the **exact DuckDB SQL** that ran. The generated SQL is dialect-safe DuckDB, and a SQL error is never a dead end — the agent feeds the error back and regenerates corrected SQL (bounded retries), with the retry visible in the trace.
 
-Throughout, **raw rows are never sent to the LLM** — only the schema + bounded aggregates. Every run is persisted to SQLite tied to its dataset (plan, SQL, trace, result summary, chart, cost).
+Throughout, **raw rows are never sent to the LLM** — only the schema + bounded aggregates. Every run is persisted to SQLite tied to its dataset (plan, SQL, trace, result summary, chart, cost). You can now **revisit past datasets and re-open prior question runs from the sidebar** — the browser is persisted across restarts and re-opening a run is a pure DB read (no LLM call).
 
-### Phase-1 API routes
+### API routes
 
 | Method & path | Purpose |
 |---------------|---------|
 | `POST /datasets` | Upload a CSV (multipart `file` field); ingest into local DuckDB and profile it. No LLM call. |
+| `GET /datasets` | List all datasets newest-first for the sidebar (with `question_count`). No LLM call. |
 | `GET /datasets/{id}` | Fetch a dataset's profile (re-open the profile card). |
+| `GET /datasets/{id}/runs` | Question/run history for a dataset, newest-first, each reconstructed to the live answer shape. No LLM call (pure DB read). |
 | `POST /datasets/{id}/ask` | Ask a natural-language question; run the agent and return the answer + chart + summary table + show-its-work trace. |
 
 Responses use the envelope `{"data": <payload>, "error": null}` on success; failures return an HTTP error with `{"detail": {"code": ..., "message": ...}}` (an *agent* failure — e.g. SQL uncorrectable after retries — returns HTTP 200 with `status="failed"` and the trace in the body so the UI can render what was tried). See [`spec/api.md`](spec/api.md) for the full contract.
@@ -116,7 +118,6 @@ Responses use the envelope `{"data": <payload>, "error": null}` on success; fail
 
 These appear in the Phase-1 UI as greyed / "coming soon" affordances — they are visible but not yet functional:
 
-- **Persistent dataset browser** — the sidebar shows only the current dataset for now (Phase 2).
 - **Conversation follow-ups** — the "follow-up question" box and "suggested questions" chips are stubs (Phase 3 / Phase 6).
 - **Multi-file JOIN / compare** — the "compare another file" button is a stub (Phase 4).
 - **Excel upload + column notes** — the uploader accepts `.csv` only; an "Excel — coming soon" note and the "column notes" panel are stubs (Phase 5).
