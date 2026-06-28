@@ -1,15 +1,6 @@
 {% extends "base.html" %}
 {% block title %}DataAnalyst AI{% endblock %}
 
-{% block header_center %}
-<nav class="site-header__tabs" role="tablist" aria-label="Main sections">
-  <button type="button" class="hdr-tab {% if active_tab != 'database' %}active{% endif %}" data-tab="analyse"
-          onclick="switchTab('analyse')">Analyse</button>
-  <button type="button" class="hdr-tab {% if active_tab == 'database' %}active{% endif %}" data-tab="database"
-          onclick="switchTab('database')">Database</button>
-</nav>
-{% endblock %}
-
 {% block head_extra %}
 <style>
   /* ── Drop zone ─────────────────────────────────────────── */
@@ -471,14 +462,6 @@
 
 {% block scripts %}
 <script>
-  // ── Tabs ──────────────────────────────────────────────────────────────
-  function switchTab(tab) {
-    document.querySelectorAll('.hdr-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-    document.getElementById('analyse-tab').style.display = (tab === 'analyse') ? 'flex' : 'none';
-    document.getElementById('database-tab').style.display = (tab === 'database') ? 'flex' : 'none';
-    if (tab === 'database') renderEER();
-  }
-
   // ── EER diagram (table boxes + FK edges) — built from window.EER (resources only) ──────
   const _SVGNS = 'http://www.w3.org/2000/svg';
   function _esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
