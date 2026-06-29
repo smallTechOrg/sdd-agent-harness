@@ -15,9 +15,16 @@ from pathlib import Path
 from graph.state import AgentState
 from llm.client import LLMClient
 from analysis.duckdb_engine import run_query
+from analysis.charts import choose_chart
+from analysis.summary import summarize_result
 from observability.events import get_logger
 
 _PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "analysis.md"
+_FOLLOWUPS_PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "followups.md"
+
+# Number of suggested follow-up questions to keep (capability: 2-3).
+_FOLLOWUPS_MIN = 2
+_FOLLOWUPS_MAX = 3
 
 # Bounded retry for transient Gemini errors (timeout / 429 / 5xx).
 _LLM_MAX_ATTEMPTS = 3
@@ -180,13 +187,116 @@ def answer(state: AgentState) -> AgentState:
     return {**state, "answer_text": answer_text, "flagged": flagged}
 
 
+def _load_followups_prompt() -> str:
+    return _FOLLOWUPS_PROMPT_PATH.read_text(encoding="utf-8").strip()
+
+
+def parse_followups(raw: str) -> list[str]:
+    """Parse a model response into 2-3 follow-up questions.
+
+    One question per line; strips numbering/bullets and blank lines. Caps at
+    ``_FOLLOWUPS_MAX``. Returns an empty list if nothing usable was produced.
+    """
+    if not raw:
+        return []
+    questions: list[str] = []
+    for line in raw.splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        # Strip a leading bullet / number marker ("1.", "1)", "-", "*").
+        text = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", text).strip()
+        # Strip wrapping quotes a model sometimes adds.
+        text = text.strip('"').strip("'").strip()
+        if text:
+            questions.append(text)
+        if len(questions) >= _FOLLOWUPS_MAX:
+            break
+    return questions
+
+
+def suggest_followups(state: AgentState) -> AgentState:
+    """Suggest 2-3 follow-up questions from schema + aggregate result only.
+
+    NON-FATAL: any failure (LLM error, too few parsed) logs and sets
+    ``followups=None`` and falls through to ``finalize``. A follow-up failure
+    must never fail the run or fabricate anything. Receives schema + question +
+    aggregate result rows only — never raw source rows.
+    """
+    run_id = state.get("run_id")
+    schema = state.get("schema", [])
+    question = state.get("question", "")
+    result_rows = state.get("result_rows") or []
+
+    prompt = "\n".join(
+        [
+            "Table: data",
+            "Schema (column name and DuckDB type):",
+            _format_schema(schema),
+            "",
+            f"The user just asked: {question}",
+            "",
+            "Aggregate result rows (JSON) — the only data you may use:",
+            json.dumps(result_rows),
+            "",
+            "Suggest 2-3 follow-up questions, one per line, no numbering.",
+        ]
+    )
+
+    try:
+        raw = _call_llm(prompt, system=_load_followups_prompt())
+    except Exception as exc:
+        log.warning("suggest_followups.failed", run_id=run_id, error=str(exc))
+        return {**state, "followups": None}
+
+    parsed = parse_followups(raw)
+    if len(parsed) < _FOLLOWUPS_MIN:
+        log.warning(
+            "suggest_followups.too_few", run_id=run_id, parsed_count=len(parsed)
+        )
+        return {**state, "followups": None}
+
+    log.info("suggest_followups.ok", run_id=run_id, count=len(parsed))
+    return {**state, "followups": parsed}
+
+
 def finalize(state: AgentState) -> AgentState:
     run_id = state.get("run_id")
     answer_text = state.get("answer_text") or ""
     sql = state.get("sql") or ""
+    schema = state.get("schema", [])
+    result_rows = state.get("result_rows")
     output_text = f"{answer_text}\n\nSQL:\n{sql}".strip()
-    log.info("finalize.ok", run_id=run_id, status="completed")
-    return {**state, "status": "completed", "output_text": output_text}
+
+    # Deterministic enrichment from the aggregate result only (no LLM, no raw
+    # rows). Each is best-effort and never fails the run.
+    question = state.get("question", "")
+    try:
+        chart = choose_chart(question, result_rows, schema)
+    except Exception as exc:  # defensive
+        log.warning("finalize.chart_error", run_id=run_id, error=str(exc))
+        chart = None
+    try:
+        summary_table = summarize_result(result_rows, schema)
+    except Exception as exc:  # defensive
+        log.warning("finalize.summary_error", run_id=run_id, error=str(exc))
+        summary_table = None
+
+    log.info(
+        "finalize.ok",
+        run_id=run_id,
+        status="completed",
+        has_chart=chart is not None,
+        has_summary=summary_table is not None,
+        followups_count=len(state.get("followups") or []),
+    )
+    return {
+        **state,
+        "status": "completed",
+        "output_text": output_text,
+        "chart": chart,
+        "summary_table": summary_table,
+    }
 
 
 def handle_error(state: AgentState) -> AgentState:

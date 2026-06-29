@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { askQuestion, type AskResult, type Dataset } from '@/lib/api'
 import { UploadPanel } from '@/components/UploadPanel'
+import { ProfilePanel } from '@/components/ProfilePanel'
 import { QuestionPanel } from '@/components/QuestionPanel'
 import { AnswerPanel } from '@/components/AnswerPanel'
 import { ComingSoonCard } from '@/components/ComingSoon'
@@ -47,8 +48,16 @@ export default function Home() {
         {/* Core, REAL path */}
         <div className="space-y-6">
           <UploadPanel dataset={dataset} onUploaded={handleUploaded} />
+          {dataset?.profile && dataset.profile.length > 0 && (
+            <ProfilePanel profile={dataset.profile} />
+          )}
           <QuestionPanel enabled={!!dataset} loading={asking} onAsk={handleAsk} />
-          <AnswerPanel loading={asking} result={result} error={askError} />
+          <AnswerPanel
+            loading={asking}
+            result={result}
+            error={askError}
+            onFollowup={handleAsk}
+          />
         </div>
 
         {/* Coming-soon stubs — visible, designed, clearly labelled (never bugs) */}
@@ -58,30 +67,6 @@ export default function Home() {
             icon="🗂"
             phase="Phase 3"
             description="Load and multi-select several datasets to compare and join them in one query."
-          />
-          <ComingSoonCard
-            title="Chart"
-            icon="📊"
-            phase="Phase 2"
-            description="Auto-chosen visualization rendered from each answer’s result shape."
-          />
-          <ComingSoonCard
-            title="Summary table"
-            icon="🧮"
-            phase="Phase 2"
-            description="A rich, formatted breakdown of the result alongside the raw aggregate rows."
-          />
-          <ComingSoonCard
-            title="Data profile"
-            icon="🔎"
-            phase="Phase 2"
-            description="Per-column types, null counts, distinct counts, and min/max computed on upload."
-          />
-          <ComingSoonCard
-            title="Follow-up suggestions"
-            icon="💡"
-            phase="Phase 2"
-            description="2–3 smart next questions — click one to ask it instantly."
           />
           <ComingSoonCard
             title="Cost meter"

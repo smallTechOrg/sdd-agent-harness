@@ -23,13 +23,46 @@ REST (FastAPI, `api:app` on port 8001). All responses use the skeleton envelope 
     "id": "uuid",
     "name": "sales.csv",
     "row_count": 12345,
-    "schema": [{ "name": "revenue", "type": "BIGINT" }, { "name": "region", "type": "VARCHAR" }],
-    "profile": null
+    "schema": [{ "name": "revenue", "type": "DOUBLE" }, { "name": "region", "type": "VARCHAR" }],
+    "profile": [
+      {
+        "column": "revenue",
+        "type": "DOUBLE",
+        "null_count": 0,
+        "distinct_count": 12,
+        "min": 120.0,
+        "max": 660.0,
+        "flags": []
+      },
+      {
+        "column": "region",
+        "type": "VARCHAR",
+        "null_count": 0,
+        "distinct_count": 4,
+        "min": null,
+        "max": null,
+        "flags": []
+      }
+    ]
   },
   "error": null
 }
 ```
-`profile` is `null` in Phase 1 (populated in Phase 2).
+
+**`profile` — Phase 2, now populated.** A list with one entry per column, computed
+entirely in local DuckDB (aggregate-only — no raw rows). Each entry:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `column` | string | column name |
+| `type` | string | DuckDB column type |
+| `null_count` | int \| null | number of null values |
+| `distinct_count` | int \| null | number of distinct values |
+| `min` | number/string \| null | minimum — populated for **numeric** columns only, else `null` |
+| `max` | number/string \| null | maximum — numeric columns only, else `null` |
+| `flags` | string[] | data-quality flags: any of `all_null`, `constant`, `high_null` (and `error` if a per-column stat failed) |
+
+Profiling is non-fatal: a per-column failure yields a partial entry (`flags: ["error"]`) and never blocks the upload. `profile` is `null` only if no column could be profiled.
 
 **Error cases:**
 | Status | Condition |
@@ -61,19 +94,52 @@ REST (FastAPI, `api:app` on port 8001). All responses use the skeleton envelope 
     "flagged": false,
     "error": null,
 
-    "chart": null,
-    "summary_table": null,
-    "followups": null,
+    "chart": {
+      "type": "bar",
+      "x": "region",
+      "y": "total_revenue",
+      "series": null,
+      "title": "What is total revenue by region?"
+    },
+    "summary_table": {
+      "columns": [
+        { "name": "region", "type": "text", "align": "left" },
+        { "name": "total_revenue", "type": "number", "align": "right" }
+      ],
+      "rows": [
+        ["North", 1210.0],
+        ["South", 665.0]
+      ]
+    },
+    "followups": [
+      "How does revenue trend month over month?",
+      "Which product drives the most revenue in each region?"
+    ],
     "tokens": null
   },
   "error": null
 }
 ```
 
+**Phase-2 fields — now populated** (each is `null` when not applicable, ambiguous, or on a failed run — never fabricated):
+
+- **`chart`** — a chart spec derived deterministically from the **aggregate result shape only** (no raw rows, no LLM), or `null` when not chartable (single scalar, ambiguous shape).
+  - `type`: `"bar"` | `"line"` | `"scatter"`
+  - `x`: result column for the x-axis (the label/dimension, or first numeric for scatter)
+  - `y`: result column for the y-axis (the numeric measure)
+  - `series`: optional second categorical column for grouping, else `null`
+  - `title`: short title (derived from the question)
+  - Rules: single scalar → `null`; one label + one numeric → `bar` (or `line` if the label is temporal/date-like); two numerics → `scatter`.
+- **`summary_table`** — a formatted table over the aggregate result (deterministic, no LLM), or `null` for an empty result.
+  - `columns`: `[{ "name", "type": "number"|"text", "align": "right"|"left" }]` — numeric columns are right-aligned.
+  - `rows`: `[[...], ...]` row-major cell values; floats are rounded **for display only** (≤4 dp) and never altered in a way that changes correctness.
+- **`followups`** — `["q1", "q2", "q3"]`, 2–3 short follow-up questions from Gemini grounded in the **schema + aggregate result only** (never raw rows), or `null` (non-fatal: a follow-up failure never fails the run).
+- **`tokens`** — stays `null` until Phase 3.
+
 **Response contract notes (binding for both slices):**
-- Phase 1 ALWAYS returns `answer`, `sql`, `result` on success. `chart`, `summary_table`, `followups`, `tokens` are present as `null` placeholders so the frontend can wire stub panels without a contract change — they are populated in Phases 2–3.
+- Phase 1 ALWAYS returns `answer`, `sql`, `result` on success. As of Phase 2, `chart`, `summary_table`, `followups` are populated for real (each `null` when not applicable); `tokens` remains a `null` placeholder until Phase 3.
 - `flagged: true` when the agent returns a best-guess (ambiguous question) rather than a confident answer — the UI shows a "best-guess" badge.
-- On failure (`status: "failed"`): `answer`/`sql`/`result` may be `null` and `error` carries the reason. The agent NEVER returns a fabricated number — a failure is surfaced, not hidden.
+- On failure (`status: "failed"`): `answer`/`sql`/`result` are `null` and `error` carries the reason. `chart`/`summary_table`/`followups` are ALSO `null` on a failed run — enrichment is never fabricated. The agent NEVER returns a fabricated number — a failure is surfaced, not hidden.
 
 **Error cases:**
 | Status | Condition |

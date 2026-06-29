@@ -20,6 +20,11 @@ class AgentState(TypedDict, total=False):
     output_text: str | None          # serialized answer+SQL+result for the Run row
     flagged: bool                    # best-guess badge
 
+    # Phase 2 enrichment (all derived from aggregate result only — no raw rows)
+    chart: dict | None               # chart spec from result shape (or None)
+    summary_table: dict | None       # formatted {columns, rows} table (or None)
+    followups: list[str] | None      # 2-3 suggested follow-up questions (or None)
+
     # Control
     status: str                      # "completed" | "failed"
     error: str | None                # fatal error -> handle_error

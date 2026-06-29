@@ -1,6 +1,9 @@
 'use client'
 
 import type { AskResult, ResultRow } from '@/lib/api'
+import { Chart } from '@/components/Chart'
+import { SummaryTable } from '@/components/SummaryTable'
+import { Followups } from '@/components/Followups'
 
 function formatCell(value: unknown): string {
   if (value === null || value === undefined) return '—'
@@ -43,10 +46,12 @@ export function AnswerPanel({
   loading,
   result,
   error,
+  onFollowup,
 }: {
   loading: boolean
   result: AskResult | null
   error: string | null
+  onFollowup: (question: string) => void
 }) {
   return (
     <section
@@ -122,7 +127,24 @@ export function AnswerPanel({
             </div>
           )}
 
-          {result.result && result.result.length > 0 && <ResultTable rows={result.result} />}
+          {/* Chart — rendered from the backend chart spec; renders nothing when null. */}
+          {result.chart && result.result && result.result.length > 0 && (
+            <Chart spec={result.chart} rows={result.result} />
+          )}
+
+          {/* Rich summary table when present; else fall back to the basic result table. */}
+          {result.summary_table ? (
+            <SummaryTable table={result.summary_table} />
+          ) : (
+            result.result && result.result.length > 0 && <ResultTable rows={result.result} />
+          )}
+
+          {/* Follow-up chips — clicking one submits it as the next question. */}
+          <Followups
+            followups={result.followups}
+            disabled={loading}
+            onPick={onFollowup}
+          />
         </div>
       )}
 

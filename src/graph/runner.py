@@ -59,6 +59,9 @@ def run_analysis(dataset_id: str, question: str) -> dict:
         "result_rows": None,
         "error": None,
         "flagged": False,
+        "chart": None,
+        "summary_table": None,
+        "followups": None,
     }
 
     final = agentic_ai.invoke(initial)
@@ -70,12 +73,18 @@ def run_analysis(dataset_id: str, question: str) -> dict:
     output_text = final.get("output_text")
     error = final.get("error") or final.get("sql_error")
     flagged = bool(final.get("flagged", False))
+    chart = final.get("chart")
+    summary_table = final.get("summary_table")
+    followups = final.get("followups")
     duration_ms = int((time.monotonic() - started) * 1000)
 
-    # On failure we never surface a fabricated number.
+    # On failure we never surface a fabricated number or fabricated enrichment.
     if status != "completed":
         answer_text = None
         result_rows = None
+        chart = None
+        summary_table = None
+        followups = None
 
     with create_db_session() as session:
         run = session.get(RunRow, run_id)
@@ -104,4 +113,7 @@ def run_analysis(dataset_id: str, question: str) -> dict:
         "result": result_rows,
         "flagged": flagged,
         "error": error if status != "completed" else None,
+        "chart": chart,
+        "summary_table": summary_table,
+        "followups": followups,
     }

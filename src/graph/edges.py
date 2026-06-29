@@ -27,4 +27,5 @@ def after_execute(state: AgentState) -> str:
 def after_answer(state: AgentState) -> str:
     if state.get("error"):
         return "handle_error"
-    return "finalize"
+    # On success, enrich with suggested follow-ups before finalizing.
+    return "suggest_followups"

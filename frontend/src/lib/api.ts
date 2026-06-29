@@ -8,15 +8,56 @@ export interface SchemaColumn {
   type: string
 }
 
+/**
+ * Per-column profile entry (Phase 2). The backend key for the column label may
+ * be `column` OR `name` — read it tolerantly via `profileColumnLabel()`.
+ */
+export interface ProfileColumn {
+  column?: string
+  name?: string
+  type: string
+  null_count: number
+  distinct_count: number
+  min: number | string | null
+  max: number | string | null
+  flags: string[]
+}
+
+/** Resolve the column label tolerantly (`column` preferred, falls back to `name`). */
+export function profileColumnLabel(c: ProfileColumn): string {
+  return c.column ?? c.name ?? ''
+}
+
 export interface Dataset {
   id: string
   name: string
   row_count: number
   schema: SchemaColumn[]
-  profile: unknown | null
+  profile: ProfileColumn[] | null
 }
 
 export type ResultRow = Record<string, unknown>
+
+/** Chart spec (Phase 2) — rendered client-side from the answer `result` rows. */
+export interface ChartSpec {
+  type: 'bar' | 'line' | 'scatter'
+  x: string
+  y: string
+  series: string | null
+  title: string
+}
+
+export interface SummaryTableColumn {
+  name: string
+  type: string
+  align: 'left' | 'right'
+}
+
+/** Rich summary table (Phase 2). */
+export interface SummaryTable {
+  columns: SummaryTableColumn[]
+  rows: unknown[][]
+}
 
 export interface AskResult {
   run_id: string
@@ -28,10 +69,11 @@ export interface AskResult {
   result: ResultRow[] | null
   flagged: boolean
   error: string | null
-  // Phase 2/3 placeholder fields — present as null in Phase 1.
-  chart: unknown | null
-  summary_table: unknown | null
-  followups: unknown | null
+  // Phase 2 — now-real enrichment (any may be null when not applicable).
+  chart: ChartSpec | null
+  summary_table: SummaryTable | null
+  followups: string[] | null
+  // Phase 3 placeholder — present as null until then.
   tokens: unknown | null
 }
 

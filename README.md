@@ -40,15 +40,15 @@ uv run python -m src
 
 Then open **http://localhost:8001/app/** in your browser.
 
-## Try it (Phase 1)
+## Try it
 
-1. In the Upload panel, choose `samples/sales.csv` (a small sample is included) and click **Upload CSV**. The dataset summary (row count + columns) appears.
-2. In the Question panel type **"What is the total revenue?"** and click **Ask**.
-3. The Answer panel shows the plain-English answer, an **Exact SQL** block with the DuckDB query that produced it, and a small result table.
+1. In the Upload panel, choose `samples/sales.csv` (a small sample is included) and click **Upload CSV**. The dataset summary (row count + columns) appears, and a **data profile** (per-column type, null/distinct counts, min/max, quality flags) is computed automatically on upload.
+2. In the Question panel type a grouped question like **"What is total revenue by region?"** and click **Ask**.
+3. The Answer panel shows the plain-English answer, an **Exact SQL** block with the DuckDB query that produced it, an auto-chosen **chart** (bar/line/scatter), a rich **summary table**, and 2–3 clickable **follow-up** suggestions — click one to ask it instantly. (A single-scalar question like "What is the total revenue?" shows the answer + SQL + summary, and no chart when the result isn't chartable.)
 
-**What is real in Phase 1:** upload CSV → ask → answer with the exact SQL + result table.
+**What is real now (Phases 1–2):** upload CSV → auto-profile → ask → answer with the exact SQL, an auto-chosen chart, a rich summary table, and suggested follow-ups (clicking a follow-up asks it). Everything is computed locally in DuckDB; only schema + aggregate results ever reach the LLM.
 
-**Clearly-labelled "Coming soon" stubs** (visible but not yet functional — not bugs): Datasets sidebar, Chart, Summary table, Profile panel, Follow-up chips, Cost meter, History/audit-trail browser, Live step stream. These are wired up in Phases 2–3.
+**Clearly-labelled "Coming soon" stubs** (visible but not yet functional — not bugs): Datasets sidebar (multi-dataset compare/join), Cost meter, History/audit-trail browser, Live step stream. These — plus persistent cross-day memory, data notes, and Excel ingest — are wired up in Phase 3.
 
 ## Tests
 

@@ -31,7 +31,8 @@ def test_after_execute_handles_error_when_exhausted():
 
 
 def test_after_answer_routes():
-    assert after_answer({"answer_text": "hi"}) == "finalize"
+    # On success the answer node routes into the Phase-2 enrichment node.
+    assert after_answer({"answer_text": "hi"}) == "suggest_followups"
     assert after_answer({"error": "boom"}) == "handle_error"
 
 

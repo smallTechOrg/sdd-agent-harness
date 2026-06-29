@@ -82,6 +82,9 @@ def test_ask_contract_shape_with_mocked_runner(api_client, _isolated_db):
         "result": [{"total": 5}],
         "flagged": False,
         "error": None,
+        "chart": None,
+        "summary_table": None,
+        "followups": None,
     }
     with patch("api.datasets.run_analysis", return_value=fake):
         r = api_client.post(f"/datasets/{ds_id}/ask", json={"question": "q"})

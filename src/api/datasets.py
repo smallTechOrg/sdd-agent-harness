@@ -11,6 +11,7 @@ from db.session import get_session
 from db.models import DatasetRow
 from domain.analysis import AskRequest
 from analysis.ingest import ingest_csv, IngestError, FileTooLargeError
+from analysis.profiler import profile_dataset
 from graph.runner import run_analysis, DatasetNotFound
 from observability.events import get_logger
 
@@ -39,12 +40,21 @@ async def create_dataset(
         log.error("ingest.failed", filename=filename, error=str(exc))
         raise api_error("INGEST_FAILED", f"Ingest failed: {exc}", 500)
 
+    # Auto-profile in DuckDB (aggregate stats only — no raw rows leave DuckDB).
+    # Non-fatal: a profiling failure must not block the upload.
+    try:
+        profile = profile_dataset(ingested["duckdb_path"], ingested["schema"])
+    except Exception as exc:  # defensive — profiling never blocks ingest
+        log.warning("profile.failed", filename=filename, error=str(exc))
+        profile = []
+
     dataset = DatasetRow(
         name=filename,
         duckdb_path=ingested["duckdb_path"],
         table_name=ingested["table_name"],
         schema_json=json.dumps(ingested["schema"]),
         row_count=ingested["row_count"],
+        profile_json=json.dumps(profile) if profile else None,
     )
     session.add(dataset)
     session.flush()
@@ -56,6 +66,7 @@ async def create_dataset(
         name=filename,
         row_count=ingested["row_count"],
         column_count=len(ingested["schema"]),
+        profiled_columns=len(profile),
     )
 
     return ok(
@@ -64,7 +75,7 @@ async def create_dataset(
             "name": filename,
             "row_count": ingested["row_count"],
             "schema": ingested["schema"],
-            "profile": None,
+            "profile": profile or None,
         }
     )
 
@@ -96,9 +107,9 @@ def ask(
             "result": result["result"],
             "flagged": result["flagged"],
             "error": result["error"],
-            "chart": None,
-            "summary_table": None,
-            "followups": None,
-            "tokens": None,
+            "chart": result["chart"],
+            "summary_table": result["summary_table"],
+            "followups": result["followups"],
+            "tokens": None,  # Phase 3.
         }
     )
