@@ -16,3 +16,7 @@ build/
 *.db-shm
 *.db-wal
 data/
+
+# DuckDB per-dataset engine files
+*.duckdb
+*.duckdb.wal

@@ -1,218 +1,222 @@
 # Agent
 
-> Required when the project uses an agent framework. Delete this file if your project has no agent framework.
->
-> If your project has no agent framework (e.g., a simple script or single-LLM API call), delete this file.
->
-
 ---
 
 ## Agent Architecture Pattern
 
-<!-- FILL IN: Which pattern does this agent follow? Choose one and describe why. -->
+**Chosen:** **Graph (LangGraph)** — the analysis is a multi-step reasoning loop (generate SQL → execute locally → inspect → answer) with a conditional **retry-on-SQL-error** edge. A graph models the conditional retry and the local-execute step cleanly; a plain loop would not capture the error-feedback edge as first-class. The skeleton already ships a 3-node LangGraph (`transform_text → finalize | handle_error`); this spec replaces the capability node in place and adds the SQL nodes.
 
-| Pattern | Use when |
-|---------|----------|
-| **Single-agent loop** | One LLM drives a deterministic tool-call loop. No branches, no handoffs. |
-| **Graph (LangGraph)** | Multi-step pipeline with conditional edges, checkpointing, or parallel nodes. |
-| **Multi-agent** | Specialised sub-agents with distinct roles; orchestrator routes between them. |
-| **Supervisor** | One supervisor LLM dispatches to worker agents based on task type. |
-| **Human-in-the-loop** | Execution pauses at defined checkpoints for user review or approval. |
-
-**Chosen:** <!-- state pattern + one-sentence rationale -->
+> **Privacy boundary is enforced at the node level.** Only `execute_sql` touches raw data, and it runs entirely inside DuckDB on the local machine. The nodes that call Gemini (`generate_sql`, `answer`) are passed **only** schema, the question, prior SQL/error text, and small aggregate **result rows** — never raw source rows. The graph contains no node that forwards a raw-row sample to the LLM.
 
 ---
 
 ## LLM Provider & Model
 
-<!-- FILL IN: Which model drives each agent/node? State provider, model ID, and why. -->
-
 | Agent / Node | Provider | Model ID | Rationale |
 |-------------|----------|----------|-----------|
-| <!-- node --> | Anthropic | <!-- e.g. claude-sonnet-4-6 --> | <!-- latency vs. quality trade-off --> |
+| `generate_sql` | Gemini | `gemini-3.1-pro` | Needs strong SQL reasoning over schema; quality over latency. |
+| `answer` | Gemini | `gemini-3.1-pro` | Phrases a careful analyst answer from aggregates; same model keeps it simple. |
 
-**Fallback behaviour:** <!-- Production resilience only: retry/backoff, degraded mode, or a surfaced error if the LLM API is unavailable or rate-limited. NOT a test/offline stub path — tests call the real API with keys from `.env`. -->
+Model is env-configurable (`AGENT_LLM_MODEL`); default `gemini-3.1-pro`. Provider auto-detected from `AGENT_GEMINI_API_KEY`.
 
-**Prompt strategy:** <!-- System/user split, few-shot examples, structured output (tool_use / JSON mode)? -->
+**Fallback behaviour:** On transient Gemini errors (timeout / 429 / 5xx), retry with backoff (bounded). On persistent failure the run is marked `failed` with a surfaced error message — the agent **never** fabricates a number. This is production resilience, not a test stub: tests call the real Gemini API via `.env`.
+
+**Prompt strategy:** System prompt (`src/prompts/analysis.md`) pins the DuckDB dialect and the privacy rules; user message carries the question + schema (and, in `answer`, the result rows). `generate_sql` requests SQL only (parsed/validated); `answer` requests prose. Few-shot DuckDB date examples are included in the system prompt to prevent SQLite idioms.
 
 ---
 
 ## Tools & Tool Calling
 
-<!-- FILL IN: Every tool the agent can call. -->
+This graph uses **direct node functions**, not LLM-chosen tools. The "tool" the model influences is DuckDB execution, invoked deterministically by `execute_sql` using the SQL the model produced.
 
 | Tool name | Description | Inputs | Output | Side-effects |
 |-----------|-------------|--------|--------|--------------|
-| <!-- name --> | <!-- what it does --> | <!-- params --> | <!-- return type --> | <!-- DB write, API call, file write, etc. --> |
+| `duckdb_execute` | Run generated SQL against the dataset's local DuckDB file | `sql: str`, `dataset_path: str` | result rows (list[dict], capped) or DuckDB error | none (read-only query) |
 
-**Tool selection strategy:** <!-- How does the agent decide which tool to call? (LLM choice, rule-based routing, forced single tool) -->
+**Tool selection strategy:** Forced/deterministic — `execute_sql` always runs the SQL from `generate_sql`. No LLM tool-routing.
 
-**Tool failure handling:** <!-- retry, fallback, abort — per tool or global policy? -->
+**Tool failure handling:** A DuckDB error does not abort; it routes back to `generate_sql` with the error text (retry-on-SQL-error), up to `max_sql_retries`. Exhausting retries sets `error` and routes to `handle_error`.
 
 ---
 
 ## Agent State
 
-<!-- FILL IN: The full state type. Every field must be named, typed, and annotated with what populates it. -->
-
 ```python
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     # Identity
-    run_id: int                          # set at initialisation
+    run_id: str                      # set by runner before invoke
+    dataset_id: str                  # which dataset to query
+    dataset_path: str                # local DuckDB file path (set by runner)
+    schema: list[dict]               # [{name, type}, ...] — set by runner from Dataset; sent to LLM
+    question: str                    # the user's plain-English question (input)
 
-    # Input
-    # ...                                # fields populated from the trigger
-
-    # Pipeline data (populated progressively by nodes)
-    # ...
+    # Pipeline data (populated by nodes)
+    sql: str | None                  # DuckDB SQL from generate_sql
+    sql_error: str | None            # last DuckDB error (fed back on retry); cleared on success
+    sql_attempts: int                # retry counter (starts 0)
+    result_rows: list[dict] | None   # aggregate result from execute_sql (capped); LLM-visible
 
     # Output
-    # ...                                # final result fields
+    answer_text: str | None          # plain-English answer from answer node
+    output_text: str | None          # serialized answer+SQL+result for the Run row / API
 
     # Control
-    error: str | None                    # set by any node on fatal failure
-    checkpoint: str | None              # last completed node (for resume)
+    status: str                      # "completed" | "failed"
+    error: str | None                # fatal error → handle_error
 ```
+
+`max_sql_retries` (default 3) is a runner constant, not state.
 
 ---
 
 ## Nodes / Steps
 
-<!-- FILL IN: One section per node. For single-agent loops, describe each "step" or "tool call phase." -->
+### `generate_sql`
+- **Reads from state:** `question`, `schema`, `sql` (prior), `sql_error` (prior), `sql_attempts`
+- **Writes to state:** `sql`, increments `sql_attempts`
+- **LLM call:** yes — `gemini-3.1-pro`. Prompt = `analysis.md` system (DuckDB dialect pinned) + question + schema + (if retrying) prior SQL and verbatim DuckDB error. Output: SQL string only.
+- **External calls:** Gemini → on transient failure, retry/backoff; on persistent failure set `error`.
+- **Behaviour:** Produces a DuckDB query that answers the question against the schema. On a retry it must correct the previous query using the fed-back error. Receives schema only — no raw rows.
 
-### `node_[name]`
+### `execute_sql`
+- **Reads from state:** `sql`, `dataset_path`
+- **Writes to state:** `result_rows` (on success, clears `sql_error`) OR `sql_error` (on DuckDB error)
+- **LLM call:** no.
+- **External calls:** DuckDB (local, read-only). On error → set `sql_error` (not fatal; routes to retry).
+- **Behaviour:** Runs the SQL locally in DuckDB, captures the result (capped, e.g. ≤1000 rows). Raw data stays on the machine; only the (aggregate) result is carried forward. A DuckDB error message is captured verbatim for feedback.
 
-**Reads from state:** <!-- field names -->
+### `answer`
+- **Reads from state:** `question`, `schema`, `sql`, `result_rows`
+- **Writes to state:** `answer_text`, `output_text`
+- **LLM call:** yes — `gemini-3.1-pro`. Prompt = question + schema + result rows (aggregates). Output: plain-English analyst answer; if the result is ambiguous the model is instructed to flag a best-guess rather than invent precision.
+- **External calls:** Gemini.
+- **Behaviour:** Phrases the answer from the result, attaches the exact SQL. Receives only aggregate result rows — never raw source rows.
 
-**Writes to state:** <!-- field names -->
+### `finalize`
+- **Reads:** `answer_text`, `sql`, `result_rows` · **Writes:** `status="completed"`, `output_text`. No LLM. Persists handled by the runner.
 
-**LLM call:** <!-- yes/no; if yes: prompt template summary, model used, output format -->
-
-**External calls:**
-
-| System | Operation | On Failure |
-|--------|-----------|------------|
-| <!-- system --> | <!-- what it calls --> | <!-- fatal (set error) / partial (log + continue) / retry --> |
-
-**Behaviour:** <!-- One paragraph. What decision or transformation does this node perform? -->
+### `handle_error`
+- **Reads:** `error` · **Writes:** `status="failed"`. No LLM. The Run row is marked `failed` with the error message; the user sees a flagged failure, never a fabricated number.
 
 ---
 
 ## Graph / Flow Topology
 
-<!-- FILL IN: ASCII diagram of node flow. Show ALL conditional edges explicitly. -->
-
 ```
 START
   │
   ▼
-node_a ──(error)──► node_handle_error ──► END
+generate_sql ──(error)──► handle_error ──► END
   │
   ▼
-node_b ──(condition)──► node_c
-  │                         │
-  │                         ▼
-  └──────────────────► node_finalize
-                             │
-                             ▼
-                            END
+execute_sql ──(sql_error & attempts<max)──► generate_sql   (retry-on-SQL-error)
+  │                                          
+  ├──(sql_error & attempts>=max)──► handle_error ──► END
+  │
+  ▼ (success)
+answer ──(error)──► handle_error ──► END
+  │
+  ▼
+finalize ──► END
 ```
 
 **Conditional edges:**
 
 | Source node | Condition | Target |
 |-------------|-----------|--------|
-| <!-- node --> | <!-- e.g. state["error"] is not None --> | <!-- target node --> |
+| `generate_sql` | `state["error"]` set | `handle_error` |
+| `generate_sql` | otherwise | `execute_sql` |
+| `execute_sql` | `sql_error` set AND `sql_attempts < max_sql_retries` | `generate_sql` (retry) |
+| `execute_sql` | `sql_error` set AND `sql_attempts >= max_sql_retries` | `handle_error` |
+| `execute_sql` | no `sql_error` | `answer` |
+| `answer` | `state["error"]` set | `handle_error` |
+| `answer` | otherwise | `finalize` |
 
 ---
 
 ## Memory & Context
 
-<!-- FILL IN: How does the agent remember things across turns, steps, or runs? -->
-
 | Scope | Mechanism | What is stored |
 |-------|-----------|----------------|
-| **Within a run** | LangGraph state | All in-progress data |
-| **Across runs** | <!-- DB / vector store / none --> | <!-- e.g. past results, user prefs --> |
-| **Conversation** | <!-- message history / summary / none --> | <!-- if chat-style --> |
+| **Within a run** | LangGraph state | question, schema, SQL, error, result |
+| **Across runs** | SQLite (`runs` table) | audit trail: question, SQL, result, tokens, timestamp |
+| **Conversation** | SQLite (`sessions` + conversation turns) — **Phase 3** | prior Q/A turns fed into `generate_sql` for follow-up context |
 
-**Context window management:** <!-- How is the prompt kept within limits? (summary, sliding window, RAG retrieval) -->
+**Context window management:** Only schema + capped result rows enter prompts, so context stays small. In Phase 3, conversation history is summarised/windowed before being added to the planning prompt.
+
+> **Phase 1 scope:** the live graph is `generate_sql → execute_sql → answer → finalize`, with the retry-on-SQL-error edge. Profiling, chart-spec, summary-table, follow-up, planning, and validation nodes (the fuller analyst loop) are the **target for Phases 2–3** and are documented in the capability files; they are not in the Phase 1 graph.
 
 ---
 
 ## Human-in-the-Loop Checkpoints
 
-<!-- FILL IN: Where does execution pause for human input? Delete section if not applicable. -->
-
-| Checkpoint | What is shown to the user | Expected user action | Timeout / default |
-|------------|--------------------------|----------------------|-------------------|
-| <!-- name --> | <!-- what the agent surfaces --> | <!-- approve / edit / abort --> | <!-- timeout action --> |
+None in Phase 1 (single-shot ask). Ambiguity handling: in Phase 2+, on genuinely ambiguous questions the `answer` node may return a clarifying question instead of a flagged guess; Phase 1 returns a clearly-flagged best-guess answer.
 
 ---
 
 ## Error Handling & Recovery
 
-<!-- FILL IN: How the agent handles failures at each level. -->
+**Node-level:** each node catches its own exceptions; a fatal LLM/infra error sets `state["error"]` and routes to `handle_error`. A DuckDB *query* error is **not** fatal — it sets `sql_error` and routes to the retry edge.
 
-**Node-level:** <!-- Each node catches its own exceptions; fatal errors set state["error"] and route to handle_error node. -->
+**Graph-level (`handle_error`):** reads `error`/`run_id`, marks the Run `failed` with `error_message`, logs with `run_id` context, terminates.
 
-**Graph-level (handle_error node):**
-- Reads: `state.error`, `state.run_id`
-- Updates DB: run status → "failed", `error_message`, `completed_at`
-- Logs error with `run_id` context
-- Terminates graph
+**Resume / retry strategy:** the SQL retry loop is in-graph (bounded by `max_sql_retries`). Failed runs are not auto-resumed; the user re-asks.
 
-**Resume / retry strategy:** <!-- Can a failed run be resumed from its last checkpoint? How? -->
-
-**Partial failure:** <!-- If a non-critical step fails, does the agent degrade gracefully or abort? -->
+**Partial failure:** if the answer phrasing fails but a result exists, the run is marked failed rather than returning an unverified number — correctness over partial output.
 
 ---
 
 ## Observability
 
-<!-- FILL IN: What is logged, traced, and measured? -->
-
 | Signal | What | Where |
 |--------|------|-------|
-| **Trace** | One trace per run, one span per node | <!-- OpenTelemetry / LangSmith / stdout --> |
-| **LLM calls** | Prompt tokens, completion tokens, latency, model | <!-- LangSmith / structured log --> |
-| **Tool calls** | Tool name, inputs, success/error, latency | Structured log |
-| **Run outcome** | Status, total duration, error if any | DB + structured log |
+| **Trace** | One log context per run, one event per node | structlog → stdout (Phase 1, from day one) |
+| **LLM calls** | Prompt tokens, completion tokens, latency, model, node | structured log + persisted on Run (`tokens`) |
+| **SQL** | generated SQL, attempt number, DuckDB error on retry | structured log + Run row |
+| **Run outcome** | status, total duration, error | SQLite `runs` + structured log |
+
+LangSmith may be enabled via `LANGCHAIN_TRACING_V2`/`LANGCHAIN_API_KEY` if the user sets them; structured stdout logging is the always-on baseline and ships in Phase 1.
 
 ---
 
 ## Concurrency Model
 
-<!-- FILL IN: How concurrent agent runs are handled. -->
-
-- **Run isolation:** <!-- one-at-a-time (API returns 409) / queue / parallel with run_id scoping -->
-- **Parallel nodes within a run:** <!-- which nodes run in parallel and why -->
-- **Checkpointing:** <!-- none / SqliteSaver / PostgresSaver — required if human-in-the-loop or long-running -->
+- **Run isolation:** single-user, one analysis at a time per request; runs are `run_id`-scoped. No 409 needed for the local single user.
+- **Parallel nodes within a run:** none — the path is sequential with a retry edge.
+- **Checkpointing:** none in Phase 1 (no human-in-the-loop, short runs). Conversation persistence in Phase 3 is via SQLite, not a LangGraph checkpointer.
 
 ---
 
-## Graph Assembly (`agent/graph.py`)
-
-<!-- FILL IN: Pseudocode showing how nodes and edges are wired. Must be ≤ 60 lines in the real file. -->
+## Graph Assembly (`src/graph/agent.py`)
 
 ```python
 graph = StateGraph(AgentState)
 
-graph.add_node("node_a", node_a)
-graph.add_node("node_b", node_b)
-graph.add_node("finalize", node_finalize)
-graph.add_node("handle_error", node_handle_error)
+graph.add_node("generate_sql", generate_sql)
+graph.add_node("execute_sql", execute_sql)
+graph.add_node("answer", answer)
+graph.add_node("finalize", finalize)
+graph.add_node("handle_error", handle_error)
 
-graph.set_entry_point("node_a")
+graph.set_entry_point("generate_sql")
 
 graph.add_conditional_edges(
-    "node_a",
-    lambda s: "handle_error" if s.get("error") else "node_b",
+    "generate_sql",
+    lambda s: "handle_error" if s.get("error") else "execute_sql",
+    {"handle_error": "handle_error", "execute_sql": "execute_sql"},
 )
-
-graph.add_edge("node_b", "finalize")
+graph.add_conditional_edges(
+    "execute_sql",
+    after_execute,   # sql_error + attempts<max → generate_sql; sql_error + attempts>=max → handle_error; else → answer
+    {"generate_sql": "generate_sql", "handle_error": "handle_error", "answer": "answer"},
+)
+graph.add_conditional_edges(
+    "answer",
+    lambda s: "handle_error" if s.get("error") else "finalize",
+    {"handle_error": "handle_error", "finalize": "finalize"},
+)
 graph.add_edge("finalize", END)
 graph.add_edge("handle_error", END)
 
-compiled_graph = graph.compile()
+agentic_ai = graph.compile()
 ```

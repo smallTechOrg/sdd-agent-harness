@@ -1,38 +1,25 @@
 # Capabilities Index
 
-> **Boilerplate status:** The spec-writer sub-agent creates one file per capability in this directory. Each file describes exactly one discrete thing the agent can do.
+> One file per capability — exactly one discrete thing the agent can do.
 
 ---
 
-## What Is a Capability?
-
-A capability is a single, discrete action or behavior the agent performs. Examples:
-- "Search the web for companies matching criteria X"
-- "Draft a personalized email given a lead profile"
-- "Send a Slack notification when a threshold is crossed"
-
 ## Capabilities in This Project
 
-<!-- FILL IN: List capabilities here as they are defined. Each entry links to its spec file (no number prefix). -->
-
-| Capability | File |
-|-----------|------|
-| <!-- name --> | [name.md](name.md) |
+| Capability | Phase | Status | File |
+|-----------|-------|--------|------|
+| Analyze question (ask → answer + exact SQL) | 1 | **ACTIVE (Phase 1 core path)** | [analyze_question.md](analyze_question.md) |
+| Profile dataset on upload | 2 | DEFERRED | [profile_dataset.md](profile_dataset.md) |
+| Render auto-chosen chart | 2 | DEFERRED | [render_chart.md](render_chart.md) |
+| Summarize result as a table | 2 | DEFERRED | [summarize_result.md](summarize_result.md) |
+| Suggest follow-up questions | 2 | DEFERRED | [suggest_followups.md](suggest_followups.md) |
+| Manage session / conversation memory | 3 | DEFERRED | [manage_session_memory.md](manage_session_memory.md) |
+| Multi-dataset compare / join query | 3 | DEFERRED | [multi_dataset_query.md](multi_dataset_query.md) |
+| Data notes about a dataset | 3 | DEFERRED | [data_notes.md](data_notes.md) |
+| Cost tracking + expensive-query warning | 3 | DEFERRED | [cost_tracking.md](cost_tracking.md) |
+| Audit trail (browse run history) | 3 | DEFERRED | [audit_trail.md](audit_trail.md) |
+| Excel ingest | 3 | DEFERRED | [excel_ingest.md](excel_ingest.md) |
 
 ## How to Add a New Capability
 
-Run `/zero-shot-build [description]` on the existing spec. The spec-writer sub-agent will:
-1. Create a new file in this directory (`<name>.md`, no number prefix)
-2. Update this index
-3. Flag any dependencies on existing capabilities
-4. Self-review that it fits the architecture and data model before returning
-
-## Capability File Template
-
-Each capability file should answer:
-- **What it does** (one sentence)
-- **Inputs** (what data it receives)
-- **Outputs** (what it produces)
-- **External calls** (APIs, LLMs, databases it touches)
-- **Error cases** (what can go wrong and how it's handled)
-- **Success criteria** (how we test it)
+Run `/zero-shot-build [description]` on the existing spec. The spec-writer creates `<name>.md`, updates this index, flags dependencies, and self-reviews fit against the architecture and data model.
