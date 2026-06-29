@@ -42,4 +42,19 @@ test.describe("Phase 2 - Multi-file upload", () => {
     // Verify the old Phase 1 stub text is gone
     await expect(page.locator("text=CSV only — Excel support coming in Phase 2")).not.toBeVisible();
   });
+
+  test("shows error when uploading an unsupported file type", async ({ page }) => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-err-"));
+    const pdfPath = path.join(tmpDir, "report.pdf");
+    fs.writeFileSync(pdfPath, "%PDF-1.4 fake pdf content");
+
+    await page.goto("http://localhost:8001/app/");
+    await page.waitForSelector("input[type=file]", { timeout: 10000 });
+    await page.setInputFiles("input[type=file]", pdfPath);
+
+    // Backend rejects .pdf — error message should appear
+    await expect(
+      page.locator("text=Only CSV and Excel").or(page.locator("text=Unsupported")).or(page.locator("text=supported"))
+    ).toBeVisible({ timeout: 10000 });
+  });
 });
