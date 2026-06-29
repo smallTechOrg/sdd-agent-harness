@@ -146,7 +146,7 @@ Phase 1 is the smallest working win: real on the one core path, with clearly-lab
    - *"Your verdict?"* (multiSelect) → **"It works well"** / **"Output isn't right"** / **"UI feels off"** / **"Something is broken"**
 5. Route on their answers:
    - App didn't load → qa-auditor (boot failure), fix, re-present.
-   - Any negative verdict → capture what they saw; qa-auditor diagnoses (SPEC vs CODE); responsible generator fixes; re-gate with qa-auditor; commit + push; re-invoke agent-builder; re-present. Loop until satisfied.
+   - Any negative verdict → capture what they saw, then delegate to **zero-shot-fix** — pass the user's description, the phase context, the live URL, and any qa-auditor diagnosis already in context (file:line + SPEC/CODE classification) so it can skip re-diagnosis. It owns diagnose → fix → verify → commit + push autonomously, using the **scoped gate** for small CODE fixes (qa-auditor verifies only the changed surface + a real-key smoke call — not the full suite/E2E). When it returns VERIFIED, rebuild + restart the running app and **re-present** the gate. Loop until satisfied.
    - Positive only → **"Ready for Phase 2?"** → **"Yes, let's go"** / **"One more thing first"**. "One more thing" → route as negative above. "Yes" → Stage 4.
 
 ## Stage 4 — Per remaining phase (build → gate, repeat)
