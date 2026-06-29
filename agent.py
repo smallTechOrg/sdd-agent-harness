@@ -38,7 +38,10 @@ _failures: list[str] = []
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 def run(cmd: list[str], *, cwd: Path = ROOT, capture: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, cwd=cwd, capture_output=capture, text=True)
+    try:
+        return subprocess.run(cmd, cwd=cwd, capture_output=capture, text=True)
+    except OSError:
+        return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr="")
 
 def which(name: str) -> bool:
     return shutil.which(name) is not None
