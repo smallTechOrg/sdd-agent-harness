@@ -1,0 +1,17 @@
+# Render Blueprint — deploy the CSV Data Analysis Agent as a single Docker web service.
+# In the Render dashboard: New → Blueprint → connect the GitHub repo → apply.
+# Then set AGENT_GEMINI_API_KEY as a secret env var in the service (it is NOT stored here).
+services:
+  - type: web
+    name: data-analysis-agent
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Secret — leave blank in the blueprint; set the real value in the dashboard.
+      - key: AGENT_GEMINI_API_KEY
+        sync: false
+      - key: AGENT_LLM_PROVIDER
+        value: gemini

@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -13,5 +14,6 @@ from config.settings import get_settings
 if __name__ == "__main__":
     s = get_settings()
     configure_logging(s.log_level)
-    port = 8001
+    # Render (and most PaaS) inject the port to bind via $PORT; fall back to 8001 locally.
+    port = int(os.environ.get("PORT", "8001"))
     uvicorn.run("api:app", host="0.0.0.0", port=port, reload=False)
